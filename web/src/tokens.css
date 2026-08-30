@@ -1,0 +1,55 @@
+:root {
+  --font-body: "Geist Variable", "Geist", sans-serif;
+  --font-wordmark: "Fraunces Variable", "Fraunces", serif;
+
+  --color-paper: oklch(0.975 0.012 65);
+  --color-paper-raised: oklch(0.995 0.006 65);
+  --color-paper-soft: oklch(0.948 0.018 61);
+  --color-paper-glass: oklch(0.975 0.012 65 / 0.94);
+  --color-ink: oklch(0.245 0.025 48);
+  --color-ink-soft: oklch(0.44 0.026 49);
+  --color-ink-muted: oklch(0.55 0.022 52);
+  --color-rule: oklch(0.86 0.025 59);
+  --color-rule-strong: oklch(0.73 0.04 56);
+  --color-accent: oklch(0.54 0.145 35);
+  --color-accent-hover: oklch(0.5 0.14 35);
+  --color-accent-active: oklch(0.46 0.13 35);
+  --color-accent-ink: oklch(0.985 0.008 65);
+  --color-accent-soft: oklch(0.92 0.04 38);
+  --color-focus: oklch(0.48 0.16 250);
+  --color-success: oklch(0.48 0.1 152);
+  --color-disabled: oklch(0.83 0.018 58);
+
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+  --space-4xl: 8rem;
+  --space-5xl: 10rem;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-pill: 999px;
+  --shadow-float: 0 1.25rem 3rem oklch(0.3 0.03 50 / 0.08);
+  --shadow-paper: 0 0.75rem 2rem oklch(0.3 0.03 50 / 0.08);
+  --shadow-focus: 0 0 0 0.25rem oklch(0.48 0.16 250 / 0.18);
+
+  --content-width: 78rem;
+  --banner-height: 4.5rem;
+  --control-height: 2.75rem;
+  --z-sticky: 200;
+  --z-sticky-nav: 300;
+
+  color: var(--color-ink);
+  background: var(--color-paper);
+  font-family: var(--font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}

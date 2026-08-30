@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Persistent health data
+.local-data/
+data/
+uploads/
+backups/
+exports/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Generated and dependency files
+node_modules/
+dist/
+web/dist/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+playwright-report/
+test-results/
+
+# Local tools
+.DS_Store
+*.log
