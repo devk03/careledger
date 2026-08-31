@@ -65,3 +65,16 @@ def test_bootstrap_completion_is_single_use(tmp_path: Path) -> None:
     assert manager.verify(token) is False
     assert manager.complete(token) is False
     assert manager.initialize().setup_required is False
+
+
+def test_database_authority_can_ignore_a_stale_completion_marker(tmp_path: Path) -> None:
+    manager = BootstrapManager(tmp_path, "http://localhost:8080")
+    state = manager.initialize()
+    assert state.setup_url is not None
+    token = parse_qs(urlparse(state.setup_url).fragment)["token"][0]
+    assert manager.complete(token) is True
+
+    reconciled = manager.initialize(setup_complete=False)
+
+    assert reconciled.setup_required is True
+    assert reconciled.setup_url is not None

@@ -31,10 +31,11 @@ class BootstrapManager:
         self._token_hash_path = secrets_dir / "bootstrap-token.sha256"
         self._completed_path = secrets_dir / "bootstrap.completed"
 
-    def initialize(self) -> BootstrapState:
+    def initialize(self, *, setup_complete: bool | None = None) -> BootstrapState:
         self._secrets_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
 
-        if self._completed_path.exists():
+        completed = self._completed_path.exists() if setup_complete is None else setup_complete
+        if completed:
             return BootstrapState(setup_required=False, token_created=False, setup_url=None)
 
         if (
@@ -63,9 +64,10 @@ class BootstrapManager:
             setup_url=f"{self._public_base_url}/setup#token={token}",
         )
 
-    def verify(self, token: str) -> bool:
+    def verify(self, token: str, *, setup_complete: bool | None = None) -> bool:
+        completed = self._completed_path.exists() if setup_complete is None else setup_complete
         if (
-            self._completed_path.exists()
+            completed
             or not self._token_hash_path.exists()
             or not self._token_path.exists()
             or self._is_expired()
@@ -75,8 +77,8 @@ class BootstrapManager:
         actual = hashlib.sha256(token.encode("utf-8")).hexdigest()
         return secrets.compare_digest(expected, actual)
 
-    def complete(self, token: str) -> bool:
-        if not self.verify(token):
+    def complete(self, token: str, *, setup_complete: bool | None = None) -> bool:
+        if not self.verify(token, setup_complete=setup_complete):
             return False
         try:
             self._write_private(

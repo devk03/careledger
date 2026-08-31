@@ -39,6 +39,8 @@ def _export_fixture(tmp_path: Path) -> tuple[Path, ContentAddressedObjectStore, 
     store.put(BytesIO(payload))
     live_database = tmp_path / "synthetic-live.sqlite"
     snapshot = tmp_path / "synthetic-snapshot.sqlite"
+    recovery_pepper = tmp_path / "synthetic-recovery-pepper"
+    recovery_pepper.write_bytes(b"r" * 32)
     _synthetic_database(live_database)
     create_sqlite_snapshot(live_database, snapshot)
     backup = tmp_path / "careledger-backup.clb"
@@ -47,6 +49,7 @@ def _export_fixture(tmp_path: Path) -> tuple[Path, ContentAddressedObjectStore, 
         backup,
         PASSPHRASE,
         database_snapshot=snapshot,
+        recovery_pepper=recovery_pepper,
         created_at=datetime(2026, 2, 3, tzinfo=UTC),
     )
     return backup, store, payload, snapshot
@@ -60,6 +63,7 @@ def test_encrypted_backup_round_trip_preserves_objects_and_sqlite(tmp_path: Path
     manifest = inspect_portable_backup(backup, PASSPHRASE)
     assert manifest.format == "careledger.portable.v1"
     assert {member.kind for member in manifest.members} == {
+        "application_secret",
         "source_object",
         "sqlite_snapshot",
     }
@@ -73,12 +77,15 @@ def test_encrypted_backup_round_trip_preserves_objects_and_sqlite(tmp_path: Path
     digest = restored_store.iter_digests()[0]
     assert restored_store.path_for(digest).read_bytes() == payload
     assert receipt.database_path is not None
+    assert receipt.database_path == restored_root / "app.sqlite"
     connection = sqlite3.connect(receipt.database_path)
     try:
         note = connection.execute("SELECT note FROM synthetic_records").fetchone()
     finally:
         connection.close()
     assert note == (CANARY.decode(),)
+    assert (restored_root / "secrets" / "recovery-pepper").read_bytes() == b"r" * 32
+    assert (restored_root / "secrets" / "recovery-pepper").stat().st_mode & 0o777 == 0o600
 
 
 def test_randomized_exports_never_repeat_ciphertext(tmp_path: Path) -> None:
@@ -89,6 +96,7 @@ def test_randomized_exports_never_repeat_ciphertext(tmp_path: Path) -> None:
         second,
         PASSPHRASE,
         database_snapshot=snapshot,
+        recovery_pepper=tmp_path / "synthetic-recovery-pepper",
         created_at=datetime(2026, 2, 3, tzinfo=UTC),
     )
 

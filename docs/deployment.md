@@ -2,10 +2,11 @@
 
 ## Supported baseline: Docker Compose
 
-The portable deployment target is one CareLedger container plus one persistent `/data` volume. It needs an OpenAI API key and a first-run owner setup; it does not need a hosted database, object store, auth provider, analytics account, or email service.
+The portable deployment target is one CareLedger container plus one persistent `/data` volume. It needs a first-run owner setup but no AI key. A caregiver-owned OpenRouter or OpenAI key is optional; CareLedger does not need a hosted database, object store, auth provider, analytics account, or email service.
 
 ```bash
-export OPENAI_API_KEY=your_key
+cp .env.example .env
+# Optional: set OPENROUTER_API_KEY in .env
 docker compose up --build
 ```
 
@@ -17,8 +18,8 @@ For an internet-facing deployment:
 - Run exactly one application replica for the SQLite MVP.
 - Keep `/data` on durable storage with enough space for originals, page renders, database growth, quarantine, and backup staging.
 - Preserve the container controls in `compose.yaml`: read-only root, memory-backed `/tmp`, all Linux capabilities dropped, and no-new-privileges.
-- Restrict administrative access and outbound network access. The application needs HTTPS access to the configured OpenAI API endpoint; document any additional exception before enabling it.
-- Do not place the OpenAI key in a browser bundle, Git, an image layer, a support archive, or routine logs.
+- Restrict administrative access and outbound network access. When AI is enabled, allow only the configured HTTPS gateway; document any additional exception before enabling it.
+- Do not place provider keys in a browser bundle, Git, an image layer, a support archive, or routine logs.
 - Back up and test restore before upgrades.
 
 The current image runs as UID/GID `10001`. The mounted `/data` directory must be writable by that identity. A platform that creates root-owned volumes must provide an equivalent safe ownership mechanism; do not solve this by running the long-lived application process as root.
@@ -40,7 +41,7 @@ A public Railway template remains a release task, not a committed secret or a si
 - one service and one replica;
 - Dockerfile build and `/health/ready` health check;
 - a persistent volume mounted at `/data` with ownership compatible with UID/GID `10001`;
-- required `OPENAI_API_KEY` and generated `PUBLIC_BASE_URL`;
+- optional caregiver-owned provider key and generated `PUBLIC_BASE_URL`;
 - no health data, setup token, passphrase, or secret in template variables, build output, or logs;
 - backup and restore against a fresh volume.
 

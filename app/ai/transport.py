@@ -9,8 +9,8 @@ class ResponsesTransport(Protocol):
 
 
 class OpenAIResponsesTransport:
-    def __init__(self, api_key: str) -> None:
-        self._client = OpenAI(api_key=api_key)
+    def __init__(self, api_key: str, *, base_url: str | None = None) -> None:
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
 
     def create(self, request: Mapping[str, Any]) -> object:
         return self._client.responses.create(**dict(request))

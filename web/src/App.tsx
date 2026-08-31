@@ -12,6 +12,13 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { LoginPage } from "./LoginPage";
+import { BackupPage } from "./BackupPage";
+import { RecoveryPage } from "./RecoveryPage";
+import { RecordsPage } from "./RecordsPage";
+import { SetupPage } from "./SetupPage";
+import { WorkspacePage } from "./WorkspacePage";
+
 type SetupStatus = {
   setup_required: boolean;
   ai_available: boolean;
@@ -35,7 +42,7 @@ const journey = [
   },
 ];
 
-function App() {
+function LandingPage() {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
 
   useEffect(() => {
@@ -53,12 +60,17 @@ function App() {
         <a className="wordmark" href="#top" aria-label="CareLedger home">
           CareLedger
         </a>
-        <div className="command" role="search">
+        <div className="command command-disabled" role="search">
           <Search aria-hidden="true" size={17} />
           <label className="sr-only" htmlFor="record-search">
             Search records, questions, and visits
           </label>
-          <input id="record-search" placeholder="Search when your records are ready" disabled />
+          <input
+            id="record-search"
+            placeholder="Search records"
+            title="Search becomes available after you add records"
+            disabled
+          />
           <kbd>⌘ K</kbd>
         </div>
         <button className="quiet-button" type="button" disabled>
@@ -124,7 +136,7 @@ function App() {
 
         <section className="empty-workbench" aria-labelledby="workbench-title">
           <div className="workbench-intro">
-            <p className="section-label">Your care workspace</p>
+            <p className="section-note">Your care workspace</p>
             <h2 id="workbench-title">One calm view, with the evidence close by.</h2>
             <p>
               The dashboard stays short on purpose. Open the source whenever you need the exact
@@ -151,7 +163,7 @@ function App() {
             <div className="brief" id="summary">
               <div className="brief-header">
                 <div>
-                  <p className="section-label">Family brief</p>
+                  <p className="brief-label">Family brief</p>
                   <h3>No records yet</h3>
                 </div>
                 <button className="outline-button" type="button" disabled>
@@ -196,7 +208,7 @@ function App() {
 
         <section className="journey" id="how-it-works" aria-labelledby="journey-title">
           <div className="journey-heading">
-            <p className="section-label">How it works</p>
+            <p className="section-note">How it works</p>
             <h2 id="journey-title">The record stays the record. The explanation stays an explanation.</h2>
           </div>
           <div className="journey-list">
@@ -230,6 +242,28 @@ function App() {
       </footer>
     </div>
   );
+}
+
+function App() {
+  if (window.location.pathname === "/setup") {
+    return <SetupPage />;
+  }
+  if (window.location.pathname === "/login") {
+    return <LoginPage />;
+  }
+  if (window.location.pathname === "/recover") {
+    return <RecoveryPage />;
+  }
+  if (window.location.pathname === "/records") {
+    return <RecordsPage />;
+  }
+  if (window.location.pathname === "/workspace") {
+    return <WorkspacePage />;
+  }
+  if (window.location.pathname === "/backup") {
+    return <BackupPage />;
+  }
+  return <LandingPage />;
 }
 
 export default App;

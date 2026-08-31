@@ -42,6 +42,7 @@ _NONCE_PREFIX_SIZE = 8
 _TAG_SIZE = 16
 _MANIFEST_PATH = "backup-manifest.json"
 _DATABASE_PATH = "database/app.sqlite"
+_RECOVERY_PEPPER_PATH = "secrets/recovery-pepper"
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _MAX_MEMBERS = 100_000
 _MAX_TOTAL_BYTES = 50 * 1024 * 1024 * 1024
@@ -111,6 +112,7 @@ def export_portable_backup(
     passphrase: str,
     *,
     database_snapshot: Path | None = None,
+    recovery_pepper: Path | None = None,
     app_version: str = "0.1.0",
     schema_version: int = 0,
     created_at: datetime | None = None,
@@ -140,6 +142,21 @@ def export_portable_backup(
                 size=database_snapshot.stat().st_size,
             )
         )
+    if recovery_pepper is not None:
+        if (
+            not recovery_pepper.is_file()
+            or recovery_pepper.is_symlink()
+            or recovery_pepper.stat().st_size != 32
+        ):
+            raise ValueError("recovery pepper must be a 32-byte regular file")
+        members.append(
+            BackupMember(
+                path=_RECOVERY_PEPPER_PATH,
+                kind="application_secret",
+                sha256=_file_sha256(recovery_pepper),
+                size=32,
+            )
+        )
     members.sort(key=lambda member: member.path)
     manifest = PortableManifest(
         format=BACKUP_FORMAT,
@@ -164,6 +181,8 @@ def export_portable_backup(
                 _add_bytes(archive, _MANIFEST_PATH, manifest_bytes)
                 if database_snapshot is not None:
                     _add_file(archive, _DATABASE_PATH, database_snapshot)
+                if recovery_pepper is not None:
+                    _add_file(archive, _RECOVERY_PEPPER_PATH, recovery_pepper)
                 for entry in object_entries:
                     _add_file(
                         archive,
@@ -229,9 +248,16 @@ def restore_portable_backup(
         if not report.ok:
             raise BackupRejected(BackupErrorCode.INTEGRITY_FAILURE)
         database_candidate = staging / _DATABASE_PATH
-        database_path: Path | None = database_candidate if database_candidate.exists() else None
-        if database_path is not None:
-            verify_sqlite_snapshot(database_path)
+        database_path: Path | None = None
+        if database_candidate.exists():
+            verify_sqlite_snapshot(database_candidate)
+            database_path = staging / "app.sqlite"
+            os.replace(database_candidate, database_path)
+        recovery_pepper = staging / _RECOVERY_PEPPER_PATH
+        if recovery_pepper.exists():
+            if recovery_pepper.stat().st_size != 32:
+                raise BackupRejected(BackupErrorCode.INTEGRITY_FAILURE)
+            recovery_pepper.chmod(0o600)
         _write_private(staging / _MANIFEST_PATH, _manifest_bytes(manifest))
         _fsync_directory(staging)
         os.replace(staging, destination)
@@ -240,7 +266,7 @@ def restore_portable_backup(
             export_id=export_id,
             destination=destination,
             object_count=len(object_entries),
-            database_path=(destination / _DATABASE_PATH if database_path is not None else None),
+            database_path=(destination / "app.sqlite" if database_path is not None else None),
         )
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
@@ -447,6 +473,8 @@ def _read_archive(
                     digest, size = _write_member(member_stream, target)
                     if expected_member.kind == "source_object":
                         target.chmod(0o400)
+                    elif expected_member.kind == "application_secret":
+                        target.chmod(0o600)
                 if digest != expected_member.sha256 or size != expected_member.size:
                     raise BackupRejected(BackupErrorCode.INTEGRITY_FAILURE)
             if seen != set(expected):
@@ -514,7 +542,7 @@ def _parse_member(raw: Any) -> BackupMember:
     if not isinstance(path, str) or not isinstance(kind, str):
         raise ValueError("invalid manifest member text")
     validate_backup_member_path(path)
-    if kind not in {"source_object", "sqlite_snapshot"}:
+    if kind not in {"source_object", "sqlite_snapshot", "application_secret"}:
         raise ValueError("invalid manifest member kind")
     if not isinstance(digest, str) or len(digest) != 64 or any(
         character not in "0123456789abcdef" for character in digest
@@ -531,6 +559,8 @@ def _parse_member(raw: Any) -> BackupMember:
         raise ValueError("object path does not match digest")
     if kind == "sqlite_snapshot" and path != _DATABASE_PATH:
         raise ValueError("invalid database snapshot path")
+    if kind == "application_secret" and (path != _RECOVERY_PEPPER_PATH or size != 32):
+        raise ValueError("invalid application secret")
     return BackupMember(path=path, kind=kind, sha256=digest, size=size)
 
 

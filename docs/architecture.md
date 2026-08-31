@@ -2,9 +2,9 @@
 
 ## Decision
 
-Use Python 3.12, FastAPI, Pydantic, SQLAlchemy 2, SQLite/FTS5, React, TypeScript, and Vite.
+Use Python 3.12, FastAPI, Pydantic, the standard SQLite driver with FTS5, React, TypeScript, and Vite.
 
-The React build is served by FastAPI in production. One Uvicorn process, one durable SQLite-backed job worker, and one `/data` volume produce a single portable container.
+The React build is served by FastAPI in production. One Uvicorn process, two durable SQLite-backed worker loops (local preprocessing and explicitly requested extraction), and one `/data` volume produce a single portable container.
 
 Python is the primary runtime because PDF/image preprocessing, schema validation, and safe derived-artifact generation are core product functions. The storage and AI boundaries remain interfaces so a later Node, Postgres, or object-storage adapter does not alter domain logic.
 
@@ -85,6 +85,7 @@ Official OpenAI documentation supports text, image, and file inputs plus structu
 - Malformed/encrypted/oversized input: quarantine with a specific user-readable reason.
 - Disk full: preflight prevents false-success records.
 - Database contention: one process, serialized writes, foreign keys, busy timeout, and supported SQLite journaling.
+- SQLite schema trust: the Debian runtime's SQLite 3.40 does not mark JSON1 functions innocuous, so `trusted_schema` remains enabled for `CHECK(json_valid(...))`. DDL is accepted only from bundled, ordered, SHA-256-verified migrations; public APIs expose no SQL or schema mutation surface.
 - Restore failure: stop before serving data and report the failing digest/integrity check.
 
 ## Deployment boundary

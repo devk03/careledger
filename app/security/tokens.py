@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 
@@ -24,7 +25,8 @@ class SessionCookiePolicy:
     path: str = "/"
     http_only: bool = True
     secure: bool = True
-    same_site: str = "strict"
+    same_site: Literal["strict"] = "strict"
+    max_age_seconds: int = 8 * 60 * 60
 
 
 def issue_session_token() -> IssuedSessionToken:

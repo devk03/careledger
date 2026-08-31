@@ -1,6 +1,7 @@
 :root {
   --font-body: "Geist Variable", "Geist", sans-serif;
   --font-wordmark: "Fraunces Variable", "Fraunces", serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", monospace;
 
   --color-paper: oklch(0.975 0.012 65);
   --color-paper-raised: oklch(0.995 0.006 65);
@@ -36,6 +37,10 @@
   --radius-md: 0.75rem;
   --radius-lg: 1rem;
   --radius-pill: 999px;
+  --dur-fast: 150ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --shadow-float: 0 1.25rem 3rem oklch(0.3 0.03 50 / 0.08);
   --shadow-paper: 0 0.75rem 2rem oklch(0.3 0.03 50 / 0.08);
   --shadow-focus: 0 0 0 0.25rem oklch(0.48 0.16 250 / 0.18);

@@ -1,9 +1,14 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from app.api.dependencies import database as database_dependency
 from app.config import get_settings
+from app.storage.database import Database
 
 router = APIRouter(tags=["system"])
+DatabaseDependency = Annotated[Database, Depends(database_dependency)]
 
 
 class HealthResponse(BaseModel):
@@ -21,16 +26,17 @@ def live() -> HealthResponse:
 
 
 @router.get("/health/ready", response_model=HealthResponse, include_in_schema=False)
-def ready() -> HealthResponse:
+def ready(database: DatabaseDependency) -> HealthResponse:
     settings = get_settings()
     settings.ensure_directories()
+    database.verify()
     return HealthResponse(status="ready")
 
 
 @router.get("/api/system/setup-status", response_model=SetupStatusResponse)
-def setup_status() -> SetupStatusResponse:
+def setup_status(database: DatabaseDependency) -> SetupStatusResponse:
     settings = get_settings()
     return SetupStatusResponse(
-        setup_required=not (settings.secrets_dir / "bootstrap.completed").exists(),
-        ai_available=bool(settings.openai_api_key),
+        setup_required=not database.is_setup_complete(),
+        ai_available=settings.ai_runtime().enabled,
     )

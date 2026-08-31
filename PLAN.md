@@ -5,12 +5,13 @@
 - Complete: isolated repository, product/security architecture, caregiver design system, Docker runtime, bootstrap token, cryptographic auth primitives, security headers, read-only container, and content-addressed storage.
 - Complete: database-independent hostile-upload admission, object integrity manifests, strict OpenAI request/response contracts, evidence/workflow domain rules, synthetic backend/frontend tests, and responsive Chromium/axe checks.
 - Complete: database-independent appointment brief generation and a streaming, passphrase-encrypted portable backup format with authenticated manifests, content hashes, and fresh-directory restore checks.
-- Permission gate: initial SQLite schema/migration and persistent owner setup.
-- After migration: authenticated upload/review APIs, durable jobs, case/timeline/question/decision/follow-up workflows, wiring backup/restore and appointment briefs to persistent records, full integration tests, and release packaging.
+- Complete: forward-only SQLite migrations, persistent owner setup/recovery/session controls, authenticated record intake, pre-parse upload limits, durable jobs, tamper-evident audit verification, caregiver-funded AI gateway configuration, cited draft persistence, authenticated originals, and immutable accept/reject review.
+- Complete: case home, accepted-fact timeline, local evidence search, questions, decisions, follow-ups, appointment-brief download/print, owner-encrypted export, and fresh-directory restore verification.
+- In progress: corrected-claim editing, local PDF text/OCR rendering, de-identified outside research, caregiver invitations, live restore switching, deletion/retention controls, full integration hardening, and release packaging.
 
 ## Definition of done
 
-A fresh clone can be deployed as one container using only `OPENAI_API_KEY`, followed by first-run local account setup. A caregiver can upload a synthetic PDF or image, verify AI-proposed facts beside the cited source page, view a case summary and timeline, receive plain-language explanations and prioritized next steps, prepare an appointment brief, restart without data loss, and export a verified backup.
+A fresh clone can be deployed as one container with no AI account, followed by first-run local account setup. Adding a caregiver-owned `OPENROUTER_API_KEY` enables analysis without making the open-source maintainer pay for inference. A caregiver can upload a synthetic PDF or image, verify AI-proposed facts against the cited source page, view a case summary and timeline, receive plain-language explanations and prioritized next steps, prepare an appointment brief, restart without data loss, and export a verified backup.
 
 Release requires:
 
@@ -43,7 +44,7 @@ Deliverables:
 
 Exit gate: setup cannot be reclaimed after first use, unauthorized record access fails, and restart preserves the account.
 
-Database migrations require explicit user permission before creation or application.
+Database migrations are forward-only, checksum-verified, additive, and require explicit maintainer permission before creation or application.
 
 ## Phase 3 - Record ingestion and provenance
 
