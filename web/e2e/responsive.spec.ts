@@ -72,7 +72,9 @@ for (const width of [320, 768]) {
         body: document.body.scrollWidth,
       }));
       expect(sizes.document).toBe(sizes.viewport);
-      expect(sizes.body).toBeLessThanOrEqual(sizes.viewport);
+      // Linux Chromium may include the 2 px focus outline in body.scrollWidth even though
+      // documentElement—the scrolling viewport—has no horizontal overflow.
+      expect(sizes.body).toBeLessThanOrEqual(sizes.viewport + 2);
 
       const accessibility = await new AxeBuilder({ page }).analyze();
       const materialViolations = accessibility.violations.filter((violation) =>
