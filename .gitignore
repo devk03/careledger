@@ -5,10 +5,30 @@
 
 # Persistent health data
 .local-data/
-data/
-uploads/
-backups/
-exports/
+/data/
+/uploads/
+/backups/
+/exports/
+/01_records/
+/02_extracted/
+/03_case/
+/medical-records/
+/private-records/
+/attachments/
+/case_summary.md
+/current_status.md
+/evidence_registry.md
+/manifest.md
+/*.pdf
+/*.png
+/*.jpg
+/*.jpeg
+/*.heic
+/*.tif
+/*.tiff
+/*.dcm
+/*.doc
+/*.docx
 *.sqlite
 *.sqlite-*
 *.db
