@@ -1,6 +1,6 @@
 # Caregiver-funded AI extraction boundary
 
-CareLedger uses a server-side Responses-compatible API only for caregiver-requested extraction. The browser never receives the API key. With no key, record intake and local organization continue without AI.
+Adeno uses a server-side Responses-compatible API only for caregiver-requested extraction. The browser never receives the API key. With no key, record intake and local organization continue without AI.
 
 Provider selection is explicit and server-side:
 
@@ -22,9 +22,9 @@ Every patient-record request is built with:
 - inline Base64 PDF/image content and a generic digest-derived filename
 - a strict JSON Schema response format
 
-Document text is untrusted evidence, never instructions. Local validation rejects the entire batch for incomplete responses, refusals, tool output, schema deviations, duplicate references, missing/out-of-batch pages, quote mismatches, or invalid bounding boxes. The model cannot create authoritative provenance: CareLedger stamps prompt/schema/request/model/source/page hashes locally and keeps every result in `proposed` review state.
+Document text is untrusted evidence, never instructions. Local validation rejects the entire batch for incomplete responses, refusals, tool output, schema deviations, duplicate references, missing/out-of-batch pages, quote mismatches, or invalid bounding boxes. The model cannot create authoritative provenance: Adeno stamps prompt/schema/request/model/source/page hashes locally and keeps every result in `proposed` review state.
 
-The model is set with `AI_MODEL`. Operators must choose a model that supports the Responses request shape, PDF/image input, and strict structured output. OpenRouter documents `/api/v1/responses`, model capabilities, image/PDF input, and caregiver-account rate limits. Ollama documents a partial Responses-compatible endpoint, but its supported request fields differ; CareLedger does not silently route the strict hosted request through Ollama until a dedicated adapter passes the same citation and schema tests.
+The model is set with `AI_MODEL`. Operators must choose a model that supports the Responses request shape, PDF/image input, and strict structured output. OpenRouter documents `/api/v1/responses`, model capabilities, image/PDF input, and caregiver-account rate limits. Ollama documents a partial Responses-compatible endpoint, but its supported request fields differ; Adeno does not silently route the strict hosted request through Ollama until a dedicated adapter passes the same citation and schema tests.
 
 `store: false` prevents later API retrieval of the response, but it does not by itself provide Zero Data Retention, a Business Associate Agreement, or HIPAA compliance. Review the current official documentation before processing protected health information:
 

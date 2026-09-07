@@ -6,7 +6,7 @@ from typing import Any
 from app.ai.contracts import ExtractionPayload
 from app.ai.inputs import SourceBatch
 from app.ai.prompts import PROMPT_VERSION, prompt_sha256
-from app.ai.request import build_extraction_request
+from app.ai.request import InferenceBoundary, build_extraction_request
 from app.ai.schema import canonical_json, schema_sha256
 from app.ai.transport import ResponsesTransport
 from app.ai.validators import validate_response
@@ -39,15 +39,23 @@ class ValidatedExtraction:
 
 
 class ExtractionService:
-    def __init__(self, transport: ResponsesTransport, *, model: str) -> None:
+    def __init__(
+        self,
+        transport: ResponsesTransport,
+        *,
+        model: str,
+        boundary: InferenceBoundary,
+    ) -> None:
         self._transport = transport
         self._model = model
+        self._boundary = boundary
 
     def extract(self, batch: SourceBatch, *, safety_identifier: str) -> ValidatedExtraction:
         request = build_extraction_request(
             batch,
             model=self._model,
             safety_identifier=safety_identifier,
+            boundary=self._boundary,
         )
         response = self._transport.create(request)
         payload = validate_response(response, batch)

@@ -5,7 +5,7 @@ const loginErrors: Record<string, string> = {
   INVALID_CREDENTIALS: "That passphrase did not match. Check it and try again.",
   SETUP_REQUIRED: "The owner account has not been created yet. Open the private setup link first.",
   TRY_LATER: "There have been several unsuccessful attempts. Please wait a little before trying again.",
-  ORIGIN_NOT_ALLOWED: "CareLedger blocked this request because it did not come from this installation.",
+  ORIGIN_NOT_ALLOWED: "Adeno blocked this request because it did not come from this installation.",
 };
 
 export function LoginPage() {
@@ -27,13 +27,13 @@ export function LoginPage() {
       });
       const result = (await response.json()) as { error?: string };
       if (!response.ok) {
-        setError(loginErrors[result.error ?? ""] ?? "CareLedger could not sign you in. Please try again.");
+        setError(loginErrors[result.error ?? ""] ?? "Adeno could not sign you in. Please try again.");
         return;
       }
       setPassword("");
       setAuthenticated(true);
     } catch {
-      setError("CareLedger could not reach its private server. Check that it is running, then try again.");
+      setError("Adeno could not reach its private server. Check that it is running, then try again.");
     } finally {
       setWorking(false);
     }
@@ -42,8 +42,8 @@ export function LoginPage() {
   return (
     <main className="auth-page">
       <header className="auth-topbar">
-        <a className="wordmark" href="/" aria-label="CareLedger home">
-          CareLedger
+        <a className="wordmark" href="/" aria-label="Adeno home">
+          Adeno
         </a>
         <p>
           <ShieldCheck aria-hidden="true" size={16} />
@@ -58,7 +58,7 @@ export function LoginPage() {
           <p className="auth-context">Welcome back</p>
           <h1>Return to the family workspace.</h1>
           <p className="auth-lede">
-            CareLedger uses one local owner account. Your passphrase is checked by this installation.
+            Adeno uses one local owner account. Your passphrase is checked by this installation.
           </p>
         </div>
 

@@ -5,7 +5,7 @@ const recoveryErrors: Record<string, string> = {
   INVALID_CREDENTIALS: "That recovery code could not be used. Check it carefully or try another unused code.",
   SETUP_REQUIRED: "The owner account has not been created yet. Open the private setup link first.",
   TRY_LATER: "There have been several unsuccessful attempts. Please wait a little before trying again.",
-  ORIGIN_NOT_ALLOWED: "CareLedger blocked this request because it did not come from this installation.",
+  ORIGIN_NOT_ALLOWED: "Adeno blocked this request because it did not come from this installation.",
   INVALID_INPUT: "Check the recovery code and new passphrase, then try again.",
 };
 
@@ -36,7 +36,7 @@ export function RecoveryPage() {
       if (!response.ok) {
         setError(
           recoveryErrors[result.error ?? ""] ??
-            "CareLedger could not recover the account. Please try again.",
+            "Adeno could not recover the account. Please try again.",
         );
         return;
       }
@@ -45,7 +45,7 @@ export function RecoveryPage() {
       setConfirmation("");
       setReplacementCodes(result.recovery_codes ?? []);
     } catch {
-      setError("CareLedger could not reach its private server. Check that it is running, then try again.");
+      setError("Adeno could not reach its private server. Check that it is running, then try again.");
     } finally {
       setWorking(false);
     }
@@ -54,8 +54,8 @@ export function RecoveryPage() {
   return (
     <main className="auth-page">
       <header className="auth-topbar">
-        <a className="wordmark" href="/" aria-label="CareLedger home">
-          CareLedger
+        <a className="wordmark" href="/" aria-label="Adeno home">
+          Adeno
         </a>
         <p>
           <ShieldCheck aria-hidden="true" size={16} />

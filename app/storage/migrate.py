@@ -7,7 +7,7 @@ def main() -> None:
     settings.ensure_directories()
     status = Database(settings.database_path).initialize()
     print(  # noqa: T201 - intentional operator command output
-        f"CareLedger schema ready: version={status.version} migrations={status.migration_count}"
+        f"Adeno schema ready: version={status.version} migrations={status.migration_count}"
     )
 
 

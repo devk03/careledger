@@ -1,8 +1,14 @@
 from dataclasses import dataclass
 from enum import StrEnum
+from urllib.parse import urlsplit
 
+from app.ai.request import InferenceBoundary
 from app.ai.service import ExtractionService
-from app.ai.transport import OpenAIResponsesTransport
+from app.ai.transport import (
+    OpenAIResponsesTransport,
+    OpenRouterPatientDataTransport,
+    ResponsesTransport,
+)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -32,9 +38,18 @@ class AIProviderRuntime:
     def extraction_service(self) -> ExtractionService:
         if not self.enabled or not self.api_key or not self.model:
             raise ValueError("AI provider is not configured")
+        base_transport = OpenAIResponsesTransport(self.api_key, base_url=self.base_url)
+        transport: ResponsesTransport = base_transport
+        if self.provider == AIProvider.OPENROUTER:
+            transport = OpenRouterPatientDataTransport(base_transport)
         return ExtractionService(
-            OpenAIResponsesTransport(self.api_key, base_url=self.base_url),
+            transport,
             model=self.model,
+            boundary=(
+                InferenceBoundary.OPENROUTER_PATIENT_DATA
+                if self.provider == AIProvider.OPENROUTER
+                else InferenceBoundary.DIRECT
+            ),
         )
 
 
@@ -78,4 +93,7 @@ def resolve_provider(
         raise ValueError("CUSTOM_AI_API_KEY and CUSTOM_AI_BASE_URL are required")
     if not custom_base_url.startswith(("https://", "http://localhost", "http://127.0.0.1")):
         raise ValueError("custom AI base URL must use HTTPS unless it is local")
+    custom_hostname = (urlsplit(custom_base_url).hostname or "").casefold()
+    if custom_hostname == "openrouter.ai" or custom_hostname.endswith(".openrouter.ai"):
+        raise ValueError("OpenRouter must use its privacy-enforced provider mode")
     return AIProviderRuntime(kind, model.strip(), custom_api_key, custom_base_url.rstrip("/"))

@@ -1,25 +1,7 @@
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-_CONTENT_SECURITY_POLICY = "; ".join(
-    (
-        "default-src 'self'",
-        "base-uri 'none'",
-        "frame-ancestors 'none'",
-        "form-action 'self'",
-        "object-src 'none'",
-        "script-src 'self'",
-        "style-src 'self'",
-        "font-src 'self'",
-        "img-src 'self' data: blob:",
-        "connect-src 'self'",
-        "media-src 'none'",
-        "worker-src 'self' blob:",
-    )
-)
-
 _SECURITY_HEADERS = {
-    "Content-Security-Policy": _CONTENT_SECURITY_POLICY,
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
@@ -32,8 +14,14 @@ _SECURITY_HEADERS = {
 
 
 class SecurityHeadersMiddleware:
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, allow_browser_openrouter: bool = False) -> None:
         self.app = app
+        self._headers = {
+            **_SECURITY_HEADERS,
+            "Content-Security-Policy": content_security_policy(
+                allow_browser_openrouter=allow_browser_openrouter
+            ),
+        }
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -45,10 +33,36 @@ class SecurityHeadersMiddleware:
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                for name, value in _SECURITY_HEADERS.items():
+                for name, value in self._headers.items():
                     headers[name] = value
-                if path.startswith("/api/") or path.startswith("/health/"):
+                if (
+                    path.startswith("/api/")
+                    or path.startswith("/health/")
+                    or path.startswith("/openrouter/callback/")
+                ):
                     headers["Cache-Control"] = "no-store"
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+def content_security_policy(*, allow_browser_openrouter: bool) -> str:
+    connect_sources = "connect-src 'self'"
+    if allow_browser_openrouter:
+        connect_sources += " https://openrouter.ai"
+    return "; ".join(
+        (
+            "default-src 'self'",
+            "base-uri 'none'",
+            "frame-ancestors 'none'",
+            "form-action 'self'",
+            "object-src 'none'",
+            "script-src 'self'",
+            "style-src 'self'",
+            "font-src 'self'",
+            "img-src 'self' data: blob:",
+            connect_sources,
+            "media-src 'none'",
+            "worker-src 'self' blob:",
+        )
+    )

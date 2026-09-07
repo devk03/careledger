@@ -62,7 +62,7 @@ def _inspect_pdf(
     if _contains_marker(path, _ACTIVE_PDF_MARKERS):
         raise UploadRejected(
             UploadErrorCode.PDF_ACTIVE_CONTENT,
-            "This PDF contains active or embedded content that CareLedger does not accept.",
+            "This PDF contains active or embedded content that Adeno does not accept.",
         )
     if not _pdf_has_clean_eof(path):
         raise UploadRejected(
@@ -118,7 +118,7 @@ def _inspect_pdf(
     except pikepdf.PdfError as error:
         raise UploadRejected(
             UploadErrorCode.MALFORMED_PDF,
-            "CareLedger could not safely read this PDF.",
+            "Adeno could not safely read this PDF.",
         ) from error
 
 
@@ -168,7 +168,7 @@ def _inspect_image(
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as error:
         raise UploadRejected(
             UploadErrorCode.MALFORMED_IMAGE,
-            "CareLedger could not safely read this image.",
+            "Adeno could not safely read this image.",
         ) from error
 
     if media_type == MediaType.PNG:

@@ -1,5 +1,9 @@
 # End-to-End Build Plan
 
+## Product direction — 2026-09-07
+
+The product is named Adeno. Hosted use is the primary release target; open-source self-hosting is optional. The first-run container experience below describes the existing community foundation, not the intended caregiver onboarding. Prioritize hosted account creation, family access, encrypted record and note intake, Today, timeline, tasks, research chat and managed AI billing with transparent operating-cost recovery. Do not require ordinary caregivers to configure infrastructure or provider API keys.
+
 ## Current progress
 
 - Complete: isolated repository, product/security architecture, caregiver design system, Docker runtime, bootstrap token, cryptographic auth primitives, security headers, read-only container, and content-addressed storage.
@@ -11,7 +15,7 @@
 
 ## Definition of done
 
-A fresh clone can be deployed as one container with no AI account, followed by first-run local account setup. Adding a caregiver-owned `OPENROUTER_API_KEY` enables analysis without making the open-source maintainer pay for inference. A caregiver can upload a synthetic PDF or image, verify AI-proposed facts against the cited source page, view a case summary and timeline, receive plain-language explanations and prioritized next steps, prepare an appointment brief, restart without data loss, and export a verified backup.
+A caregiver can open the hosted website, create an account, protect the family workspace, invite other adults, and use records, notes, timeline, tasks, explanations and research without infrastructure setup or provider credentials. The operator manages inference and bills transparently to recover costs. E2EE and credential isolation must satisfy the launch gates in `docs/research-hosting-plan.md`. A fresh clone must also remain runnable as the optional community Docker edition. Both paths preserve source citations, human review, persistent data and verified exports.
 
 Release requires:
 

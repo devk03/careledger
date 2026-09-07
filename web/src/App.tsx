@@ -28,7 +28,7 @@ const journey = [
   {
     number: "01",
     title: "Add the records",
-    body: "Upload PDFs or photos. CareLedger keeps the original files unchanged and checks for duplicates.",
+    body: "Upload PDFs or photos. Adeno keeps the original files unchanged and checks for duplicates.",
   },
   {
     number: "02",
@@ -57,8 +57,8 @@ function LandingPage() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="wordmark" href="#top" aria-label="CareLedger home">
-          CareLedger
+        <a className="wordmark" href="#top" aria-label="Adeno home">
+          Adeno
         </a>
         <div className="command command-disabled" role="search">
           <Search aria-hidden="true" size={17} />
@@ -85,7 +85,7 @@ function LandingPage() {
             <p className="context-line">A private place for the family health story</p>
             <h1 id="welcome-title">Know what is happening. Know what to ask next.</h1>
             <p className="lede">
-              CareLedger turns a pile of health records into a source-linked timeline, gentle
+              Adeno turns a pile of health records into a source-linked timeline, gentle
               explanations, and a clear list for the next doctor visit.
             </p>
             <div className="welcome-actions">
@@ -99,7 +99,7 @@ function LandingPage() {
             </div>
             <p className="safety-note">
               <LockKeyhole aria-hidden="true" size={16} />
-              Your originals and reviewed timeline stay in your own CareLedger installation.
+              Your originals and reviewed timeline stay in your own Adeno installation.
             </p>
           </div>
 
@@ -129,7 +129,11 @@ function LandingPage() {
             </ol>
             <div className="system-line">
               <ShieldCheck aria-hidden="true" size={17} />
-              <span>{setup?.ai_available ? "AI key connected" : "Add an API key to enable explanations"}</span>
+              <span>
+                {setup?.ai_available
+                  ? "Plain-language explanations are ready"
+                  : "Explanations are off for now"}
+              </span>
             </div>
           </aside>
         </section>
@@ -237,7 +241,7 @@ function LandingPage() {
       </main>
 
       <footer className="footer">
-        <p><span className="wordmark-small">CareLedger</span> keeps the source close.</p>
+        <p><span className="wordmark-small">Adeno</span> keeps the source close.</p>
         <p>Open source · Self-hosted · Not medical advice</p>
       </footer>
     </div>

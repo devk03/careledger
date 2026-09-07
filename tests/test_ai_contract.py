@@ -8,9 +8,14 @@ from typing import Any
 import pytest
 
 from app.ai.inputs import PageContext, SourceBatch
-from app.ai.request import build_extraction_request, opaque_safety_identifier
+from app.ai.request import (
+    InferenceBoundary,
+    build_extraction_request,
+    opaque_safety_identifier,
+)
 from app.ai.schema import assert_strict_schema, extraction_json_schema
 from app.ai.service import ExtractionService
+from app.ai.transport import OpenRouterPatientDataTransport
 from app.ai.validators import ExtractionErrorCode, ExtractionRejected, validate_response
 from app.ingest.models import MediaType
 
@@ -105,6 +110,7 @@ def test_schema_is_strict_and_request_is_stateless_tool_free_inline() -> None:
         batch,
         model="gpt-5.4-mini-2026-03-17",
         safety_identifier=safety_id,
+        boundary=InferenceBoundary.DIRECT,
     )
 
     assert request["store"] is False
@@ -126,6 +132,38 @@ def test_valid_response_requires_locally_resolvable_citation() -> None:
     validated = validate_response(_response(), _batch())
     assert validated.claims[0].citations[0].page_number == 1
     assert validated.claims[0].source_qualifier.value == "possible"
+
+
+def test_openrouter_patient_request_enforces_privacy_and_disables_web_and_cache() -> None:
+    request = build_extraction_request(
+        _batch(),
+        model="openai/synthetic-model",
+        safety_identifier=opaque_safety_identifier("synthetic-actor", b"x" * 32),
+        boundary=InferenceBoundary.OPENROUTER_PATIENT_DATA,
+    )
+
+    assert request["extra_body"] == {
+        "provider": {
+            "zdr": True,
+            "data_collection": "deny",
+            "require_parameters": True,
+            "allow_fallbacks": False,
+        },
+        "plugins": [{"id": "web", "enabled": False}],
+    }
+    assert request["extra_headers"] == {"X-OpenRouter-Cache": "false"}
+    assert request["tools"] == []
+    assert request["store"] is False
+
+
+def test_openrouter_patient_request_rejects_online_model_variant() -> None:
+    with pytest.raises(ValueError, match="online search"):
+        build_extraction_request(
+            _batch(),
+            model="openai/synthetic-model:online",
+            safety_identifier=opaque_safety_identifier("synthetic-actor", b"x" * 32),
+            boundary=InferenceBoundary.OPENROUTER_PATIENT_DATA,
+        )
 
 
 @pytest.mark.parametrize(
@@ -182,9 +220,29 @@ class FakeTransport:
         return self.response
 
 
+def test_openrouter_transport_rejects_policy_tampering_before_network_dispatch() -> None:
+    delegate = FakeTransport(_response())
+    transport = OpenRouterPatientDataTransport(delegate)
+    request = build_extraction_request(
+        _batch(),
+        model="openai/synthetic-model",
+        safety_identifier=opaque_safety_identifier("synthetic-actor", b"x" * 32),
+        boundary=InferenceBoundary.OPENROUTER_PATIENT_DATA,
+    )
+    request["extra_body"]["provider"]["zdr"] = False
+
+    with pytest.raises(ValueError, match="policy is incomplete"):
+        transport.create(request)
+    assert delegate.captured is None
+
+
 def test_service_stamps_provenance_locally_and_leaves_claims_proposed() -> None:
     transport = FakeTransport(_response())
-    service = ExtractionService(transport, model="gpt-5.4-mini-2026-03-17")
+    service = ExtractionService(
+        transport,
+        model="gpt-5.4-mini-2026-03-17",
+        boundary=InferenceBoundary.DIRECT,
+    )
     batch = _batch()
 
     result = service.extract(

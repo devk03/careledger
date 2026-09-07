@@ -24,7 +24,7 @@ def event_hash_v1(
     occurred_at: int,
     previous_hash: str | None,
 ) -> str:
-    """Hash the stable v1 audit fields used by every released CareLedger event."""
+    """Hash the stable v1 audit fields used by every released Adeno event."""
     canonical = json.dumps(
         {
             "action": action,

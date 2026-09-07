@@ -1,1 +1,1 @@
-"""CareLedger application package."""
+"""Adeno application package."""

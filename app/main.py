@@ -29,6 +29,7 @@ from app.security.bootstrap import BootstrapManager
 from app.security.headers import SecurityHeadersMiddleware
 from app.security.local_secrets import load_or_create_secret
 from app.security.request_limits import ONE_MEBIBYTE, UploadBodyLimitMiddleware
+from app.security.staging import StagingAccessMiddleware
 from app.storage.database import Database
 from app.storage.objects import ContentAddressedObjectStore
 from app.workspace.service import CareWorkspaceService
@@ -84,7 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.evidence_search_service = EvidenceSearchService(database, auth_service)
     state = manager.initialize(setup_complete=database.is_setup_complete())
     if state.setup_required and state.setup_url:
-        LOGGER.warning("First-run setup URL: %s", state.setup_url)
+        LOGGER.warning("First-run setup required. Run python -m app.setup_link privately.")
     preprocess = BackgroundPreprocessWorker(
         PreprocessWorker(
             database,
@@ -115,20 +116,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
+    settings.require_release_ready_edition()
     app = FastAPI(
-        title="CareLedger",
+        title="Adeno",
         description="A source-linked family health evidence workspace.",
         version="0.1.0",
         docs_url=None,
         redoc_url=None,
         lifespan=lifespan,
     )
-    settings = get_settings()
     app.add_middleware(
         UploadBodyLimitMiddleware,
         max_bytes=settings.max_upload_bytes + ONE_MEBIBYTE,
     )
-    app.add_middleware(SecurityHeadersMiddleware)
+    if settings.app_environment == "staging" and settings.staging_access_password:
+        app.add_middleware(
+            StagingAccessMiddleware,
+            password=settings.staging_access_password.get_secret_value(),
+        )
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        allow_browser_openrouter=settings.ai_credential_mode.strip().lower()
+        == "per_user_oauth",
+    )
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(records_router)

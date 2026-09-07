@@ -18,7 +18,7 @@ Do not publish, deploy, push, create a pull request, or tag a release without ex
 - [ ] Home distinguishes what is known, what it may mean, what remains unknown, and what to do next.
 - [ ] Questions and next steps show source, owner, priority, due date, and whether they came from a clinician, caregiver, or AI draft.
 - [ ] Appointment brief output is source-linked, prioritized, and usable without the full application.
-- [ ] Medical emergency guidance is visible and does not imply monitoring by CareLedger.
+- [ ] Medical emergency guidance is visible and does not imply monitoring by Adeno.
 
 ## Security and recovery
 

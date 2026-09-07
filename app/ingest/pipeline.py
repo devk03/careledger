@@ -95,7 +95,7 @@ class UploadIntake:
         except OSError as error:
             rejection = UploadRejected(
                 UploadErrorCode.STREAM_IO_ERROR,
-                "CareLedger could not safely receive this file. Please try again.",
+                "Adeno could not safely receive this file. Please try again.",
                 retryable=True,
             )
             self._reject_if_possible(manifest, rejection)

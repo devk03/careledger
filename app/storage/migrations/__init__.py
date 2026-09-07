@@ -1,1 +1,1 @@
-"""Versioned, forward-only CareLedger database migrations."""
+"""Versioned, forward-only Adeno database migrations."""

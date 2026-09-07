@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
@@ -18,10 +18,13 @@ class Settings(BaseSettings):
     )
 
     app_environment: str = "development"
+    app_edition: str = "community"
+    staging_access_password: SecretStr | None = Field(default=None, repr=False)
     app_host: str = "0.0.0.0"  # noqa: S104 - required inside a container
     app_port: int = Field(default=8080, validation_alias=AliasChoices("APP_PORT", "PORT"))
     data_dir: Path = Path("./.local-data")
     public_base_url: str = "http://localhost:8080"
+    ai_credential_mode: str = "self_hosted"
     ai_provider: str = "auto"
     ai_model: str = Field(
         default="openai/gpt-5.4-mini",
@@ -63,7 +66,22 @@ class Settings(BaseSettings):
         return Path(__file__).resolve().parent.parent / "web" / "dist"
 
     def ai_runtime(self) -> "AIProviderRuntime":
-        from app.ai.provider import resolve_provider
+        from app.ai.provider import AIProvider, AIProviderRuntime, resolve_provider
+
+        credential_mode = self.ai_credential_mode.strip().lower()
+        if credential_mode == "per_user_oauth":
+            if any(
+                (
+                    self.openrouter_api_key,
+                    self.openai_api_key,
+                    self.custom_ai_api_key,
+                    self.custom_ai_base_url,
+                )
+            ):
+                raise ValueError("per-user OAuth mode forbids deployment-wide AI credentials")
+            return AIProviderRuntime(AIProvider.DISABLED, None, None, None)
+        if credential_mode != "self_hosted":
+            raise ValueError("unsupported AI credential mode")
 
         return resolve_provider(
             provider=self.ai_provider,
@@ -83,6 +101,25 @@ class Settings(BaseSettings):
             self.backup_dir,
         ):
             path.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    def require_release_ready_edition(self) -> None:
+        if self.app_environment == "staging":
+            if (
+                self.staging_access_password is None
+                or len(self.staging_access_password.get_secret_value()) < 32
+            ):
+                raise ValueError("staging requires an access password of at least 32 characters")
+            if not self.public_base_url.startswith("https://"):
+                raise ValueError("staging requires an HTTPS public origin")
+            if self.ai_runtime().enabled:
+                raise ValueError("staging inference is disabled until hosted controls are complete")
+        edition = self.app_edition.strip().lower()
+        if edition == "managed":
+            raise RuntimeError(
+                "managed E2EE mode is unavailable until ciphertext-only routes and UI are complete"
+            )
+        if edition != "community":
+            raise ValueError("unsupported Adeno edition")
 
 
 @lru_cache

@@ -16,7 +16,7 @@ def detect_media_type(path: Path) -> MediaType:
         return MediaType.JPEG
     raise UploadRejected(
         UploadErrorCode.UNSUPPORTED_TYPE,
-        "CareLedger accepts PDF, JPEG, and PNG records only.",
+        "Adeno accepts PDF, JPEG, and PNG records only.",
     )
 
 

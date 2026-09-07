@@ -4,7 +4,7 @@
 
 Health records, OCR, extracted claims, prompts, responses, filenames, audit events, backups, exports, and notifications may contain sensitive health information.
 
-CareLedger is not HIPAA-compliant out of the box and provides no BAA. Operators are responsible for deployment, contracts, policies, access control, retention, and legal compliance.
+Adeno is not HIPAA-compliant out of the box and provides no BAA. Operators are responsible for deployment, contracts, policies, access control, retention, and legal compliance.
 
 ## Release-blocking controls
 

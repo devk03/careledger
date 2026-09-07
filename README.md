@@ -1,6 +1,10 @@
-# CareLedger
+# Adeno
 
-CareLedger is a self-hosted evidence workspace for adults coordinating a parent or loved one's health care.
+Adeno is an open-source health workspace designed primarily as a hosted service for adults coordinating a parent or loved one's care.
+
+The primary experience is to open the website, create an account, invite family, and add records or unorganized thoughts. Adeno will manage hosting and AI access, with transparent charges that cover operating costs. Caregivers should not need to deploy software, obtain API keys, or choose models. Self-hosting remains an optional path from the same open-source codebase.
+
+The hosted service is under development. Today's runnable build is a local community preview; public signup, managed billing, family access, research mode and complete E2EE integration are not yet available. See the [hosted product direction](docs/product.md) and [implementation plan](docs/research-hosting-plan.md).
 
 Upload medical records, verify extracted facts against the original page, understand unfamiliar language, prepare questions for clinicians, and track what happens next.
 
@@ -12,7 +16,7 @@ Upload medical records, verify extracted facts against the original page, unders
 - Patient evidence, clinician interpretation, family observations, and general research remain visibly separate.
 - The interface explains what is known, what it may mean, what remains unknown, and the next action.
 
-## Run the current foundation
+## Run the local preview (optional)
 
 ```bash
 cp .env.example .env
@@ -23,16 +27,16 @@ docker compose up --build
 Open `http://localhost:8080`. On first boot, find the private setup URL with:
 
 ```bash
-docker compose logs careledger
+docker compose exec careledger python -m app.setup_link
 ```
 
-On first boot, the container will print a one-time setup URL. The owner creates a local account; generated application secrets and all health data persist in one mounted `/data` volume.
+The operator command displays a one-time setup URL privately; routine application logs never contain it. The owner creates a local account; generated application secrets and all health data persist in one mounted `/data` volume.
 
-No hosted database, object store, analytics account, email provider, or authentication service is required. Record storage, fingerprints, source viewing, and human organization work with AI disabled. When a caregiver adds their own OpenRouter or OpenAI key, CareLedger asks for explicit confirmation before sending each original outside the deployment.
+No hosted database, object store, analytics account, email provider, or authentication service is required. Record storage, fingerprints, source viewing, and human organization work with AI disabled. When a caregiver adds their own OpenRouter or OpenAI key, Adeno asks for explicit confirmation before sending each original outside the deployment.
 
 ## Important limits
 
-CareLedger organizes evidence and drafts questions. It does not diagnose, prescribe, stage cancer, or replace clinicians.
+Adeno organizes evidence and drafts questions. It does not diagnose, prescribe, stage cancer, or replace clinicians.
 
 This project is not HIPAA-compliant out of the box and does not provide a Business Associate Agreement. Compliance depends on the operator's deployment, contracts, policies, and use. Supplying an API key does not create a BAA or Zero Data Retention configuration.
 

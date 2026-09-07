@@ -1,8 +1,10 @@
 # Deployment
 
+See [the research, hosting, and API security plan](research-hosting-plan.md) for the proposed hosted service, Cloudflare compatibility, provider comparison, and launch gates reviewed 2026-09-07. The current runnable edition remains the community Docker application.
+
 ## Supported baseline: Docker Compose
 
-The portable deployment target is one CareLedger container plus one persistent `/data` volume. It needs a first-run owner setup but no AI key. A caregiver-owned OpenRouter or OpenAI key is optional; CareLedger does not need a hosted database, object store, auth provider, analytics account, or email service.
+The portable deployment target is one Adeno container plus one persistent `/data` volume. It needs a first-run owner setup but no AI key. A caregiver-owned OpenRouter or OpenAI key is optional; Adeno does not need a hosted database, object store, auth provider, analytics account, or email service.
 
 ```bash
 cp .env.example .env
@@ -10,11 +12,19 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open `http://localhost:8080`. Retrieve the one-time setup URL from `docker compose logs careledger`, open it locally, and create the owner account before exposing the service.
+Open `http://localhost:8080`. Retrieve the one-time setup URL using `docker compose exec careledger python -m app.setup_link`, open it locally, and create the owner account before exposing the service. Do not publish this operator-only command output.
+
+## Restricted Railway preview
+
+The first Railway release is an access-restricted, single-household community preview for fictional testing. Managed E2EE and public family signup remain disabled. Set `APP_ENVIRONMENT=staging`, `APP_EDITION=community`, `AI_PROVIDER=disabled`, `DATA_DIR=/data`, the exact HTTPS `PUBLIC_BASE_URL`, and a random runtime `STAGING_ACCESS_PASSWORD` of at least 32 characters. The browser's outer access prompt uses username `adeno`; the normal application login remains independently required. Only GET health endpoints bypass the outer gate.
+
+Use one replica, a durable volume at `/data`, health check `/health/ready`, and start command `python -m app.railway_start`. Railway mounts volumes as root; set `RAILWAY_RUN_UID=0` only with this entrypoint. It adjusts the mount-root ownership without recursion, clears supplementary groups, and drops to UID/GID 10001 before launching the server. Verify the running process UID and a restart with the same volume. Never start `app.run` directly as root.
+
+Deploy only an audited `git archive` of the release commit, not the private parent workspace or a general filesystem copy. Docker's build context is allowlisted. Provider keys remain unset for this preview. Retrieve setup privately through the operator shell using `python -m app.setup_link`; never put its token in build/runtime logs or GitHub.
 
 For an internet-facing deployment:
 
-- Put CareLedger behind a trusted TLS reverse proxy and set `PUBLIC_BASE_URL` to its exact `https://` origin.
+- Put Adeno behind a trusted TLS reverse proxy and set `PUBLIC_BASE_URL` to its exact `https://` origin.
 - Run exactly one application replica for the SQLite MVP.
 - Keep `/data` on durable storage with enough space for originals, page renders, database growth, quarantine, and backup staging.
 - Preserve the container controls in `compose.yaml`: read-only root, memory-backed `/tmp`, all Linux capabilities dropped, and no-new-privileges.
@@ -34,7 +44,7 @@ The container uses an init process in Compose and the server handles termination
 
 ## Railway status
 
-Railway can build the repository Dockerfile, import Docker Compose services, and attach persistent volumes. Railway's legacy Config as Code files are deprecated, so CareLedger does not ship a new `railway.json` as its primary deployment path.
+Railway can build the repository Dockerfile, import Docker Compose services, and attach persistent volumes. Railway's legacy Config as Code files are deprecated, so Adeno does not ship a new `railway.json` as its primary deployment path.
 
 A public Railway template remains a release task, not a committed secret or a silent deployment action. Before publishing it, verify:
 

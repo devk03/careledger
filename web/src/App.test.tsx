@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 
-describe("CareLedger caregiver entry", () => {
+describe("Adeno caregiver entry", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
@@ -42,7 +42,7 @@ describe("CareLedger caregiver entry", () => {
 
   it("has no serious or critical accessibility violations in the empty state", async () => {
     render(<App />);
-    await screen.findByText("AI key connected");
+    await screen.findByText("Plain-language explanations are ready");
 
     const results = await axe.run(document.body, {
       rules: { "color-contrast": { enabled: false } },

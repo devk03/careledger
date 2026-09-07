@@ -12,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 APPLICATION_ID = 1_129_071_687  # ASCII "CLDG"
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 BUSY_TIMEOUT_MS = 5_000
 
 
@@ -61,6 +61,7 @@ MIGRATIONS = (
     Migration(2, "cross_scope_guards", "0002_cross_scope_guards.sql"),
     Migration(3, "extraction_job_uniqueness", "0003_extraction_job_uniqueness.sql"),
     Migration(4, "workflow_actor_guards", "0004_workflow_actor_guards.sql"),
+    Migration(5, "managed_e2ee_sync", "0005_managed_e2ee_sync.sql"),
 )
 
 
@@ -170,7 +171,7 @@ class Database:
         connection.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
         # Debian's SQLite 3.40 does not mark JSON1 functions innocuous, so a schema with
         # CHECK(json_valid(...)) cannot be created or written with trusted_schema disabled.
-        # CareLedger accepts DDL only from checksum-verified bundled migrations.
+        # Adeno accepts DDL only from checksum-verified bundled migrations.
         connection.execute("PRAGMA trusted_schema = ON")
         connection.execute("PRAGMA recursive_triggers = ON")
         if not read_only:

@@ -1,5 +1,17 @@
 # Product Brief
 
+## Name and primary experience
+
+The product name is Adeno. Hosted use comes first: a caregiver visits the website, creates an account, invites family, and starts adding records and thoughts. The operator handles infrastructure and AI access. Pricing covers inference, search, storage, hosting and payment costs transparently; the project has no profit objective. No API-key setup or model selection belongs in ordinary onboarding.
+
+All application code remains open source. Self-hosting is an optional advanced path, documented separately from the caregiver journey. The current local build still uses installation-owner setup while hosted onboarding is developed; do not imply the hosted service is already live.
+
+The home view answers “What needs attention?” with My responsibilities first and a Whole family switch. Records accepts files and unorganized notes; Timeline keeps event dates distinct from upload dates; Ask includes record questions and current research; Tasks shows owner, reason, source and due date. Google Calendar integration is planned, with explicit sharing of event details. Family permissions and explanation level are separate controls.
+
+## Rename compatibility
+
+Use Adeno in visible UI, page metadata and product documentation. Existing internal `careledger` package names, repository/directory paths, container service/volume names, cookies, backup formats, crypto domain separators and storage identifiers remain compatibility identifiers. Renaming them requires a separate reviewed transition; branding alone must not invalidate records or keys. Public repository/domain changes are a publication task. The personal origin of the name is not included in public-facing copy.
+
 ## Audience
 
 Adult caregivers coordinating health care for a parent or loved one. They may be stressed, unfamiliar with medical language, and working across time zones, hospitals, and family members.

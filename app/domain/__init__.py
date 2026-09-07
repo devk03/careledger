@@ -1,4 +1,4 @@
-"""CareLedger's persistence-independent caregiver domain."""
+"""Adeno's persistence-independent caregiver domain."""
 
 from app.domain.appointment import (
     AppointmentBrief,

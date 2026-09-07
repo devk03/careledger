@@ -47,7 +47,7 @@ for (const width of [320, 768]) {
   for (const authPage of [
     {
       path: "/setup#token=synthetic-private-token",
-      heading: "Set up your private CareLedger.",
+      heading: "Set up your private Adeno.",
       name: "setup",
     },
     {

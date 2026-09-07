@@ -101,7 +101,7 @@ export function WorkspacePage() {
           : loaded[0]?.id ?? "";
         setProfileId(selected);
       } catch {
-        if (!cancelled) setError("CareLedger could not open this care dashboard.");
+        if (!cancelled) setError("Adeno could not open this care dashboard.");
       }
     }
     void load();
@@ -119,7 +119,7 @@ export function WorkspacePage() {
         if (!cancelled) setDashboard(loaded);
       })
       .catch(() => {
-        if (!cancelled) setError("CareLedger could not load this family's current plan.");
+        if (!cancelled) setError("Adeno could not load this family's current plan.");
       });
     return () => {
       cancelled = true;
@@ -141,7 +141,7 @@ export function WorkspacePage() {
       );
       setQuestion("");
     } catch {
-      setError("CareLedger could not save this question. Nothing was changed.");
+      setError("Adeno could not save this question. Nothing was changed.");
     } finally {
       setWorking("");
     }
@@ -162,7 +162,7 @@ export function WorkspacePage() {
       );
       setFollowup("");
     } catch {
-      setError("CareLedger could not save this next step. Nothing was changed.");
+      setError("Adeno could not save this next step. Nothing was changed.");
     } finally {
       setWorking("");
     }
@@ -188,7 +188,7 @@ export function WorkspacePage() {
       setDecision("");
       setRationale("");
     } catch {
-      setError("CareLedger could not save this decision. Nothing was changed.");
+      setError("Adeno could not save this decision. Nothing was changed.");
     } finally {
       setWorking("");
     }
@@ -212,7 +212,7 @@ export function WorkspacePage() {
           : current,
       );
     } catch {
-      setError("CareLedger could not mark this complete. Nothing was changed.");
+      setError("Adeno could not mark this complete. Nothing was changed.");
     } finally {
       setWorking("");
     }
@@ -231,7 +231,7 @@ export function WorkspacePage() {
       if (!response.ok) throw new Error("search failed");
       setSearchResults((await response.json()) as SearchResult[]);
     } catch {
-      setError("CareLedger could not search the accepted evidence.");
+      setError("Adeno could not search the accepted evidence.");
     } finally {
       setWorking("");
     }
@@ -249,7 +249,7 @@ export function WorkspacePage() {
   return (
     <div className="workspace-page">
       <header className="workspace-topbar">
-        <a className="wordmark" href="/">CareLedger</a>
+        <a className="wordmark" href="/">Adeno</a>
         <p><ShieldCheck aria-hidden="true" size={16} />Private family workspace</p>
       </header>
       <main className="workspace-layout">

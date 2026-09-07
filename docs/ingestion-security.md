@@ -1,6 +1,6 @@
 # Record admission boundary
 
-CareLedger treats every uploaded byte as hostile until validation finishes.
+Adeno treats every uploaded byte as hostile until validation finishes.
 
 ## Admission sequence
 
