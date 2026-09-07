@@ -48,5 +48,8 @@ playwright-report/
 test-results/
 
 # Local tools
+.railway/
+.adeno-deploy/
+.deployment/
 .DS_Store
 *.log
