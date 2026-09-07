@@ -6,6 +6,8 @@ See [the research, hosting, and API security plan](research-hosting-plan.md) for
 
 The portable deployment target is one Adeno container plus one persistent `/data` volume. It needs a first-run owner setup but no AI key. A caregiver-owned OpenRouter or OpenAI key is optional; Adeno does not need a hosted database, object store, auth provider, analytics account, or email service.
 
+Mount `/data` explicitly with Compose or the hosting platform. The image omits Docker's `VOLUME` instruction because Railway rejects it; Compose and Railway persistent-volume mounts still provide durability.
+
 ```bash
 cp .env.example .env
 # Optional: set OPENROUTER_API_KEY in .env

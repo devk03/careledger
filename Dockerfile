@@ -27,7 +27,6 @@ COPY --from=web-builder /build/web/dist ./web/dist
 RUN mkdir -p /data && chown -R careledger:careledger /data /app
 USER careledger
 EXPOSE 8080
-VOLUME ["/data"]
 HEALTHCHECK --interval=20s --timeout=3s --start-period=15s --retries=3 \
   CMD ["python", "-c", "import os,urllib.request; p=os.getenv('PORT',os.getenv('APP_PORT','8080')); urllib.request.urlopen('http://127.0.0.1:'+p+'/health/ready',timeout=2)"]
 CMD ["python", "-m", "app.run"]
