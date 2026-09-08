@@ -1,7 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-const widths = [320, 375, 414, 768];
+const widths = [320, 375, 414, 768, 1280];
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/public/project", route => route.fulfill({ json: { stars: 12, stale: false } }));
+});
 
 for (const width of widths) {
   test(`caregiver entry is accessible without overflow at ${width}px`, async ({ page }) => {
@@ -43,7 +46,7 @@ for (const width of widths) {
   });
 }
 
-for (const width of [320, 768]) {
+for (const width of widths) {
   for (const authPage of [
     {
       path: "/setup#token=synthetic-private-token",
@@ -85,7 +88,7 @@ for (const width of [320, 768]) {
   }
 }
 
-for (const width of [320, 768]) {
+for (const width of widths) {
   test(`record intake is accessible without overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 500 ? 812 : 1024 });
     await page.route("**/api/auth/session", async (route) => {
@@ -131,7 +134,7 @@ for (const width of [320, 768]) {
   });
 }
 
-for (const width of [320, 768]) {
+for (const width of widths) {
   test(`care dashboard is accessible without overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 500 ? 812 : 1024 });
     await page.route("**/api/auth/session", async (route) => {
@@ -198,7 +201,7 @@ for (const width of [320, 768]) {
   });
 }
 
-for (const width of [320, 768]) {
+for (const width of widths) {
   test(`owner backup is accessible without overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 500 ? 812 : 1024 });
     await page.route("**/api/auth/session", async (route) => {

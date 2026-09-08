@@ -1,11 +1,12 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { uiPreview } from "./uiPreview";
 
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), ...(mode === "ui-preview" ? [uiPreview()] : [])],
   server: {
     port: 5173,
-    proxy: {
+    proxy: mode === "ui-preview" ? undefined : {
       "/api": "http://localhost:8080",
       "/health": "http://localhost:8080",
     },
@@ -16,4 +17,4 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
   },
-});
+}));

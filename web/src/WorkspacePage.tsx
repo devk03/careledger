@@ -1,3 +1,5 @@
+import { AppHeader } from "./ui";
+import { Button, Input, Select, Textarea, ButtonLink, Notice } from "./ui";
 import {
   ArrowLeft,
   Check,
@@ -8,8 +10,7 @@ import {
   Plus,
   Printer,
   Search,
-  ShieldCheck,
-} from "lucide-react";
+  } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 
 type Session = {
@@ -79,6 +80,14 @@ export function WorkspacePage() {
   const [working, setWorking] = useState("");
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const readyForNavigation = dashboard !== null;
+
+  useEffect(() => {
+    if (!readyForNavigation || window.location.hash !== "#next-steps") return;
+    const destination = document.getElementById("next-steps");
+    destination?.scrollIntoView({ block: "start" });
+    destination?.focus({ preventScroll: true });
+  }, [readyForNavigation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -241,17 +250,14 @@ export function WorkspacePage() {
     return (
       <main className="workspace-gate">
         <h1>Sign in to open the care dashboard.</h1>
-        <a className="primary-button" href="/login">Sign in</a>
+        <ButtonLink className="" href="/login">Sign in</ButtonLink>
       </main>
     );
   }
 
   return (
     <div className="workspace-page">
-      <header className="workspace-topbar">
-        <a className="wordmark" href="/">Adeno</a>
-        <p><ShieldCheck aria-hidden="true" size={16} />Private family workspace</p>
-      </header>
+      <AppHeader className="workspace-topbar" context={<> Private family workspace </>} />
       <main className="workspace-layout">
         <header className="workspace-heading">
           <a className="back-link" href="/records"><ArrowLeft aria-hidden="true" size={16} />Records</a>
@@ -263,12 +269,12 @@ export function WorkspacePage() {
             </div>
             <div className="workspace-heading-actions">
               <label htmlFor="workspace-profile">Care profile</label>
-              <select id="workspace-profile" value={profileId} onChange={(event) => setProfileId(event.target.value)}>
+              <Select id="workspace-profile" value={profileId} onChange={(event) => setProfileId(event.target.value)}>
                 {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.preferred_name}</option>)}
-              </select>
-              <button className="outline-button" type="button" onClick={() => window.print()}>
+              </Select>
+              <Button className="outline-button" type="button" onClick={() => window.print()}>
                 <Printer aria-hidden="true" size={16} />Print visit view
-              </button>
+              </Button>
               <a
                 className="outline-button"
                 href={`/api/care-profiles/${profileId}/appointment-brief`}
@@ -284,10 +290,10 @@ export function WorkspacePage() {
           <form className="evidence-search" role="search" onSubmit={searchEvidence}>
             <Search aria-hidden="true" size={17} />
             <label className="sr-only" htmlFor="evidence-search">Search accepted evidence</label>
-            <input id="evidence-search" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search accepted evidence" maxLength={200} />
-            <button type="submit" disabled={!searchText.trim() || working === "search"}>{working === "search" ? "Searching…" : "Search"}</button>
+            <Input id="evidence-search" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search accepted evidence" maxLength={200} />
+            <Button type="submit" disabled={!searchText.trim() || working === "search"}>{working === "search" ? "Searching…" : "Search"}</Button>
           </form>
-          <p className="workspace-error" role="alert" aria-live="polite">{error}</p>
+          <Notice className="workspace-error" role="alert" aria-live="polite">{error}</Notice>
         </header>
 
         {dashboard ? (
@@ -313,18 +319,18 @@ export function WorkspacePage() {
               <SummarySection title="Recent timeline" empty="Dated reviewed facts will appear here." claims={dashboard.timeline} />
             </section>
 
-            <section className="workflow-grid" aria-label="Care coordination">
+            <section id="next-steps" className="workflow-grid" aria-label="Care coordination" tabIndex={-1}>
               <article className="workflow-panel">
                 <header><FileQuestion aria-hidden="true" size={20} /><div><p className="section-note">Ask next</p><h2>Questions for clinicians</h2></div></header>
                 <form onSubmit={addQuestion}>
                   <label htmlFor="new-question">Add a question</label>
-                  <textarea id="new-question" value={question} onChange={(event) => setQuestion(event.target.value)} required maxLength={500} />
-                  <select aria-label="Question priority" value={priority} onChange={(event) => setPriority(event.target.value)}>
+                  <Textarea id="new-question" value={question} onChange={(event) => setQuestion(event.target.value)} required maxLength={500} />
+                  <Select aria-label="Question priority" value={priority} onChange={(event) => setPriority(event.target.value)}>
                     <option value="before_next_visit">Before the next visit</option>
                     <option value="at_next_visit">At the next visit</option>
                     <option value="when_possible">When possible</option>
-                  </select>
-                  <button className="panel-add" type="submit" disabled={!question.trim() || working === "question"}><Plus aria-hidden="true" size={16} />Add question</button>
+                  </Select>
+                  <Button className="panel-add" type="submit" disabled={!question.trim() || working === "question"}><Plus aria-hidden="true" size={16} />Add question</Button>
                 </form>
                 <WorkflowList items={dashboard.questions} kind="questions" working={working} onComplete={complete} />
               </article>
@@ -333,8 +339,8 @@ export function WorkspacePage() {
                 <header><ListChecks aria-hidden="true" size={20} /><div><p className="section-note">Do next</p><h2>Family follow-ups</h2></div></header>
                 <form onSubmit={addFollowup}>
                   <label htmlFor="new-followup">Add a next step</label>
-                  <textarea id="new-followup" value={followup} onChange={(event) => setFollowup(event.target.value)} required maxLength={500} />
-                  <button className="panel-add" type="submit" disabled={!followup.trim() || working === "followup"}><Plus aria-hidden="true" size={16} />Add next step</button>
+                  <Textarea id="new-followup" value={followup} onChange={(event) => setFollowup(event.target.value)} required maxLength={500} />
+                  <Button className="panel-add" type="submit" disabled={!followup.trim() || working === "followup"}><Plus aria-hidden="true" size={16} />Add next step</Button>
                 </form>
                 <WorkflowList items={dashboard.followups} kind="followups" working={working} onComplete={complete} />
               </article>
@@ -343,10 +349,10 @@ export function WorkspacePage() {
                 <header><ClipboardList aria-hidden="true" size={20} /><div><p className="section-note">Remember why</p><h2>Decisions made</h2></div></header>
                 <form onSubmit={addDecision}>
                   <label htmlFor="new-decision">Record a decision</label>
-                  <input id="new-decision" value={decision} onChange={(event) => setDecision(event.target.value)} required maxLength={500} />
+                  <Input id="new-decision" value={decision} onChange={(event) => setDecision(event.target.value)} required maxLength={500} />
                   <label htmlFor="decision-rationale">Why? <span>Optional</span></label>
-                  <textarea id="decision-rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} maxLength={2000} />
-                  <button className="panel-add" type="submit" disabled={!decision.trim() || working === "decision"}><Plus aria-hidden="true" size={16} />Record decision</button>
+                  <Textarea id="decision-rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} maxLength={2000} />
+                  <Button className="panel-add" type="submit" disabled={!decision.trim() || working === "decision"}><Plus aria-hidden="true" size={16} />Record decision</Button>
                 </form>
                 <div className="workflow-items">
                   {dashboard.decisions.map((item) => (
@@ -395,7 +401,7 @@ function WorkflowList({ items, kind, working, onComplete }: {
         return (
           <div className={`workflow-item ${item.state === "completed" ? "workflow-item-done" : ""}`} key={item.id}>
             <div><strong>{label}</strong><p>{_workflowMeta(item)}</p></div>
-            {item.state !== "completed" ? <button type="button" aria-label={`Mark complete: ${label}`} disabled={working === item.id} onClick={() => void onComplete(kind, item.id)}><Check aria-hidden="true" size={16} /></button> : null}
+            {item.state !== "completed" ? <Button type="button" aria-label={`Mark complete: ${label}`} disabled={working === item.id} onClick={() => void onComplete(kind, item.id)}><Check aria-hidden="true" size={16} /></Button> : null}
           </div>
         );
       })}

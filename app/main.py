@@ -14,6 +14,7 @@ from app.api.auth import router as auth_router
 from app.api.backups import router as backups_router
 from app.api.evidence import router as evidence_router
 from app.api.health import router as health_router
+from app.api.project import router as project_router
 from app.api.records import router as records_router
 from app.api.search import router as search_router
 from app.api.workspace import router as workspace_router
@@ -137,10 +138,10 @@ def create_app() -> FastAPI:
         )
     app.add_middleware(
         SecurityHeadersMiddleware,
-        allow_browser_openrouter=settings.ai_credential_mode.strip().lower()
-        == "per_user_oauth",
+        allow_browser_openrouter=settings.ai_credential_mode.strip().lower() == "per_user_oauth",
     )
     app.include_router(health_router)
+    app.include_router(project_router)
     app.include_router(auth_router)
     app.include_router(records_router)
     app.include_router(analysis_router)
@@ -153,6 +154,11 @@ def create_app() -> FastAPI:
     assets = web_dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
+    images = web_dist / "images"
+    if images.is_dir():
+        app.mount("/images", StaticFiles(directory=images), name="images")
+
+    if (web_dist / "index.html").is_file():
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str) -> FileResponse:

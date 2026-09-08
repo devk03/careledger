@@ -1,5 +1,21 @@
 [
   {
+    "date": "2026-09-07",
+    "scope": "app",
+    "macrostructure": "Workbench with editorial welcome",
+    "theme": "Coral",
+    "enrichment": "original generated garden and notebook artwork",
+    "brief": "User-directed warm button focus, stable retry colors, preserved fields/press motion, editorial welcome and auth pages"
+  },
+  {
+    "date": "2026-09-07",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "Coral",
+    "enrichment": "none",
+    "brief": "Shared caregiver UI primitives and synthetic-only local gallery; existing routes retained"
+  },
+  {
     "date": "2026-08-30",
     "artifact": "caregiver empty-state workbench",
     "genre": "modern-minimal",

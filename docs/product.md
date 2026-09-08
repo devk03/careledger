@@ -1,10 +1,14 @@
 # Product Brief
 
+Current build priority: [core platform](core-platform.md). Outbound notifications and communication integrations are explicitly deferred; approved updates are read inside the family portal first.
+
+Long-term direction: [community-funded access, fiscal sponsorship, and privacy commitments](long-term-goal.md). This is the controlling direction for funding and public/private tooling scope; implementation remains subject to the launch gates described there.
+
 ## Name and primary experience
 
 The product name is Adeno. Hosted use comes first: a caregiver visits the website, creates an account, invites family, and starts adding records and thoughts. The operator handles infrastructure and AI access. Pricing covers inference, search, storage, hosting and payment costs transparently; the project has no profit objective. No API-key setup or model selection belongs in ordinary onboarding.
 
-All application code remains open source. Self-hosting is an optional advanced path, documented separately from the caregiver journey. The current local build still uses installation-owner setup while hosted onboarding is developed; do not imply the hosted service is already live.
+The caregiver application remains open source; private operator/admin tooling may be maintained separately. Self-hosting is an optional advanced path, documented separately from the caregiver journey. The current local build still uses installation-owner setup while hosted onboarding is developed; a restricted hosted preview is not a public production launch. Individual family logins and a versioned approved-update feed are not implemented yet.
 
 The home view answers “What needs attention?” with My responsibilities first and a Whole family switch. Records accepts files and unorganized notes; Timeline keeps event dates distinct from upload dates; Ask includes record questions and current research; Tasks shows owner, reason, source and due date. Google Calendar integration is planned, with explicit sharing of event details. Family permissions and explanation level are separate controls.
 
@@ -24,11 +28,12 @@ Upload records, confirm what the records actually say, understand the situation 
 
 ## The caregiver loop
 
-1. Add a loved one and upload records.
-2. Review extracted facts beside the original page.
-3. Approve, reject, or correct each proposal.
-4. See the current situation in four sections: known, meaning, unknown, next.
-5. Prepare for an appointment and track commitments afterward.
+1. Add a care event: treatment, consultation, new result, discharge, or family observation.
+2. Upload its records and unorganized personal notes; preserve event, document and upload dates separately.
+3. Prepare one family-update draft with source-linked facts, simple explanations, uncertainties and proposed tasks.
+4. A permitted caregiver reviews, edits and approves the update. Approval is editorial, not medical verification.
+5. Family members sign in with their own accounts to read that approved version, open its sources and see their own responsibilities.
+6. Track commitments and questions for the next visit. No outbound message is needed to complete this loop.
 
 ## Information hierarchy
 

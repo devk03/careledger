@@ -2,15 +2,15 @@
 
 Adeno is an open-source health workspace designed primarily as a hosted service for adults coordinating a parent or loved one's care.
 
-The primary experience is to open the website, create an account, invite family, and add records or unorganized thoughts. Adeno will manage hosting and AI access, with transparent charges that cover operating costs. Caregivers should not need to deploy software, obtain API keys, or choose models. Self-hosting remains an optional path from the same open-source codebase.
+The intended core experience is: add records and notes after a visit or treatment, review a source-linked family update, and let each adult family member sign in to see the same approved update and their own responsibilities. Caregivers should not need to deploy software, obtain API keys, or choose models. Self-hosting remains an optional path from the same open-source codebase. The long-term funding goal is community-supported access with strictly metered operating costs, not profit.
 
-The hosted service is under development. Today's runnable build is a local community preview; public signup, managed billing, family access, research mode and complete E2EE integration are not yet available. See the [hosted product direction](docs/product.md) and [implementation plan](docs/research-hosting-plan.md).
+The hosted service is under development. Today's runnable build is a local community preview; public signup, individual family access, versioned family updates, managed billing, research mode and complete E2EE integration are not yet available. The [core platform plan](docs/core-platform.md) controls the next build scope. Outbound email, WhatsApp and push are deferred.
 
 Upload medical records, verify extracted facts against the original page, understand unfamiliar language, prepare questions for clinicians, and track what happens next.
 
 ## Product promise
 
-- Originals remain immutable and locally stored.
+- Originals remain immutable in the installation's storage; current server storage is not end-to-end encrypted.
 - Every important fact points to a document and page.
 - AI output starts as a draft and never silently becomes a medical fact.
 - Patient evidence, clinician interpretation, family observations, and general research remain visibly separate.
@@ -81,9 +81,11 @@ This project is not HIPAA-compliant out of the box and does not provide a Busine
 
 ## Status
 
+The interface now includes a shared warm-paper component library, responsive welcome and working pages, a clickable GitHub link with a cached public star count, fictional caregiver examples, and About/privacy pages that distinguish current capabilities from plans. See the [UI library guide](docs/ui-library.md) for the isolated, fictional-data UI preview. That preview cannot save changes or call AI and is separate from the functional Docker app.
+
 The isolated repository, caregiver interface, persistent owner authentication, forward-only SQLite schema, secure PDF/image intake, immutable SHA-256 object store, durable preprocess/extraction jobs, caregiver-funded AI gateway boundary, strict extraction validation, immutable human review, authenticated source viewing, local accepted-evidence search, care dashboard, questions/follow-ups/decisions, appointment-brief download/print, owner-encrypted backup and tested fresh restore, lockfiles, CI, and hardened single-container runtime are implemented.
 
-The responsive Chromium/axe suite covers 320, 375, 414, and 768 CSS pixels with no serious or critical violations. The container is verified healthy with a read-only root filesystem and a memory-backed `/tmp`.
+The responsive Chromium/axe suite covers 320, 375, 414, 768 and 1280 CSS pixels. GitHub Actions runs only when a maintainer starts it manually; pushing changes does not trigger CI. The Docker runtime is configured with a read-only root filesystem and a memory-backed `/tmp`.
 
 Dedicated corrected-claim editing, local PDF text/OCR rendering, de-identified outside research, invitations, live restore switching, deletion/retention controls, and release publication remain active build work. Ollama is not yet presented as equivalent to the hosted Responses path because its supported request fields differ; local-model support will use an explicit adapter and compatibility tests.
 

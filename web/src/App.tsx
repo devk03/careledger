@@ -1,12 +1,10 @@
+import { ButtonLink } from "./ui";
 import {
   ArrowRight,
   Check,
-  ChevronDown,
-  CircleHelp,
   FileText,
   LockKeyhole,
   Plus,
-  Search,
   ShieldCheck,
   Upload,
 } from "lucide-react";
@@ -18,6 +16,10 @@ import { RecoveryPage } from "./RecoveryPage";
 import { RecordsPage } from "./RecordsPage";
 import { SetupPage } from "./SetupPage";
 import { WorkspacePage } from "./WorkspacePage";
+import { DesignSystemPage } from "./DesignSystemPage";
+import { EditorialArt } from "./EditorialArt";
+import { GitHubLink } from "./GitHubLink";
+import { PublicFooter, InformationPage, CaregiverExamples } from "./InformationPage";
 
 type SetupStatus = {
   setup_required: boolean;
@@ -55,63 +57,55 @@ function LandingPage() {
   }, []);
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
+    <div className="app-shell welcome-page">
+      <header className="welcome-topbar">
         <a className="wordmark" href="#top" aria-label="Adeno home">
           Adeno
         </a>
-        <div className="command command-disabled" role="search">
-          <Search aria-hidden="true" size={17} />
-          <label className="sr-only" htmlFor="record-search">
-            Search records, questions, and visits
-          </label>
-          <input
-            id="record-search"
-            placeholder="Search records"
-            title="Search becomes available after you add records"
-            disabled
-          />
-          <kbd>⌘ K</kbd>
-        </div>
-        <button className="quiet-button" type="button" disabled>
-          <CircleHelp aria-hidden="true" size={17} />
-          Help
-        </button>
+        <nav aria-label="Welcome navigation">
+          <a href="#how-it-works">How it works</a>
+          <a href="/login">Sign in</a>
+          <GitHubLink />
+        </nav>
       </header>
 
       <main id="top">
-        <section className="welcome" aria-labelledby="welcome-title">
+        <section className="welcome welcome-editorial" aria-labelledby="welcome-title">
           <div className="welcome-copy">
-            <p className="context-line">A private place for the family health story</p>
+            <p className="context-line">For the people caring for someone.</p>
             <h1 id="welcome-title">Know what is happening. Know what to ask next.</h1>
             <p className="lede">
               Adeno turns a pile of health records into a source-linked timeline, gentle
               explanations, and a clear list for the next doctor visit.
             </p>
             <div className="welcome-actions">
-              <a className="primary-button" href={setup?.setup_required ? "/setup" : "/records"}>
+              <ButtonLink className="" href={setup?.setup_required ? "/setup" : "/records"}>
                 {setup?.setup_required ? "Finish private setup" : "Add health records"}
                 <ArrowRight aria-hidden="true" size={18} />
-              </a>
+              </ButtonLink>
               <a className="text-link" href="#how-it-works">
                 See how it works
               </a>
             </div>
             <p className="safety-note">
               <LockKeyhole aria-hidden="true" size={16} />
-              Your originals and reviewed timeline stay in your own Adeno installation.
+              For personal understanding and organization—not medical advice, diagnosis, or treatment.
             </p>
           </div>
 
-          <aside className="next-panel" aria-labelledby="next-panel-title">
+          <EditorialArt className="welcome-art" priority />
+        </section>
+
+        <section className="welcome-start" aria-labelledby="next-panel-title">
+          <aside className="next-panel">
             <div className="next-panel-heading">
               <span className="status-dot" aria-hidden="true" />
               <p>Start here</p>
             </div>
             <h2 id="next-panel-title">Set up your family workspace</h2>
             <p>
-              Create the owner account, then add one record. Nothing becomes a trusted medical
-              fact until you review it.
+              Create the owner account using your administrator’s setup link, then add one record.
+              Proposed notes enter your reviewed timeline after you approve them; approval does not verify medical accuracy.
             </p>
             <ol className="setup-list">
               <li>
@@ -140,7 +134,7 @@ function LandingPage() {
 
         <section className="empty-workbench" aria-labelledby="workbench-title">
           <div className="workbench-intro">
-            <p className="section-note">Your care workspace</p>
+            <p className="section-note">A look inside the workspace</p>
             <h2 id="workbench-title">One calm view, with the evidence close by.</h2>
             <p>
               The dashboard stays short on purpose. Open the source whenever you need the exact
@@ -154,14 +148,14 @@ function LandingPage() {
                 <FileText aria-hidden="true" size={18} />
                 Summary
               </a>
-              <button className="rail-item" type="button" disabled>
+              <a className="rail-item" href="/records">
                 <Upload aria-hidden="true" size={18} />
                 Records
-              </button>
-              <button className="rail-item" type="button" disabled>
+              </a>
+              <a className="rail-item" href="/workspace#next-steps">
                 <Check aria-hidden="true" size={18} />
                 Next steps
-              </button>
+              </a>
             </nav>
 
             <div className="brief" id="summary">
@@ -170,10 +164,10 @@ function LandingPage() {
                   <p className="brief-label">Family brief</p>
                   <h3>No records yet</h3>
                 </div>
-                <button className="outline-button" type="button" disabled>
+                <ButtonLink variant="secondary" href="/records">
                   <Plus aria-hidden="true" size={17} />
                   Add record
-                </button>
+                </ButtonLink>
               </div>
 
               <div className="brief-sections">
@@ -183,7 +177,7 @@ function LandingPage() {
                 </article>
                 <article>
                   <h4>What this means</h4>
-                  <p>Each medical term will have a short explanation and a link to its source.</p>
+                  <p>Available plain-language explanations link back to the record they describe.</p>
                 </article>
                 <article>
                   <h4>What remains unknown</h4>
@@ -205,7 +199,7 @@ function LandingPage() {
                 <div className="paper-rule" />
                 <div className="paper-rule paper-rule-medium" />
               </div>
-              <p>Choose a note to see its exact source page here.</p>
+              <p>Illustrative empty workspace. In your workspace, open a record to read its original pages.</p>
             </aside>
           </div>
         </section>
@@ -226,29 +220,35 @@ function LandingPage() {
               </article>
             ))}
           </div>
+          <EditorialArt scene="notes" className="journey-art" />
         </section>
+
+        <CaregiverExamples />
 
         <section className="trust-strip" aria-label="Safety principles">
           <p>
             <ShieldCheck aria-hidden="true" size={18} />
             Built for careful families, not for replacing medical care.
           </p>
-          <button className="disclosure" type="button" disabled>
+          <ButtonLink variant="quiet" href="/privacy">
             Read the privacy model
-            <ChevronDown aria-hidden="true" size={17} />
-          </button>
+            <ArrowRight aria-hidden="true" size={17} />
+          </ButtonLink>
         </section>
       </main>
 
-      <footer className="footer">
-        <p><span className="wordmark-small">Adeno</span> keeps the source close.</p>
-        <p>Open source · Self-hosted · Not medical advice</p>
-      </footer>
+      <PublicFooter />
     </div>
   );
 }
 
 function App() {
+  if (window.location.pathname === "/privacy" || window.location.pathname === "/about") {
+    return <InformationPage page={window.location.pathname === "/privacy" ? "privacy" : "about"} />;
+  }
+  if (import.meta.env.DEV && window.location.pathname === "/design-system") {
+    return <DesignSystemPage />;
+  }
   if (window.location.pathname === "/setup") {
     return <SetupPage />;
   }

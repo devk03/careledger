@@ -9,7 +9,7 @@
   --color-paper-glass: oklch(0.975 0.012 65 / 0.94);
   --color-ink: oklch(0.245 0.025 48);
   --color-ink-soft: oklch(0.44 0.026 49);
-  --color-ink-muted: oklch(0.55 0.022 52);
+  --color-ink-muted: oklch(0.51 0.022 52);
   --color-rule: oklch(0.86 0.025 59);
   --color-rule-strong: oklch(0.73 0.04 56);
   --color-accent: oklch(0.54 0.145 35);
@@ -18,8 +18,27 @@
   --color-accent-ink: oklch(0.985 0.008 65);
   --color-accent-soft: oklch(0.92 0.04 38);
   --color-focus: oklch(0.48 0.16 250);
+  --color-button-focus: var(--color-ink);
+  --color-retry-surface: oklch(0.92 0.04 38);
+  --color-retry-hover: oklch(0.88 0.045 38);
+  --color-image-outline: oklch(0 0 0 / 0.1);
+  --text-welcome: clamp(2.5rem, 4.4vw + 0.5rem, 4.75rem);
   --color-success: oklch(0.48 0.1 152);
   --color-disabled: oklch(0.83 0.018 58);
+  --color-error: oklch(0.46 0.13 35);
+  --color-info: oklch(0.4 0.075 250);
+  --color-success-soft: oklch(0.95 0.02 152);
+  --color-info-soft: oklch(0.95 0.014 250);
+  --color-clear: transparent;
+
+  --text-small: 0.875rem;
+  --text-body: 1rem;
+  --text-lede: 1.125rem;
+  --text-section: clamp(1.5rem, 2vw + 0.5rem, 2rem);
+  --text-page: clamp(2rem, 3vw + 1rem, 3.5rem);
+  --leading-body: 1.6;
+  --leading-heading: 1.12;
+  --tracking-heading: -0.04em;
 
   --space-3xs: 0.25rem;
   --space-2xs: 0.5rem;

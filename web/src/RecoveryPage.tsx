@@ -1,3 +1,6 @@
+import { AppHeader } from "./ui";
+import { EditorialArt } from "./EditorialArt";
+import { Button, Input, ButtonLink, Notice } from "./ui";
 import { ArrowRight, KeyRound, ShieldCheck } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
@@ -53,15 +56,7 @@ export function RecoveryPage() {
 
   return (
     <main className="auth-page">
-      <header className="auth-topbar">
-        <a className="wordmark" href="/" aria-label="Adeno home">
-          Adeno
-        </a>
-        <p>
-          <ShieldCheck aria-hidden="true" size={16} />
-          Private installation
-        </p>
-      </header>
+      <AppHeader className="auth-topbar" context={<> Private installation </>} />
       <section className="auth-layout">
         <div className="auth-heading">
           <div className="auth-mark" aria-hidden="true">
@@ -72,6 +67,7 @@ export function RecoveryPage() {
           <p className="auth-lede">
             A successful recovery signs out every older session and replaces every previous code.
           </p>
+          <EditorialArt scene="notes" className="auth-art" />
         </div>
 
         {replacementCodes.length ? (
@@ -84,16 +80,16 @@ export function RecoveryPage() {
                 <li key={code}>{code}</li>
               ))}
             </ol>
-            <a className="primary-button" href="/">
+            <ButtonLink className="" href="/">
               I saved these codes
               <ArrowRight aria-hidden="true" size={18} />
-            </a>
+            </ButtonLink>
           </div>
         ) : (
           <form className="auth-form" onSubmit={submit} noValidate>
             <div className="auth-field">
               <label htmlFor="recovery-code">Recovery code</label>
-              <input
+              <Input
                 id="recovery-code"
                 value={recoveryCode}
                 onChange={(event) => setRecoveryCode(event.target.value)}
@@ -106,7 +102,7 @@ export function RecoveryPage() {
             </div>
             <div className="auth-field">
               <label htmlFor="recovery-password">New owner passphrase</label>
-              <input
+              <Input
                 id="recovery-password"
                 type="password"
                 value={password}
@@ -121,7 +117,7 @@ export function RecoveryPage() {
             </div>
             <div className="auth-field">
               <label htmlFor="recovery-password-confirmation">Repeat the new passphrase</label>
-              <input
+              <Input
                 id="recovery-password-confirmation"
                 type="password"
                 value={confirmation}
@@ -133,13 +129,13 @@ export function RecoveryPage() {
               />
               <small aria-hidden="true">&nbsp;</small>
             </div>
-            <p className="auth-error" role="alert" aria-live="polite">
+            <Notice className="auth-error" role="alert" aria-live="polite">
               {error}
-            </p>
-            <button className="primary-button auth-submit" type="submit" disabled={working}>
+            </Notice>
+            <Button className="primary-button auth-submit" type="submit" loading={working}>
               {working ? "Recovering access…" : "Recover access"}
               <ArrowRight aria-hidden="true" size={18} />
-            </button>
+            </Button>
           </form>
         )}
       </section>

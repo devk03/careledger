@@ -1,3 +1,5 @@
+import { AppHeader } from "./ui";
+import { Button, Input, Select, ButtonLink, Notice } from "./ui";
 import {
   ArrowRight,
   BrainCircuit,
@@ -6,7 +8,6 @@ import {
   FileText,
   LockKeyhole,
   Plus,
-  ShieldCheck,
   Upload,
   X,
 } from "lucide-react";
@@ -289,25 +290,17 @@ export function RecordsPage() {
         <LockKeyhole aria-hidden="true" size={25} />
         <h1>Sign in to open the family workspace.</h1>
         <p>Adeno does not expose record names or counts before authentication.</p>
-        <a className="primary-button" href="/login">
+        <ButtonLink className="" href="/login">
           Sign in
           <ArrowRight aria-hidden="true" size={18} />
-        </a>
+        </ButtonLink>
       </main>
     );
   }
 
   return (
     <div className="records-page">
-      <header className="records-topbar">
-        <a className="wordmark" href="/" aria-label="Adeno home">
-          Adeno
-        </a>
-        <p>
-          <ShieldCheck aria-hidden="true" size={16} />
-          {session?.user ? `Private workspace · ${session.user.display_name}` : "Opening private workspace…"}
-        </p>
-      </header>
+      <AppHeader className="records-topbar" context={<> {session?.user ? `Private workspace · ${session.user.display_name}` : "Opening private workspace…"} </>} />
 
       <main className="records-layout">
         <header className="records-heading">
@@ -324,7 +317,7 @@ export function RecordsPage() {
             <>
               <label className="profile-select" htmlFor="care-profile">
                 <span>Care profile</span>
-                <select
+                <Select
                   id="care-profile"
                   value={selectedProfileId}
                   onChange={(event) => setSelectedProfileId(event.target.value)}
@@ -334,7 +327,7 @@ export function RecordsPage() {
                       {profile.preferred_name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <a className="dashboard-link" href={`/workspace?profile=${selectedProfileId}`}>
                 Open the care dashboard
@@ -346,7 +339,7 @@ export function RecordsPage() {
                   <span>{selectedFile ? selectedFile.name : "Choose a PDF or clear photo"}</span>
                   <small>PDF, JPEG, or PNG · up to 30 MB</small>
                 </label>
-                <input
+                <Input
                   id="record-file"
                   className="sr-only"
                   type="file"
@@ -354,20 +347,20 @@ export function RecordsPage() {
                   accept="application/pdf,image/jpeg,image/png"
                   onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
                 />
-                <button
+                <Button
                   className="primary-button records-submit"
                   type="submit"
                   disabled={!selectedFile || working}
                 >
                   <Plus aria-hidden="true" size={18} />
                   {working ? "Checking the record…" : "Add this record"}
-                </button>
+                </Button>
               </form>
             </>
           ) : (
             <form className="profile-form" onSubmit={createProfile}>
               <label htmlFor="profile-name">Who are you helping?</label>
-              <input
+              <Input
                 id="profile-name"
                 value={profileName}
                 onChange={(event) => setProfileName(event.target.value)}
@@ -376,15 +369,15 @@ export function RecordsPage() {
                 required
               />
               <small>Use a nickname or relationship if you prefer.</small>
-              <button className="primary-button" type="submit" disabled={working}>
+              <Button className="primary-button" type="submit" loading={working}>
                 {working ? "Creating the profile…" : "Create the care profile"}
                 <ArrowRight aria-hidden="true" size={18} />
-              </button>
+              </Button>
             </form>
           )}
-          <p className="records-error" role="alert" aria-live="polite">
+          <Notice className="records-error" role="alert" aria-live="polite">
             {error}
-          </p>
+          </Notice>
         </aside>
 
         <section className="records-list" aria-labelledby="records-title">
@@ -417,20 +410,20 @@ export function RecordsPage() {
                     <span>{_scanLabel(document.scan_verdict)}</span>
                     {document.duplicate_source ? <span>Original bytes already preserved</span> : null}
                     {document.status === "ready" && aiStatus.enabled ? (
-                      <button
+                      <Button
                         className="record-action"
                         type="button"
                         onClick={() => setConsentDocumentId(document.id)}
                       >
                         <BrainCircuit aria-hidden="true" size={16} />
                         Explain this record
-                      </button>
+                      </Button>
                     ) : null}
                     {document.status === "ready" && !aiStatus.enabled ? (
                       <span>AI is off · the original is safely stored</span>
                     ) : null}
                     {document.status === "needs_review" ? (
-                      <button
+                      <Button
                         className="record-action"
                         type="button"
                         disabled={reviewWorkingId === document.id}
@@ -438,7 +431,7 @@ export function RecordsPage() {
                       >
                         <FileCheck2 aria-hidden="true" size={16} />
                         {reviewWorkingId === document.id ? "Opening…" : "Review proposed facts"}
-                      </button>
+                      </Button>
                     ) : null}
                   </div>
                   {consentDocumentId === document.id ? (
@@ -454,14 +447,14 @@ export function RecordsPage() {
                         <p className="analysis-model">Model: {aiStatus.model}</p>
                       </div>
                       <div className="consent-actions">
-                        <button
+                        <Button
                           className="quiet-action"
                           type="button"
                           onClick={() => setConsentDocumentId("")}
                         >
                           Keep it local
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           className="primary-button"
                           type="button"
                           disabled={reviewWorkingId === document.id}
@@ -469,7 +462,7 @@ export function RecordsPage() {
                         >
                           {reviewWorkingId === document.id ? "Sending safely…" : "Send and explain"}
                           <ArrowRight aria-hidden="true" size={17} />
-                        </button>
+                        </Button>
                       </div>
                     </section>
                   ) : null}
@@ -491,7 +484,7 @@ export function RecordsPage() {
                 <p className="section-note">Human review required</p>
                 <h2 id="review-title">Check every proposed fact against its source.</h2>
               </div>
-              <button
+              <Button
                 className="quiet-action"
                 type="button"
                 onClick={() => {
@@ -500,7 +493,7 @@ export function RecordsPage() {
                 }}
               >
                 Close review
-              </button>
+              </Button>
             </header>
             {proposals.length ? (
               <div className="proposal-list">
@@ -538,7 +531,7 @@ export function RecordsPage() {
                       ))}
                     </aside>
                     <div className="proposal-actions">
-                      <button
+                      <Button
                         className="reject-action"
                         type="button"
                         disabled={reviewWorkingId === proposal.revision_id}
@@ -546,8 +539,8 @@ export function RecordsPage() {
                       >
                         <X aria-hidden="true" size={17} />
                         Reject draft
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         className="accept-action"
                         type="button"
                         disabled={reviewWorkingId === proposal.revision_id}
@@ -555,7 +548,7 @@ export function RecordsPage() {
                       >
                         <Check aria-hidden="true" size={17} />
                         {reviewWorkingId === proposal.revision_id ? "Saving…" : "Accept as sourced"}
-                      </button>
+                      </Button>
                     </div>
                   </article>
                 ))}

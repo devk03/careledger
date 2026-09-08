@@ -1,3 +1,6 @@
+import { AppHeader } from "./ui";
+import { EditorialArt } from "./EditorialArt";
+import { Button, Input, ButtonLink, Notice } from "./ui";
 import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
@@ -41,15 +44,7 @@ export function LoginPage() {
 
   return (
     <main className="auth-page">
-      <header className="auth-topbar">
-        <a className="wordmark" href="/" aria-label="Adeno home">
-          Adeno
-        </a>
-        <p>
-          <ShieldCheck aria-hidden="true" size={16} />
-          Private installation
-        </p>
-      </header>
+      <AppHeader className="auth-topbar" context={<> Private installation </>} />
       <section className="auth-layout auth-layout-login">
         <div className="auth-heading">
           <div className="auth-mark" aria-hidden="true">
@@ -60,6 +55,7 @@ export function LoginPage() {
           <p className="auth-lede">
             Adeno uses one local owner account. Your passphrase is checked by this installation.
           </p>
+          <EditorialArt className="auth-art" />
         </div>
 
         {authenticated ? (
@@ -67,16 +63,16 @@ export function LoginPage() {
             <ShieldCheck aria-hidden="true" size={22} />
             <h2>You’re signed in.</h2>
             <p>Your reviewed records and open questions are ready when you are.</p>
-            <a className="primary-button" href="/">
+            <ButtonLink className="" href="/">
               Open the workspace
               <ArrowRight aria-hidden="true" size={18} />
-            </a>
+            </ButtonLink>
           </div>
         ) : (
           <form className="auth-form" onSubmit={submit}>
             <div className="auth-field">
               <label htmlFor="login-password">Owner passphrase</label>
-              <input
+              <Input
                 id="login-password"
                 type="password"
                 value={password}
@@ -89,13 +85,13 @@ export function LoginPage() {
               />
               <small aria-hidden="true">&nbsp;</small>
             </div>
-            <p className="auth-error" role="alert" aria-live="polite">
+            <Notice className="auth-error" role="alert" aria-live="polite">
               {error}
-            </p>
-            <button className="primary-button auth-submit" type="submit" disabled={working}>
+            </Notice>
+            <Button className="primary-button auth-submit" type="submit" loading={working}>
               {working ? "Checking the passphrase…" : "Sign in"}
               <ArrowRight aria-hidden="true" size={18} />
-            </button>
+            </Button>
             <a className="text-link auth-secondary-link" href="/recover">
               Use a saved recovery code
             </a>

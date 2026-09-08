@@ -30,6 +30,9 @@ describe("Adeno caregiver entry", () => {
       "href",
       "/setup",
     );
+    expect(screen.getByRole("link", { name: "Records" })).toHaveAttribute("href", "/records");
+    expect(screen.getByRole("link", { name: "Next steps" })).toHaveAttribute("href", "/workspace#next-steps");
+    expect(screen.getByRole("link", { name: "Add record" })).toHaveAttribute("href", "/records");
     for (const heading of [
       "What we know",
       "What this means",

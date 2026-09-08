@@ -1,4 +1,6 @@
-import { ArrowLeft, Download, KeyRound, ShieldCheck } from "lucide-react";
+import { AppHeader } from "./ui";
+import { Button, Input, ButtonLink, Notice } from "./ui";
+import { ArrowLeft, Download, KeyRound, } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 
 type Session = {
@@ -81,17 +83,14 @@ export function BackupPage() {
     return (
       <main className="workspace-gate">
         <h1>The workspace owner must create backups.</h1>
-        <a className="primary-button" href="/login">Sign in as owner</a>
+        <ButtonLink className="" href="/login">Sign in as owner</ButtonLink>
       </main>
     );
   }
 
   return (
     <div className="backup-page">
-      <header className="workspace-topbar">
-        <a className="wordmark" href="/">Adeno</a>
-        <p><ShieldCheck aria-hidden="true" size={16} />Owner-only recovery</p>
-      </header>
+      <AppHeader className="workspace-topbar" context={<> Owner-only recovery </>} />
       <main className="backup-layout">
         <section className="backup-heading">
           <a className="back-link" href="/workspace"><ArrowLeft aria-hidden="true" size={16} />Care dashboard</a>
@@ -110,24 +109,24 @@ export function BackupPage() {
         <form className="backup-form" onSubmit={exportBackup}>
           <div>
             <label htmlFor="backup-account-password">Adeno account password</label>
-            <input id="backup-account-password" type="password" autoComplete="current-password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} required />
+            <Input id="backup-account-password" type="password" autoComplete="current-password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} required />
             <small>This confirms that the signed-in owner requested the export.</small>
           </div>
           <div>
             <label htmlFor="backup-passphrase">New backup passphrase</label>
-            <input id="backup-passphrase" type="password" autoComplete="new-password" minLength={12} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} required />
+            <Input id="backup-passphrase" type="password" autoComplete="new-password" minLength={12} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} required />
             <small>Use a long phrase that is not the account password.</small>
           </div>
           <div>
             <label htmlFor="backup-confirmation">Repeat backup passphrase</label>
-            <input id="backup-confirmation" type="password" autoComplete="new-password" minLength={12} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
+            <Input id="backup-confirmation" type="password" autoComplete="new-password" minLength={12} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
             <small>{confirmation && confirmation !== passphrase ? "The two backup passphrases do not match." : "Adeno never stores this passphrase."}</small>
           </div>
-          <button className="primary-button backup-submit" type="submit" disabled={working || passphrase.length < 12 || passphrase !== confirmation}>
+          <Button className="primary-button backup-submit" type="submit" disabled={working || passphrase.length < 12 || passphrase !== confirmation}>
             <Download aria-hidden="true" size={18} />
             {working ? "Verifying and encrypting…" : "Create encrypted backup"}
-          </button>
-          <p className="auth-error" role="alert">{error}</p>
+          </Button>
+          <Notice className="auth-error" role="alert">{error}</Notice>
           {complete ? <p className="backup-success" role="status">Backup verified and downloaded. An encrypted server-side copy also remains in the private backup directory.</p> : null}
         </form>
       </main>

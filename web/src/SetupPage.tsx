@@ -1,3 +1,6 @@
+import { AppHeader } from "./ui";
+import { EditorialArt } from "./EditorialArt";
+import { Button, Input, ButtonLink, Notice } from "./ui";
 import { ArrowRight, KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 
@@ -93,10 +96,10 @@ export function SetupPage() {
           <p className="auth-helper">
             A password manager or a printed copy stored safely are both reasonable choices.
           </p>
-          <a className="primary-button" href="/">
+          <ButtonLink className="" href="/">
             I saved these codes
             <ArrowRight aria-hidden="true" size={18} />
-          </a>
+          </ButtonLink>
         </div>
       </AuthShell>
     );
@@ -113,12 +116,13 @@ export function SetupPage() {
         <p className="auth-lede">
           This creates the owner account for your family’s installation. There is no public signup.
         </p>
+        <EditorialArt scene="notes" className="auth-art" />
       </div>
 
       <form className="auth-form" onSubmit={submit} noValidate>
         <div className="auth-field">
           <label htmlFor="setup-display-name">Your name</label>
-          <input
+          <Input
             id="setup-display-name"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
@@ -131,7 +135,7 @@ export function SetupPage() {
         </div>
         <div className="auth-field">
           <label htmlFor="setup-household-name">Workspace name</label>
-          <input
+          <Input
             id="setup-household-name"
             value={householdName}
             onChange={(event) => setHouseholdName(event.target.value)}
@@ -145,7 +149,7 @@ export function SetupPage() {
         </div>
         <div className="auth-field">
           <label htmlFor="setup-password">Owner passphrase</label>
-          <input
+          <Input
             id="setup-password"
             type="password"
             value={password}
@@ -162,7 +166,7 @@ export function SetupPage() {
         </div>
         <div className="auth-field">
           <label htmlFor="setup-password-confirmation">Repeat the passphrase</label>
-          <input
+          <Input
             id="setup-password-confirmation"
             type="password"
             value={confirmation}
@@ -175,13 +179,13 @@ export function SetupPage() {
           <small aria-hidden="true">&nbsp;</small>
         </div>
 
-        <p className="auth-error" role="alert" aria-live="polite">
+        <Notice className="auth-error" role="alert" aria-live="polite">
           {error}
-        </p>
-        <button className="primary-button auth-submit" type="submit" disabled={working}>
+        </Notice>
+        <Button className="primary-button auth-submit" type="submit" loading={working}>
           <KeyRound aria-hidden="true" size={18} />
           {working ? "Protecting the workspace…" : "Create the owner account"}
-        </button>
+        </Button>
       </form>
     </AuthShell>
   );
@@ -190,15 +194,7 @@ export function SetupPage() {
 function AuthShell({ children }: { children: ReactNode }) {
   return (
     <main className="auth-page">
-      <header className="auth-topbar">
-        <a className="wordmark" href="/" aria-label="Adeno home">
-          Adeno
-        </a>
-        <p>
-          <ShieldCheck aria-hidden="true" size={16} />
-          Private installation
-        </p>
-      </header>
+      <AppHeader className="auth-topbar" context={<> Private installation </>} />
       <section className="auth-layout">{children}</section>
     </main>
   );

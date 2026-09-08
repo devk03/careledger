@@ -2,7 +2,9 @@
 
 ## Product direction — 2026-09-07
 
-The product is named Adeno. Hosted use is the primary release target; open-source self-hosting is optional. The first-run container experience below describes the existing community foundation, not the intended caregiver onboarding. Prioritize hosted account creation, family access, encrypted record and note intake, Today, timeline, tasks, research chat and managed AI billing with transparent operating-cost recovery. Do not require ordinary caregivers to configure infrastructure or provider API keys.
+**Current scope override:** [Core platform](docs/core-platform.md) controls the next increment: individual adult logins and family authorization, records/notes grouped into care events, reviewed source-linked family updates, timeline and assigned tasks. Outbound communications, calendar sync, broad web research and payment UX are deferred. The phases below are the historical foundation/backlog, not a claim that those features are complete or all belong in the next increment. Hosted encryption, access, recovery and cost controls remain launch gates.
+
+The product is named Adeno. Hosted use is the primary release target; open-source self-hosting is optional. The first-run container experience below describes the existing community foundation, not the intended caregiver onboarding. Do not require ordinary caregivers to configure infrastructure or provider API keys.
 
 ## Current progress
 
@@ -15,7 +17,7 @@ The product is named Adeno. Hosted use is the primary release target; open-sourc
 
 ## Definition of done
 
-A caregiver can open the hosted website, create an account, protect the family workspace, invite other adults, and use records, notes, timeline, tasks, explanations and research without infrastructure setup or provider credentials. The operator manages inference and bills transparently to recover costs. E2EE and credential isolation must satisfy the launch gates in `docs/research-hosting-plan.md`. A fresh clone must also remain runnable as the optional community Docker edition. Both paths preserve source citations, human review, persistent data and verified exports.
+A caregiver can open the hosted website, create an account, protect the family workspace, invite other adults, and publish a reviewed family update from records and personal notes. Each authorized adult can read the same update and see their tasks without infrastructure setup or provider credentials. E2EE, funded AI limits and credential isolation must satisfy the launch gates in `docs/research-hosting-plan.md`. A fresh clone must also remain runnable as the optional community Docker edition. Both paths preserve source citations, human review, persistent data and verified exports. Research and outbound messaging are not required for this core increment.
 
 Release requires:
 
