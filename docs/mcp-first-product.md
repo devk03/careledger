@@ -12,6 +12,8 @@ The core loop is: upload a treatment/visit/result and a rough note → review ev
 
 The [family access and document inbox spec](family-access-and-intake.md) defines the web dump, classification proposals, human-reviewed timeline, and individual access boundaries behind this loop.
 
+The [adult review inbox](agent-review-inbox.md) defines how a child proposal becomes visible to a permitted adult and their agent. MCP subscriptions are optional change hints, not a promise that closed AI clients will wake up or display a notification.
+
 ## Two separate connections, not a pile of keys
 
 1. A person signs into **adeno** and joins a family. Their AI client connects to adeno through that person's OAuth authorization. adeno issues a scoped, revocable connection grant. The family admin cannot silently authorize another adult's AI client. The normal connection flow should be “Copy setup instruction → give it to your agent → approve adeno access in your browser → Done,” without copying an adeno API key.

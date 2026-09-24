@@ -10,6 +10,8 @@ For the first pilot, use three simple capabilities on each day: **view**, **cont
 
 An adult with publish access may publish their own human-authored note or checked placement directly. A child's submission always waits for an authorized adult to approve or reject it. Model-extracted clinical statements also remain proposals until an adult checks them against the source; merely having an adult account does not turn model output into a fact. Drafts are visible only to their author and permitted adult reviewers.
 
+An adult's [review inbox and agent connection](agent-review-inbox.md) can signal that a child proposal is waiting, without sending its content to an AI provider. Offline agents discover it on the next read; the authenticated web queue remains authoritative.
+
 Every HTTP, viewer, search, export, and MCP read checks the current membership and the specific day grant. Hidden days must not leak through counts, cursors, search snippets, revision listings, or “history through day.” An agent receives no broader access than its connected person. Source-file access is a separate check: viewing one day cannot silently grant a whole PDF that also contains material from restricted days. The admin must explicitly grant the source or share an approved bounded excerpt; otherwise the source remains unavailable. Guessing a node, revision, or document ID never grants access.
 
 ## Snapshots without copying original files
