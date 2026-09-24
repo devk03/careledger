@@ -70,6 +70,11 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
 
   close(): void { this.db.close(); }
 
+  ready(): boolean {
+    try { verifySchema(this.db); return true; }
+    catch { return false; }
+  }
+
   async findByTokenSha256(tokenSha256: string): Promise<StoredSession | null> {
     if (!/^[0-9a-f]{64}$/.test(tokenSha256)) return null;
     const row = this.db.prepare<[string], SessionRow>(

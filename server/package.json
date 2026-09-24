@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "tsc -p tsconfig.build.json",
+    "start:local-pilot": "node dist/runLocalPilot.js",
     "stress:http": "npm run build && node stress/http.mjs",
     "stress:ingest": "npm run build && node stress/ingest.mjs"
   },

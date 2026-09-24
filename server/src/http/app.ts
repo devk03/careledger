@@ -62,6 +62,7 @@ export function createHttpApp(dependencies: {
   reviews?: PendingReviewRepository;
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
+  readiness?: () => boolean;
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -72,6 +73,10 @@ export function createHttpApp(dependencies: {
 
   app.get("/health/live", (_request, response) => {
     response.json({ status: "ok" });
+  });
+  app.get("/health/ready", (_request, response) => {
+    const ready = dependencies.readiness?.() ?? false;
+    response.status(ready ? 200 : 503).json({ status: ready ? "ready" : "unavailable" });
   });
 
   if (dependencies.profiles !== undefined) {
