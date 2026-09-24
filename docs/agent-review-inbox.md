@@ -36,4 +36,4 @@ The copied agent-setup instruction can add one sentence: “When I ask what need
 - Revoking day publish access immediately removes the event and blocks direct review-ID access.
 - Agent clients without subscriptions still discover the item on their next authorized queue read.
 
-The current MCP TypeScript package has only in-memory read tools and no public authenticated transport. This design needs durable storage, account grants, and a separately approved additive migration before real family data is used.
+The current MCP TypeScript package has only in-memory read tools and no public authenticated transport. An [unregistered additive schema draft](../app/storage/migrations/0007_family_day_access.sql) now models the queue and grants and has been applied only to fictional test databases; no TypeScript runtime reads it yet. Durable authorization, delivery behavior and a separately reviewed existing-database cutover remain required before real family data is used.

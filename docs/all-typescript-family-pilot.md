@@ -4,7 +4,7 @@ Decision recorded 2026-09-24: the family pilot will use the React/Vite frontend 
 
 ## Current boundary
 
-The Dockerfile still starts Python, and Compose defines only that service. The TypeScript server has tested in-memory HTTP/MCP read paths and preliminary upload admission/staging, but no production entrypoint, sessions, durable repository, upload route, review workflow, or public MCP transport. The existing SQLite schema is version 5. The unregistered `0006_sparse_care_days.sql` draft lacks per-day grants, snapshots, and the child-review outbox and must not be used as the pilot migration. Creating or applying a revised migration requires separate explicit approval.
+The Dockerfile still starts Python, and Compose defines only that service. The TypeScript server has tested in-memory HTTP/MCP read paths and preliminary upload admission/staging, but no production entrypoint, sessions, durable repository, upload route, review workflow, or public MCP transport. The existing SQLite schema is version 5. The unregistered `0006_sparse_care_days.sql` draft is paired with an unregistered `0007_family_day_access.sql` follow-on for per-day grants, snapshots, and the child-review outbox. They have been applied together only to fresh fictional test databases. They must not be registered for startup or used with family records until the TypeScript authorization and write path pass the release gates.
 
 Do not run independent Python and TypeScript writers against one medical database. Until cutover, Python remains the sole writer. The TypeScript service may read synthetic fixtures during development, but no real records go into a new pilot until the gates below pass.
 

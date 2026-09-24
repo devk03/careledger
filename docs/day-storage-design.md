@@ -1,6 +1,6 @@
 # Sparse day storage proposal
 
-Earlier storage proposal with an [unregistered migration draft](../app/storage/migrations/0006_sparse_care_days.sql). **The migration has not been registered or applied.** It was tested only against fresh fictional databases. The newer [day access and snapshot design](day-access-and-history.md) adds per-day grants and stored published snapshots, which this SQL draft does not provide. **Do not register or apply the draft as a family rollout migration.** A revised migration requires separate explicit approval before creation or application. The existing Python application and its database remain the system of record.
+Earlier storage proposal with an [unregistered day-placement draft](../app/storage/migrations/0006_sparse_care_days.sql) and a [follow-on family-access draft](../app/storage/migrations/0007_family_day_access.sql). **Neither migration is registered or applied to an existing database.** Both were executed together only on fresh fictional test databases. The second draft adds day/source grants, published snapshots, child review requests and a durable outbox, but runtime authorization and atomic publish logic remain unimplemented. Do not register these drafts for family rollout yet. The user approved draft creation and fictional-data application; an existing database target and verified backup must be identified before any real cutover. The existing Python application and its database remain the system of record.
 
 ## Key decision
 
@@ -31,4 +31,4 @@ The Express HTTP and MCP adapters must share the same application service and a 
 
 ## Approval boundary
 
-Creation of the unregistered SQL draft was approved. Next, review the exact SQL and data-preservation plan. Registering or executing it against any database requires **separate explicit approval**. No backfill or write cutover is part of this draft. Do not push or deploy it as part of migration review.
+The additive draft pair creates new tables/views/triggers and adds `member_kind` to existing users and invitations, defaulting legacy rows to `adult`. It does not drop tables, delete records, backfill care days or cut over writes. Before touching an existing database, verify that this legacy-account default is appropriate, identify the exact database, take and test an encrypted backup, then run the approved migration under a write freeze. Registration in `app/storage/database.py` would auto-apply at Python startup, so it remains intentionally absent until the TypeScript cutover is ready. This approval does not authorize public deployment or imply that the new tables alone enforce safe reads.
