@@ -2,21 +2,22 @@
 
 The [treatment timeline product contract](treatment-timeline-product.md) defines what the inbox is for: source-grounded extracted entries that a person checks before they enter a shared chronology. The timeline, not a generated chat answer, is the canonical family record. Extraction is not care advice.
 
-Proposed product behavior, 2026-09-22. This is a design for the MCP-first product, not an implemented hosted feature. The working community app currently has one owner login and a basic upload/review/timeline foundation. No new schema or migration was created by this plan.
+Proposed product behavior, updated 2026-09-24. This is a design, not an implemented hosted feature. The working community app currently has one owner login and a basic upload/review/timeline foundation. The newer [per-day access and history decision](day-access-and-history.md) governs family provisioning and child contributions; no new schema or migration was created by that decision.
 
-## One family space, individual adults
+## One family space, individual accounts
 
-A family space contains one loved one's records, a shared approved timeline, approved family updates, questions and tasks. Each adult has their own account and device authorization. The patient or an appropriately authorized caregiver decides who can join; an admin role inside software does not itself establish authority to share someone's health information.
+A family space contains one loved one's records, an approved timeline, approved family updates, questions and tasks. Each person has their own account. The patient or an appropriately authorized caregiver decides who can join; an admin role inside software does not itself establish authority to share someone's health information.
 
 | Role | Can see | Can do |
 | --- | --- | --- |
-| Family admin | Shared approved information and working material | Invite/revoke members, manage family settings, and perform editor actions. |
-| Editor | Shared approved information and working drafts | Upload files, write notes, correct proposals, approve a timeline item or family update, and manage shared tasks. |
-| Member | Shared approved information and their tasks | Read approved updates and sources, ask questions, submit new files or notes as proposals, and complete their own tasks. Cannot inspect other members' working drafts or publish timeline changes. |
+| Family admin | Family records and admin-only access history | Invite/revoke members, grant day/source access, and publish changes. |
+| Adult editor | Only granted days, sources and working drafts | Read, contribute and publish on specifically granted days. |
+| Adult reader | Only granted approved days and sources | Read granted material; optional contribute grant submits proposals, never publishes. |
+| Child contributor | Only material explicitly granted for viewing; their own submissions | Submit a note or file as a proposal. An authorized adult must approve it before it reaches the shared timeline. Cannot publish or manage access. |
 
-Initial sharing is family-wide for approved records. The invitation screen must say that joining grants access to the existing approved history, including source pages behind summaries. Per-person exclusion of a particular approved document is a later feature; do not imply it exists through a hidden button. A person's preferred explanation length changes presentation, not permission.
+Initial sharing is **not** family-wide. An invitation creates an account with no record access until the admin grants specific populated days. The admin can batch-grant days, but the server still checks each day and source on every read. A child's contribution waits for an authorized adult to publish it; adult editors may publish their own checked edits on days where they have publish access. A person's preferred explanation length changes presentation, not permission.
 
-Join flow: admin enters the adult's address → one-use, expiring invite → invitee creates/signs into their own account and enrolls a device → admin verifies the intended recipient and grants the approved-content key → membership becomes active. A separate grant is needed for editor working material. Every read, download, search, task action and MCP request checks current family membership and role. The connected AI client's grant is narrower still: `membership ∩ item visibility ∩ client scopes ∩ keys available on that device`.
+Join flow: admin names the recipient → one-use, expiring invite → recipient sets their own login secret → admin verifies the intended person and grants specific day capabilities. The trusted-server pilot enforces those grants on every read, download, search, task action and MCP request; it is not E2EE. Future managed E2EE also requires device enrollment and separate content-key grants. A connected AI client's access is narrower still: `membership ∩ day/source grant ∩ client scopes ∩ keys available on that device`.
 
 After joining, each adult sees **Copy setup instruction** in their own account. They paste the short public instruction into their agent, which adds adeno through MCP and opens the browser authorization prompt. Linking an AI app is a personal authorization, separate from accepting a family invitation. The [first-login connection flow](mcp-first-product.md#connect-your-agent-the-first-login-flow) defines the setup and disconnection experience.
 

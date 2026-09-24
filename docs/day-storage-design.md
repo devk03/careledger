@@ -1,10 +1,10 @@
 # Sparse day storage proposal
 
-Design proposal with an [unregistered migration draft](../app/storage/migrations/0006_sparse_care_days.sql). **The migration has not been applied.** It is absent from `MIGRATIONS` and `CURRENT_SCHEMA_VERSION` remains 5, so normal startup does not apply it. Separate explicit approval is required before registering, executing, or testing the SQL against a database. The existing Python application and its database remain the system of record until an additive path is tested.
+Earlier storage proposal with an [unregistered migration draft](../app/storage/migrations/0006_sparse_care_days.sql). **The migration has not been registered or applied.** It was tested only against fresh fictional databases. The newer [day access and snapshot design](day-access-and-history.md) adds per-day grants and stored published snapshots, which this SQL draft does not provide. **Do not register or apply the draft as a family rollout migration.** A revised migration requires separate explicit approval before creation or application. The existing Python application and its database remain the system of record.
 
 ## Key decision
 
-A day node does not need its own stored row. Its stable key is `(care_profile_id, care_day)`. The timeline groups approved file placements and family notes by that calendar day when read. If neither exists, there is no visible node. No blank days, event graph, summary table, vector index, or AI memory is required.
+The earlier design derived a day node from approved placements and notes, keyed by `(care_profile_id, care_day)`. The new requirement keeps that sparse key and no blank days, but stores an immutable snapshot whenever a populated day's approved contents change. The draft below therefore remains useful as an item-level history sketch, not a complete day-node schema.
 
 This also makes “History through a day” a permission-scoped query over current approved material dated on or before the selected day, ordered backward. A later-uploaded file approved for an earlier care day appears on the next read. Upload time remains provenance, not the timeline key.
 

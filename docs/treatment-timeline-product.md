@@ -1,6 +1,6 @@
 # adeno: treatment timeline as the product
 
-Product direction, 2026-09-23. The web timeline is adeno's primary interface: families drop files and notes, check extracted record entries, and see the history of one loved one's treatment. MCP is another way for an authorized family member's agent to query that same history or submit new source material for review. This refines the earlier [MCP-first plan](mcp-first-product.md). This is a proposed product contract, not a claim that the current app already implements it.
+Product direction, updated 2026-09-24. The web timeline is adeno's primary interface: families drop files and notes, check extracted record entries, and see the history of one loved one's treatment. MCP is another way for an authorized family member's agent to query that same history or submit new source material for review. [Per-day grants, child approval, and published node snapshots](day-access-and-history.md) refine the earlier access and storage assumptions. This is a proposed product contract, not a claim that the current app already implements it.
 
 ## The job
 
