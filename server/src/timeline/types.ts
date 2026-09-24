@@ -12,8 +12,10 @@ export type AuthorizedScope = {
 
 export interface TimelineRepository {
   profileBelongsToHousehold(careProfileId: string, householdId: string): Promise<boolean>;
+  /** Must return only days this active user may read; no hidden counts or cursors. */
   listApprovedDays(input: {
     householdId: string;
+    userId: string;
     careProfileId: string;
     throughDay: ISODate;
     beforeDay?: ISODate;
@@ -24,9 +26,10 @@ export interface TimelineRepository {
 export type StoredPageChunk = Omit<ApprovedPageChunk, "sourceTextIsUntrusted">;
 
 export interface ApprovedPageRepository {
-  /** The adapter must authorize the household/profile/document/link in one scoped read. */
+  /** The adapter must authorize user, household, profile, document and source grant in one scoped read. */
   readApprovedPageChunk(input: {
     householdId: string;
+    userId: string;
     careProfileId: string;
     documentId: string;
     pageNumber: number;

@@ -62,11 +62,16 @@ export async function getHistoryThroughDay(
   // Fetch one extra day to decide whether a continuation cursor is needed.
   const rows = await repository.listApprovedDays({
     householdId: scope.householdId,
+    userId: scope.userId,
     careProfileId: input.careProfileId,
     throughDay,
     ...(beforeDay === undefined ? {} : { beforeDay }),
     limit: limit + 1,
   });
+  if (rows.some((day) => day.careProfileId !== input.careProfileId || day.day > throughDay ||
+    (beforeDay !== undefined && day.day >= beforeDay))) {
+    throw new Error("Timeline repository returned out-of-scope data");
+  }
   const days = rows.slice(0, limit);
   return {
     throughDay,

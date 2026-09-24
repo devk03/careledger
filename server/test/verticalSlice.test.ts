@@ -37,8 +37,9 @@ it("uses one fresh, authorized history across HTTP and MCP", async () => {
   ];
   const timeline: TimelineRepository = {
     profileBelongsToHousehold: async (id, household) => id === profileId && household === "fictional-family-a",
-    listApprovedDays: async ({ householdId, careProfileId, throughDay, beforeDay, limit }) => {
+    listApprovedDays: async ({ householdId, userId, careProfileId, throughDay, beforeDay, limit }) => {
       expect(householdId).toBe("fictional-family-a");
+      expect(userId).toBe("fictional-adult-a");
       expect(careProfileId).toBe(profileId);
       return days
         .filter((day) => day.day <= throughDay && (beforeDay === undefined || day.day < beforeDay))

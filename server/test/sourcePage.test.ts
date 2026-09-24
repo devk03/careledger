@@ -26,7 +26,10 @@ describe("approved source page read", () => {
   });
 
   it("does not reveal whether an unapproved page exists", async () => {
-    const pages: ApprovedPageRepository = { readApprovedPageChunk: async () => null };
+    const pages: ApprovedPageRepository = { readApprovedPageChunk: async (input) => {
+      expect(input).toMatchObject({ householdId: "fictional-family", userId: "fictional-adult" });
+      return null;
+    } };
     await expect(getApprovedSourcePage(pages, timeline, scope, {
       careProfileId: "profile", documentId: "document", pageNumber: 1,
     })).rejects.toBeInstanceOf(SourcePageNotFound);

@@ -40,6 +40,7 @@ export async function getApprovedSourcePage(
 
   const result = await repository.readApprovedPageChunk({
     householdId: scope.householdId,
+    userId: scope.userId,
     careProfileId: input.careProfileId,
     documentId: input.documentId,
     pageNumber: input.pageNumber,

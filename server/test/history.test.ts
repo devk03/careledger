@@ -43,13 +43,15 @@ class FictionalRepository implements TimelineRepository {
 
   async listApprovedDays(input: {
     householdId: string;
+    userId: string;
     careProfileId: string;
     throughDay: string;
     beforeDay?: string;
     limit: number;
   }): Promise<TimelineDay[]> {
     this.listCalls += 1;
-    if (input.householdId !== "family-a" || input.careProfileId !== "person-a") {
+    if (input.householdId !== "family-a" || input.userId !== "adult-a" ||
+      input.careProfileId !== "person-a") {
       throw new Error("Unscoped repository request");
     }
     return this.days
@@ -132,5 +134,13 @@ describe("backward timeline traversal", () => {
     await expect(getHistoryThroughDay(repository, scope, {
       careProfileId: "person-a", throughDay: "2026-09-18", focusFromDay: "2026-09-19",
     })).rejects.toBeInstanceOf(InvalidTimelineDate);
+  });
+
+  it("fails closed if an adapter returns a day from another profile", async () => {
+    const repository = new FictionalRepository();
+    repository.days[0] = { ...repository.days[0]!, careProfileId: "person-b" };
+    await expect(getHistoryThroughDay(repository, scope, {
+      careProfileId: "person-a", throughDay: "2026-09-18",
+    })).rejects.toThrow("out-of-scope");
   });
 });
