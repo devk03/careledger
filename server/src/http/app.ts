@@ -1,6 +1,8 @@
 import express, { type Request } from "express";
 
-import { preflightCookieMutation } from "../auth/cookieSession.js";
+import { issueCsrfToken, preflightCookieMutation, readCookieSession,
+  sessionClearCookie, sessionSetCookie, type SessionRepository } from "../auth/cookieSession.js";
+import type { SqliteFamilyAccounts } from "../auth/familyAccounts.js";
 import type { GrantResult } from "../storage/sqliteFamilyMutations.js";
 import {
   getHistoryThroughDay,
@@ -35,6 +37,8 @@ export function createHttpApp(dependencies: {
   /** Only pass both fields for the trusted-local v7 family pilot. */
   mutations?: DayAccessWriter;
   expectedOrigin?: string;
+  accounts?: SqliteFamilyAccounts;
+  sessions?: SessionRepository;
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -46,6 +50,94 @@ export function createHttpApp(dependencies: {
   app.get("/health/live", (_request, response) => {
     response.json({ status: "ok" });
   });
+
+  if (dependencies.accounts !== undefined && dependencies.sessions !== undefined &&
+    dependencies.expectedOrigin !== undefined) {
+    const accounts = dependencies.accounts;
+    const expectedOrigin = dependencies.expectedOrigin;
+    const json = express.json({ limit: "16kb", type: "application/json" });
+    const sameOrigin = (request: Request): boolean =>
+      request.get("origin") === expectedOrigin &&
+      [undefined, "same-origin"].includes(request.get("sec-fetch-site"));
+
+    app.get("/api/v2/auth/session", async (request, response) => {
+      const session = await readCookieSession(request, dependencies.sessions!);
+      if (!session) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+      response.json({ userId: session.scope.userId, householdId: session.scope.householdId,
+        csrfToken: issueCsrfToken(session.sessionId, session.csrfSecret), expiresAt: session.expiresAt });
+    });
+
+    app.post("/api/v2/auth/login", json, async (request, response) => {
+      if (!sameOrigin(request)) { response.status(403).json({ error: "ORIGIN_NOT_ALLOWED" }); return; }
+      const body: unknown = request.body;
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        response.status(400).json({ error: "INVALID_BODY" }); return;
+      }
+      const fields = body as Record<string, unknown>;
+      if (typeof fields.loginName !== "string" || typeof fields.password !== "string") {
+        response.status(400).json({ error: "INVALID_BODY" }); return;
+      }
+      const result = await accounts.login({ loginName: fields.loginName, password: fields.password });
+      if (!result.ok) {
+        response.status(result.error === "TRY_LATER" ? 429 : result.error === "INVALID_INPUT" ? 400 : 401)
+          .json({ error: result.error });
+        return;
+      }
+      response.setHeader("Set-Cookie", sessionSetCookie(result.value.sessionToken));
+      const { sessionToken: _secret, ...publicResult } = result.value;
+      response.json(publicResult);
+    });
+
+    app.post("/api/v2/auth/invitations/accept", json, async (request, response) => {
+      if (!sameOrigin(request)) { response.status(403).json({ error: "ORIGIN_NOT_ALLOWED" }); return; }
+      const body: unknown = request.body;
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        response.status(400).json({ error: "INVALID_BODY" }); return;
+      }
+      const fields = body as Record<string, unknown>;
+      if (typeof fields.token !== "string" || typeof fields.loginName !== "string" ||
+        typeof fields.displayName !== "string" || typeof fields.password !== "string") {
+        response.status(400).json({ error: "INVALID_BODY" }); return;
+      }
+      const result = await accounts.acceptInvitation({ token: fields.token,
+        loginName: fields.loginName, displayName: fields.displayName, password: fields.password });
+      if (!result.ok) {
+        response.status(result.error === "LOGIN_TAKEN" ? 409 : 400).json({ error: result.error });
+        return;
+      }
+      response.setHeader("Set-Cookie", sessionSetCookie(result.value.sessionToken));
+      const { sessionToken: _secret, ...publicResult } = result.value;
+      response.status(201).json(publicResult);
+    });
+
+    app.post("/api/v2/auth/invitations", json, (request, response) => {
+      const preflight = preflightCookieMutation(request, expectedOrigin);
+      if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+      const body: unknown = request.body;
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        response.status(400).json({ error: "INVALID_BODY" }); return;
+      }
+      const kind = (body as Record<string, unknown>).memberKind;
+      if (kind !== "adult" && kind !== "child") {
+        response.status(400).json({ error: "INVALID_BODY" }); return;
+      }
+      const result = accounts.issueInvitation(preflight, kind);
+      response.status(result.ok ? 201 : result.error === "AUTH_REQUIRED" ? 401 : 403)
+        .json(result.ok ? result.value : { error: result.error });
+    });
+
+    app.post("/api/v2/auth/logout", (request, response) => {
+      const preflight = preflightCookieMutation(request, expectedOrigin);
+      if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+      const result = accounts.logout(preflight);
+      if (!result.ok) {
+        response.status(result.error === "AUTH_REQUIRED" ? 401 : 403).json({ error: result.error });
+        return;
+      }
+      response.setHeader("Set-Cookie", sessionClearCookie());
+      response.status(204).end();
+    });
+  }
 
   if (dependencies.mutations !== undefined && dependencies.expectedOrigin !== undefined) {
     app.post("/api/v2/care-profiles/:careProfileId/timeline/days/:careDay/access",

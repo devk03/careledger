@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { cookieAuthenticator, issueCsrfToken, SESSION_COOKIE_NAME, sessionTokenSha256 } from "../src/auth/cookieSession.js";
+import { SqliteFamilyAccounts } from "../src/auth/familyAccounts.js";
 import { createHttpApp } from "../src/http/app.js";
 import { SqliteFamilyTimeline, IncompatibleFamilyTimelineDatabase } from "../src/storage/sqliteFamilyTimeline.js";
 import { SqliteFamilyMutations } from "../src/storage/sqliteFamilyMutations.js";
@@ -173,6 +174,97 @@ describe("fictional v7 family timeline", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       reader.close(); mutations.close(); writer.close();
+    }
+  });
+
+  it("provisions independent adult and child accounts with single-use expiring invitations", async () => {
+    const { path, writer } = database();
+    const secret = Buffer.alloc(32, 9);
+    const token = "o".repeat(43);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-invite', 'owner-a', ?, ?, 1, 100, 1000, 100)")
+      .run(sessionTokenSha256(token), secret);
+    const preflight = { ok: true as const, tokenSha256: sessionTokenSha256(token),
+      csrfToken: issueCsrfToken("session-invite", secret) };
+    const accounts = new SqliteFamilyAccounts(path);
+    const reader = new SqliteFamilyTimeline(path);
+    try {
+      const adultInvite = accounts.issueInvitation(preflight, "adult", 200);
+      const childInvite = accounts.issueInvitation(preflight, "child", 200);
+      if (!adultInvite.ok || !childInvite.ok) throw new Error("Expected fictional invitations");
+      const adult = await accounts.acceptInvitation({ token: adultInvite.value.token,
+        loginName: "Aunt.Example", displayName: "Fictional aunt", password: "a long fictional password", nowSeconds: 201 });
+      const child = await accounts.acceptInvitation({ token: childInvite.value.token,
+        loginName: "Young.Example", displayName: "Fictional child", password: "another fictional password", nowSeconds: 201 });
+      if (!adult.ok || !child.ok) throw new Error("Expected fictional accounts");
+      expect(adult.value.memberKind).toBe("adult");
+      expect(child.value.memberKind).toBe("child");
+      expect(adult.value.userId).not.toBe(child.value.userId);
+      expect(await reader.listApprovedDays({ householdId: "family-a", userId: adult.value.userId,
+        careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 })).toEqual([]);
+      expect(await accounts.acceptInvitation({ token: adultInvite.value.token,
+        loginName: "Other.Example", displayName: "Other", password: "a long fictional password", nowSeconds: 202 }))
+        .toEqual({ ok: false, error: "INVITATION_INVALID" });
+      expect(await accounts.login({ loginName: "aunt.example", password: "wrong fictional pass", nowSeconds: 203 }))
+        .toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+      const loggedIn = await accounts.login({ loginName: "aunt.example",
+        password: "a long fictional password", nowSeconds: 204 });
+      expect(loggedIn).toMatchObject({ ok: true, value: { userId: adult.value.userId } });
+      expect(accounts.logout({ ok: true, tokenSha256: sessionTokenSha256(adult.value.sessionToken),
+        csrfToken: adult.value.csrfToken }, 205)).toEqual({ ok: true, value: null });
+      expect((await reader.findByTokenSha256(sessionTokenSha256(adult.value.sessionToken)))?.revokedAt).toBe(205);
+      const expired = accounts.issueInvitation(preflight, "adult", 206);
+      if (!expired.ok) throw new Error("Expected expiring invitation");
+      expect(await accounts.acceptInvitation({ token: expired.value.token,
+        loginName: "Late.Example", displayName: "Late", password: "a long fictional password",
+        nowSeconds: expired.value.expiresAt })).toEqual({ ok: false, error: "INVITATION_INVALID" });
+    } finally { reader.close(); accounts.close(); writer.close(); }
+  });
+
+  it("serves invitation acceptance and individual login without exposing session tokens in JSON", async () => {
+    const { path, writer } = database();
+    const ownerToken = "o".repeat(43);
+    const secret = Buffer.alloc(32, 5);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-owner-http', 'owner-a', ?, ?, 1, 100, 4000000000, 100)")
+      .run(sessionTokenSha256(ownerToken), secret);
+    const reader = new SqliteFamilyTimeline(path);
+    const accounts = new SqliteFamilyAccounts(path);
+    const app = createHttpApp({ authenticate: cookieAuthenticator(reader), timeline: reader,
+      pages: reader, accounts, sessions: reader, expectedOrigin: "http://127.0.0.1:9999" });
+    const server = await new Promise<Server>((resolve) => {
+      const started = app.listen(0, "127.0.0.1", () => resolve(started));
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Test listener unavailable");
+    const base = `http://127.0.0.1:${address.port}/api/v2/auth`;
+    const common = { origin: "http://127.0.0.1:9999", "content-type": "application/json",
+      "sec-fetch-site": "same-origin" };
+    try {
+      const invited = await fetch(`${base}/invitations`, { method: "POST",
+        headers: { ...common, cookie: `${SESSION_COOKIE_NAME}=${ownerToken}`,
+          "x-csrf-token": issueCsrfToken("session-owner-http", secret) },
+        body: JSON.stringify({ memberKind: "adult" }) });
+      expect(invited.status).toBe(201);
+      const { token } = await invited.json() as { token: string };
+      const accepted = await fetch(`${base}/invitations/accept`, { method: "POST", headers: common,
+        body: JSON.stringify({ token, loginName: "Sibling.Example", displayName: "Fictional sibling",
+          password: "fictional secure password" }) });
+      expect(accepted.status).toBe(201);
+      expect(accepted.headers.get("set-cookie")).toContain(SESSION_COOKIE_NAME);
+      expect(JSON.stringify(await accepted.json())).not.toContain("sessionToken");
+      const login = await fetch(`${base}/login`, { method: "POST", headers: common,
+        body: JSON.stringify({ loginName: "sibling.example", password: "fictional secure password" }) });
+      expect(login.status).toBe(200);
+      expect(login.headers.get("set-cookie")).toContain("HttpOnly");
+      const loginBody = await login.json() as { userId: string; csrfToken: string };
+      expect(loginBody.userId).toBeTruthy();
+      expect(loginBody.csrfToken).toMatch(/^v1\./);
+      const denied = await fetch(`${base}/login`, { method: "POST",
+        headers: { ...common, origin: "http://evil.invalid" },
+        body: JSON.stringify({ loginName: "sibling.example", password: "fictional secure password" }) });
+      expect(denied.status).toBe(403);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      reader.close(); accounts.close(); writer.close();
     }
   });
 });
