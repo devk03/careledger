@@ -5,6 +5,8 @@ import Database from "better-sqlite3";
 
 import { issueCsrfToken, issueSessionToken, type MutationPreflight,
   type StoredSession, verifyStoredMutationSession } from "./cookieSession.js";
+import { BootstrapTokenStore } from "./bootstrapTokenStore.js";
+import { generateRecoveryCodes, verifyRecoveryCode } from "./recoveryCodes.js";
 import { IncompatibleFamilyTimelineDatabase, privateFile, verifySchema } from "../storage/sqliteFamilyTimeline.js";
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -26,9 +28,12 @@ type UserRow = { id: string; householdId: string; displayName: string;
 type InvitationRow = { id: string; householdId: string; memberKind: "adult" | "child";
   expiresAt: number; acceptedAt: number | null };
 type AuditRow = { event_hash: string };
+type RecoveryRow = { id: string; codeHash: string; batchId: string;
+  userId: string; householdId: string; displayName: string; authVersion: number };
 
 export type AccountError = "INVALID_INPUT" | "INVALID_CREDENTIALS" | "TRY_LATER" |
-  "INVITATION_INVALID" | "LOGIN_TAKEN" | "AUTH_REQUIRED" | "INVALID_CSRF" | "FORBIDDEN";
+  "INVITATION_INVALID" | "LOGIN_TAKEN" | "AUTH_REQUIRED" | "INVALID_CSRF" |
+  "FORBIDDEN" | "SETUP_COMPLETE" | "INVALID_SETUP";
 export type AccountResult<T> = { ok: true; value: T } | { ok: false; error: AccountError };
 export type IssuedLogin = { userId: string; displayName: string; role: "owner" | "caregiver";
   memberKind: "adult" | "child"; sessionToken: string; csrfToken: string; expiresAt: number };
@@ -57,6 +62,113 @@ export class SqliteFamilyAccounts {
   }
 
   close(): void { this.db.close(); }
+
+  isSetupComplete(): boolean {
+    return this.db.prepare<[], { setupCompletedAt: number | null }>(
+      "SELECT setup_completed_at setupCompletedAt FROM app_state WHERE singleton = 1",
+    ).get()?.setupCompletedAt !== null;
+  }
+
+  async setupOwner(input: { token: string; displayName: string; householdName: string;
+    password: string; bootstrap: BootstrapTokenStore; recoveryPepper: Uint8Array;
+    nowSeconds?: number }): Promise<AccountResult<IssuedLogin & { recoveryCodes: string[] }>> {
+    const nowSeconds = input.nowSeconds ?? now();
+    if (input.displayName.trim().length < 1 || input.displayName.length > 120 ||
+      input.householdName.trim().length < 1 || input.householdName.length > 120 ||
+      !validPassword(input.password) || input.recoveryPepper.byteLength < 32)
+      return { ok: false, error: "INVALID_INPUT" };
+    if (this.db.prepare<[], { setupCompletedAt: number | null }>(
+      "SELECT setup_completed_at setupCompletedAt FROM app_state WHERE singleton = 1",
+    ).get()?.setupCompletedAt !== null) return { ok: false, error: "SETUP_COMPLETE" };
+    if (!input.bootstrap.verify(input.token, nowSeconds)) return { ok: false, error: "INVALID_SETUP" };
+    const passwordHash = await hash(input.password, PASSWORD_OPTIONS);
+    const codes = generateRecoveryCodes(input.recoveryPepper);
+    const result = this.db.transaction((): AccountResult<IssuedLogin & { recoveryCodes: string[] }> => {
+      const state = this.db.prepare<[], { setupCompletedAt: number | null }>(
+        "SELECT setup_completed_at setupCompletedAt FROM app_state WHERE singleton = 1",
+      ).get();
+      if (!state || state.setupCompletedAt !== null || this.db.prepare(
+        "SELECT 1 FROM users WHERE role = 'owner' AND status = 'active'",
+      ).get()) return { ok: false, error: "SETUP_COMPLETE" };
+      if (!input.bootstrap.verify(input.token, nowSeconds)) return { ok: false, error: "INVALID_SETUP" };
+      const householdId = randomUUID();
+      const userId = randomUUID();
+      this.db.prepare("INSERT INTO households (singleton, id, display_name, created_at) " +
+        "VALUES (1, ?, ?, ?)").run(householdId, input.householdName.trim(), nowSeconds);
+      this.db.prepare("INSERT INTO users (id, household_id, login_name, login_name_normalized, " +
+        "display_name, role, status, password_hash, created_at, updated_at, password_changed_at, " +
+        "member_kind) VALUES (?, ?, 'owner', 'owner', ?, 'owner', 'active', ?, ?, ?, ?, 'adult')")
+        .run(userId, householdId, input.displayName.trim(), passwordHash,
+          nowSeconds, nowSeconds, nowSeconds);
+      const batchId = randomUUID();
+      const insertCode = this.db.prepare("INSERT INTO recovery_codes (id, user_id, batch_id, " +
+        "code_hmac, created_at) VALUES (?, ?, ?, ?, ?)");
+      for (const codeHash of codes.hashes)
+        insertCode.run(randomUUID(), userId, batchId, codeHash, nowSeconds);
+      const issued = this.insertSession(userId, 1, nowSeconds);
+      this.db.prepare("UPDATE app_state SET setup_completed_at = ?, active_household_id = ? " +
+        "WHERE singleton = 1 AND setup_completed_at IS NULL").run(nowSeconds, householdId);
+      this.audit(householdId, userId, "owner_setup", "user", userId, nowSeconds);
+      return { ok: true, value: { userId, displayName: input.displayName.trim(),
+        role: "owner", memberKind: "adult", ...issued, recoveryCodes: codes.plaintext } };
+    }).immediate();
+    if (result.ok) {
+      try { input.bootstrap.complete(); }
+      catch { /* The committed DB state still prevents a second setup. */ }
+    }
+    return result;
+  }
+
+  async recoverOwner(input: { code: string; newPassword: string;
+    recoveryPepper: Uint8Array; nowSeconds?: number }):
+    Promise<AccountResult<IssuedLogin & { recoveryCodes: string[] }>> {
+    const nowSeconds = input.nowSeconds ?? now();
+    if (!validPassword(input.newPassword) || input.recoveryPepper.byteLength < 32 ||
+      !/^[A-Za-z2-7]{4}(?:-[A-Za-z2-7]{4}){3}$/.test(input.code))
+      return { ok: false, error: "INVALID_INPUT" };
+    const rows = this.db.prepare<[], RecoveryRow>(
+      "SELECT rc.id, rc.code_hmac codeHash, rc.batch_id batchId, u.id userId, " +
+      "u.household_id householdId, u.display_name displayName, u.auth_version authVersion " +
+      "FROM recovery_codes rc JOIN users u ON u.id = rc.user_id " +
+      "WHERE rc.used_at IS NULL AND rc.revoked_at IS NULL " +
+      "AND u.role = 'owner' AND u.status = 'active'",
+    ).all();
+    const matched = rows.find((row) => verifyRecoveryCode(
+      input.code, row.codeHash, input.recoveryPepper));
+    if (!matched) return { ok: false, error: "INVALID_CREDENTIALS" };
+    const passwordHash = await hash(input.newPassword, PASSWORD_OPTIONS);
+    const replacements = generateRecoveryCodes(input.recoveryPepper);
+    return this.db.transaction((): AccountResult<IssuedLogin & { recoveryCodes: string[] }> => {
+      const current = this.db.prepare<[string, string], { authVersion: number }>(
+        "SELECT u.auth_version authVersion FROM recovery_codes rc " +
+        "JOIN users u ON u.id = rc.user_id WHERE rc.id = ? AND u.id = ? " +
+        "AND rc.used_at IS NULL AND rc.revoked_at IS NULL AND u.status = 'active'",
+      ).get(matched.id, matched.userId);
+      if (!current || current.authVersion !== matched.authVersion)
+        return { ok: false, error: "INVALID_CREDENTIALS" };
+      this.db.prepare("UPDATE recovery_codes SET used_at = ? WHERE id = ?")
+        .run(nowSeconds, matched.id);
+      this.db.prepare("UPDATE recovery_codes SET revoked_at = ? WHERE user_id = ? " +
+        "AND batch_id = ? AND revoked_at IS NULL").run(nowSeconds, matched.userId, matched.batchId);
+      this.db.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
+        .run(nowSeconds, matched.userId);
+      const newVersion = matched.authVersion + 1;
+      this.db.prepare("UPDATE users SET password_hash = ?, auth_version = ?, updated_at = ?, " +
+        "password_changed_at = ? WHERE id = ? AND status = 'active'")
+        .run(passwordHash, newVersion, nowSeconds, nowSeconds, matched.userId);
+      const batchId = randomUUID();
+      const insertCode = this.db.prepare("INSERT INTO recovery_codes (id, user_id, batch_id, " +
+        "code_hmac, created_at) VALUES (?, ?, ?, ?, ?)");
+      for (const codeHash of replacements.hashes)
+        insertCode.run(randomUUID(), matched.userId, batchId, codeHash, nowSeconds);
+      const issued = this.insertSession(matched.userId, newVersion, nowSeconds);
+      this.audit(matched.householdId, matched.userId,
+        "owner_recovery", "user", matched.userId, nowSeconds);
+      return { ok: true, value: { userId: matched.userId,
+        displayName: matched.displayName, role: "owner", memberKind: "adult",
+        ...issued, recoveryCodes: replacements.plaintext } };
+    }).immediate();
+  }
 
   issueInvitation(preflight: Extract<MutationPreflight, { ok: true }>,
     memberKind: "adult" | "child", nowSeconds = now()): AccountResult<{ token: string; expiresAt: number }> {

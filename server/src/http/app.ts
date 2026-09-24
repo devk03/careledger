@@ -2,6 +2,7 @@ import express, { type Request } from "express";
 
 import { issueCsrfToken, preflightCookieMutation, readCookieSession,
   sessionClearCookie, sessionSetCookie, type SessionRepository } from "../auth/cookieSession.js";
+import type { BootstrapTokenStore } from "../auth/bootstrapTokenStore.js";
 import type { SqliteFamilyAccounts } from "../auth/familyAccounts.js";
 import type { GrantResult, NoteProposalResult, NoteReviewResult } from "../storage/sqliteFamilyMutations.js";
 import {
@@ -63,6 +64,7 @@ export function createHttpApp(dependencies: {
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
   readiness?: () => boolean;
+  ownerSetup?: { bootstrap: BootstrapTokenStore; recoveryPepper: Uint8Array };
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -95,6 +97,55 @@ export function createHttpApp(dependencies: {
     const sameOrigin = (request: Request): boolean =>
       request.get("origin") === expectedOrigin &&
       [undefined, "same-origin"].includes(request.get("sec-fetch-site"));
+
+    if (dependencies.ownerSetup !== undefined) {
+      const ownerSetup = dependencies.ownerSetup;
+      app.get("/api/v2/auth/setup-status", (_request, response) => {
+        response.json({ setupRequired: !accounts.isSetupComplete() });
+      });
+      app.post("/api/v2/auth/setup", json, async (request, response) => {
+        if (!sameOrigin(request)) { response.status(403).json({ error: "ORIGIN_NOT_ALLOWED" }); return; }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const fields = body as Record<string, unknown>;
+        if (typeof fields.token !== "string" || typeof fields.displayName !== "string" ||
+          typeof fields.householdName !== "string" || typeof fields.password !== "string") {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const result = await accounts.setupOwner({ token: fields.token,
+          displayName: fields.displayName, householdName: fields.householdName,
+          password: fields.password, ...ownerSetup });
+        if (!result.ok) {
+          response.status(result.error === "SETUP_COMPLETE" ? 409 : 400).json({ error: result.error });
+          return;
+        }
+        response.setHeader("Set-Cookie", sessionSetCookie(result.value.sessionToken));
+        const { sessionToken: _secret, ...publicResult } = result.value;
+        response.status(201).json(publicResult);
+      });
+      app.post("/api/v2/auth/recover", json, async (request, response) => {
+        if (!sameOrigin(request)) { response.status(403).json({ error: "ORIGIN_NOT_ALLOWED" }); return; }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const fields = body as Record<string, unknown>;
+        if (typeof fields.code !== "string" || typeof fields.newPassword !== "string") {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const result = await accounts.recoverOwner({ code: fields.code,
+          newPassword: fields.newPassword, recoveryPepper: ownerSetup.recoveryPepper });
+        if (!result.ok) {
+          response.status(result.error === "INVALID_INPUT" ? 400 : 401).json({ error: result.error });
+          return;
+        }
+        response.setHeader("Set-Cookie", sessionSetCookie(result.value.sessionToken));
+        const { sessionToken: _secret, ...publicResult } = result.value;
+        response.json(publicResult);
+      });
+    }
 
     app.get("/api/v2/auth/session", async (request, response) => {
       const session = await readCookieSession(request, dependencies.sessions!);

@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { cookieAuthenticator, issueCsrfToken, SESSION_COOKIE_NAME, sessionTokenSha256 } from "../src/auth/cookieSession.js";
+import { BootstrapTokenStore } from "../src/auth/bootstrapTokenStore.js";
 import { SqliteFamilyAccounts } from "../src/auth/familyAccounts.js";
 import { createHttpApp } from "../src/http/app.js";
 import { SqliteFamilyTimeline, IncompatibleFamilyTimelineDatabase } from "../src/storage/sqliteFamilyTimeline.js";
@@ -28,7 +29,7 @@ const documentHash = "a".repeat(64);
 const pageText = "A fictional laboratory report with no real patient information.";
 const pageHash = createHash("sha256").update(pageText).digest("hex");
 
-function database(): { path: string; writer: Database.Database } {
+function emptyDatabase(): { path: string; writer: Database.Database } {
   const path = join(mkdtempSync(join(tmpdir(), "adeno-fictional-family-")), "case.sqlite");
   const writer = new Database(path);
   writer.pragma("foreign_keys = ON");
@@ -41,6 +42,12 @@ function database(): { path: string; writer: Database.Database } {
   }
   writer.pragma("application_id = 1129071687");
   writer.pragma("user_version = 7");
+  chmodSync(path, 0o600);
+  return { path, writer };
+}
+
+function database(): { path: string; writer: Database.Database } {
+  const { path, writer } = emptyDatabase();
   writer.prepare("INSERT INTO households (singleton, id, display_name, created_at) VALUES (1, 'family-a', 'Fictional family', 100)").run();
   for (const [id, role, kind] of [
     ["owner-a", "owner", "adult"], ["adult-a", "caregiver", "adult"],
@@ -64,11 +71,81 @@ function database(): { path: string; writer: Database.Database } {
   writer.prepare("INSERT INTO day_snapshot_entries (snapshot_id, position, placement_revision_id) VALUES ('snapshot-a', 0, 'placement-revision-a')").run();
   writer.prepare("INSERT INTO day_snapshot_entries (snapshot_id, position, note_revision_id) VALUES ('snapshot-a', 1, 'note-revision-a')").run();
   writer.prepare("INSERT INTO day_access_events (id, care_profile_id, care_day, subject_user_id, event_no, level, actor_user_id, occurred_at) VALUES ('grant-day-a', 'profile-a', '2030-04-12', 'adult-a', 1, 'view', 'owner-a', 102)").run();
-  chmodSync(path, 0o600);
   return { path, writer };
 }
 
 describe("fictional v7 family timeline", () => {
+  it("sets up the owner once with private bootstrap and recovery codes", async () => {
+    const { path, writer } = emptyDatabase();
+    const secretDirectory = mkdtempSync(join(tmpdir(), "adeno-fictional-bootstrap-"));
+    const bootstrap = new BootstrapTokenStore(secretDirectory);
+    const token = bootstrap.initialize();
+    if (!token) throw new Error("Expected fictional bootstrap token");
+    const accounts = new SqliteFamilyAccounts(path);
+    try {
+      const setup = await accounts.setupOwner({ token, displayName: "Fictional owner",
+        householdName: "Fictional household", password: "a fictional owner password",
+        bootstrap, recoveryPepper: Buffer.alloc(32, 7) });
+      if (!setup.ok) throw new Error(`Expected setup, received ${setup.error}`);
+      expect(setup.value.recoveryCodes).toHaveLength(10);
+      expect(bootstrap.verify(token)).toBe(false);
+      expect(await accounts.setupOwner({ token, displayName: "Second",
+        householdName: "Second", password: "a fictional owner password",
+        bootstrap, recoveryPepper: Buffer.alloc(32, 7) }))
+        .toEqual({ ok: false, error: "SETUP_COMPLETE" });
+      expect(await accounts.login({ loginName: "owner", password: "a fictional owner password" }))
+        .toMatchObject({ ok: true, value: { userId: setup.value.userId, role: "owner" } });
+      const recovered = await accounts.recoverOwner({ code: setup.value.recoveryCodes[0]!,
+        newPassword: "a different fictional password", recoveryPepper: Buffer.alloc(32, 7) });
+      if (!recovered.ok) throw new Error("Expected fictional owner recovery");
+      expect(recovered.value.recoveryCodes).toHaveLength(10);
+      expect(await accounts.recoverOwner({ code: setup.value.recoveryCodes[0]!,
+        newPassword: "another fictional password", recoveryPepper: Buffer.alloc(32, 7) }))
+        .toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+      expect(await accounts.login({ loginName: "owner", password: "a fictional owner password" }))
+        .toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+      expect(await accounts.login({ loginName: "owner", password: "a different fictional password" }))
+        .toMatchObject({ ok: true, value: { userId: setup.value.userId } });
+      const priorSession = writer.prepare("SELECT revoked_at revokedAt FROM sessions WHERE token_sha256 = ?")
+        .get(sessionTokenSha256(setup.value.sessionToken)) as { revokedAt: number | null };
+      expect(priorSession.revokedAt).not.toBeNull();
+    } finally { accounts.close(); writer.close(); }
+  });
+  it("keeps the bootstrap secret out of web JSON while permitting local owner setup", async () => {
+    const { path, writer } = emptyDatabase();
+    const bootstrap = new BootstrapTokenStore(mkdtempSync(join(tmpdir(), "adeno-fictional-setup-http-")));
+    const token = bootstrap.initialize();
+    if (!token) throw new Error("Expected fictional token");
+    const accounts = new SqliteFamilyAccounts(path);
+    const reader = new SqliteFamilyTimeline(path);
+    const app = createHttpApp({ authenticate: cookieAuthenticator(reader), timeline: reader,
+      pages: reader, accounts, sessions: reader,
+      ownerSetup: { bootstrap, recoveryPepper: Buffer.alloc(32, 7) },
+      expectedOrigin: "http://127.0.0.1:9999", readiness: () => reader.ready() });
+    const server = await new Promise<Server>((resolve) => {
+      const started = app.listen(0, "127.0.0.1", () => resolve(started));
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Test listener unavailable");
+    const base = `http://127.0.0.1:${address.port}`;
+    try {
+      expect((await (await fetch(`${base}/api/v2/auth/setup-status`)).json()).setupRequired).toBe(true);
+      expect((await (await fetch(`${base}/health/ready`)).json()).status).toBe("ready");
+      const response = await fetch(`${base}/api/v2/auth/setup`, { method: "POST",
+        headers: { origin: "http://127.0.0.1:9999", "content-type": "application/json" },
+        body: JSON.stringify({ token, displayName: "Fictional owner",
+          householdName: "Fictional family", password: "fictional owner password" }) });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { recoveryCodes: string[] };
+      expect(body.recoveryCodes).toHaveLength(10);
+      expect(JSON.stringify(body)).not.toContain(token);
+      expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+      expect((await (await fetch(`${base}/api/v2/auth/setup-status`)).json()).setupRequired).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      reader.close(); accounts.close(); writer.close();
+    }
+  });
   it("separates day access from original-source access and checks revocations afresh", async () => {
     const { path, writer } = database();
     const reader = new SqliteFamilyTimeline(path);
