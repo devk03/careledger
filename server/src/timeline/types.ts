@@ -46,3 +46,13 @@ export interface PendingReviewRepository {
     householdId: string; userId: string; careProfileId: string;
   }): Promise<PendingReviewHint[]>;
 }
+
+export type DayVersion = { revision: number; publishedAt: string;
+  publisherUserId: string; reason: string | null; contentSha256: string };
+
+export interface DayVersionRepository {
+  listDayVersions(input: { householdId: string; userId: string;
+    careProfileId: string; careDay: ISODate }): Promise<DayVersion[]>;
+  readDayVersion(input: { householdId: string; userId: string;
+    careProfileId: string; careDay: ISODate; revision: number }): Promise<TimelineDay | null>;
+}

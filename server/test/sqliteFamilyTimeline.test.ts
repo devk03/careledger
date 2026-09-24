@@ -331,6 +331,14 @@ describe("fictional v7 family timeline", () => {
         "Fictional family note.", "Fictional child observation.",
       ]);
       expect(published?.revision).toBe(2);
+      expect((await reader.listDayVersions({ householdId: "family-a", userId: "owner-a",
+        careProfileId: "profile-a", careDay: "2030-04-12" })).map((version) => version.revision))
+        .toEqual([2, 1]);
+      expect((await reader.readDayVersion({ householdId: "family-a", userId: "owner-a",
+        careProfileId: "profile-a", careDay: "2030-04-12", revision: 1 }))?.statements)
+        .toHaveLength(1);
+      expect(await reader.readDayVersion({ householdId: "family-a", userId: "child-a",
+        careProfileId: "profile-a", careDay: "2030-04-12", revision: 1 })).toBeNull();
       expect((writer.prepare("SELECT count(*) n FROM review_outbox_events WHERE kind = 'resolved'").get() as { n: number }).n).toBe(1);
       expect(await reader.listPendingChildReviews({ householdId: "family-a",
         userId: "owner-a", careProfileId: "profile-a" })).toEqual([]);

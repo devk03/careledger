@@ -3,7 +3,8 @@ import { lstatSync } from "node:fs";
 
 import Database from "better-sqlite3";
 
-import type { ApprovedPageRepository, ISODate, PendingReviewHint, PendingReviewRepository,
+import type { ApprovedPageRepository, DayVersion, DayVersionRepository, ISODate,
+  PendingReviewHint, PendingReviewRepository,
   StoredPageChunk, TimelineDay, TimelineRepository } from "../timeline/types.js";
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
 
@@ -46,7 +47,7 @@ export class IncompatibleFamilyTimelineDatabase extends Error {
  * recheck user status and current grants, including after MCP connection setup.
  */
 export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRepository,
-  PendingReviewRepository, SessionRepository {
+  PendingReviewRepository, DayVersionRepository, SessionRepository {
   private readonly db: Database.Database;
 
   constructor(path: string) {
@@ -216,6 +217,44 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     ).all(input.userId, input.householdId, input.careProfileId);
     return rows.map((row) => ({ id: row.id, targetCareDay: row.targetCareDay,
       createdAt: new Date(row.createdAt * 1000).toISOString() }));
+  }
+
+  async listDayVersions(input: { householdId: string; userId: string;
+    careProfileId: string; careDay: ISODate }): Promise<DayVersion[]> {
+    const rows = this.db.prepare<[string, string, string, string], { revision: number;
+      publishedAt: number; publisherUserId: string; reason: string | null;
+      contentSha256: string }>(
+      "SELECT s.revision_no revision, s.published_at publishedAt, " +
+      "s.published_by publisherUserId, s.reason, s.content_sha256 contentSha256 " +
+      "FROM day_nodes n JOIN care_profiles p ON p.id = n.care_profile_id AND p.archived_at IS NULL " +
+      "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
+      "JOIN day_snapshots s ON s.day_node_id = n.id " +
+      "WHERE p.household_id = ? AND p.id = ? AND n.care_day = ? " +
+      "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access a " +
+      "WHERE a.care_profile_id = p.id AND a.care_day = n.care_day AND a.subject_user_id = u.id)) " +
+      "ORDER BY s.revision_no DESC",
+    ).all(input.userId, input.householdId, input.careProfileId, input.careDay);
+    return rows.map((row) => ({ revision: row.revision,
+      publishedAt: new Date(row.publishedAt * 1000).toISOString(),
+      publisherUserId: row.publisherUserId, reason: row.reason,
+      contentSha256: row.contentSha256 }));
+  }
+
+  async readDayVersion(input: { householdId: string; userId: string;
+    careProfileId: string; careDay: ISODate; revision: number }): Promise<TimelineDay | null> {
+    if (!Number.isSafeInteger(input.revision) || input.revision < 1) return null;
+    return this.db.transaction(() => {
+      const row = this.db.prepare<[string, string, string, string, number], DayRow>(
+        "SELECT n.id, n.care_day day, s.revision_no revision, s.id snapshotId " +
+        "FROM day_nodes n JOIN care_profiles p ON p.id = n.care_profile_id AND p.archived_at IS NULL " +
+        "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
+        "JOIN day_snapshots s ON s.day_node_id = n.id " +
+        "WHERE p.household_id = ? AND p.id = ? AND n.care_day = ? AND s.revision_no = ? " +
+        "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access a " +
+        "WHERE a.care_profile_id = p.id AND a.care_day = n.care_day AND a.subject_user_id = u.id))",
+      ).get(input.userId, input.householdId, input.careProfileId, input.careDay, input.revision);
+      return row ? this.readDay(row, input) : null;
+    }).deferred();
   }
 }
 

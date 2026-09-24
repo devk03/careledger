@@ -8,6 +8,7 @@ import {
   getHistoryThroughDay,
   InvalidTimelineDate,
   listTimelineDays,
+  parseISODate,
   TimelineAccessDenied,
 } from "../timeline/history.js";
 import {
@@ -15,7 +16,7 @@ import {
   InvalidPageRequest,
   SourcePageNotFound,
 } from "../timeline/sourcePage.js";
-import type { ApprovedPageRepository, AuthorizedScope, PendingReviewRepository,
+import type { ApprovedPageRepository, AuthorizedScope, DayVersionRepository, PendingReviewRepository,
   TimelineRepository } from "../timeline/types.js";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthorizedScope | null>;
@@ -58,6 +59,7 @@ export function createHttpApp(dependencies: {
   accounts?: SqliteFamilyAccounts;
   sessions?: SessionRepository;
   reviews?: PendingReviewRepository;
+  versions?: DayVersionRepository;
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -384,6 +386,39 @@ export function createHttpApp(dependencies: {
       });
       response.json({ pending: hints });
     });
+  }
+
+  if (dependencies.versions !== undefined) {
+    app.get("/api/v2/care-profiles/:careProfileId/timeline/days/:careDay/versions",
+      async (request, response) => {
+        const scope = await dependencies.authenticate(request);
+        if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+        try { parseISODate(request.params.careDay); }
+        catch { response.status(400).json({ error: "INVALID_QUERY" }); return; }
+        const versions = await dependencies.versions!.listDayVersions({
+          householdId: scope.householdId, userId: scope.userId,
+          careProfileId: request.params.careProfileId, careDay: request.params.careDay,
+        });
+        if (versions.length === 0) { response.status(404).json({ error: "NOT_FOUND" }); return; }
+        response.json({ versions });
+      });
+    app.get("/api/v2/care-profiles/:careProfileId/timeline/days/:careDay/versions/:revision",
+      async (request, response) => {
+        const scope = await dependencies.authenticate(request);
+        if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+        try { parseISODate(request.params.careDay); }
+        catch { response.status(400).json({ error: "INVALID_QUERY" }); return; }
+        if (!/^\d+$/.test(request.params.revision)) {
+          response.status(400).json({ error: "INVALID_QUERY" }); return;
+        }
+        const version = await dependencies.versions!.readDayVersion({
+          householdId: scope.householdId, userId: scope.userId,
+          careProfileId: request.params.careProfileId, careDay: request.params.careDay,
+          revision: Number(request.params.revision),
+        });
+        if (!version) { response.status(404).json({ error: "NOT_FOUND" }); return; }
+        response.json(version);
+      });
   }
 
   app.get("/api/v2/care-profiles/:careProfileId/documents/:documentId/pages/:pageNumber", async (request, response) => {
