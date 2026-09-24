@@ -17,7 +17,7 @@ export interface OpenRouterBrowserCredential {
 
 export class OpenRouterOAuthError extends Error {
   constructor() {
-    super("Adeno could not securely connect explanations. Please try again.");
+    super("adeno could not securely connect explanations. Please try again.");
     this.name = "OpenRouterOAuthError";
   }
 }

@@ -1,6 +1,8 @@
 # Managed edition: end-to-end encryption boundary
 
-Product update (2026-09-07): Adeno is hosted first, with optional open-source self-hosting. The caregiver-owned OAuth and separate hosting-fee approach below is an earlier implementation proposal, now a fallback. The primary goal is simple hosted signup and operator-managed AI access with transparent cost recovery, subject to the unchanged E2EE requirements. Follow `research-hosting-plan.md` for the current billing and private-inference launch gates; do not treat this earlier proposal as a requirement for caregivers to open a provider account.
+Direction reaffirmed 2026-09-22: the maintainer chose to retain family-controlled encryption even if this delays private-record access from cloud-hosted MCP clients. See the [MCP-first product plan](mcp-first-product.md) for the local-companion prototype and the unresolved web-client boundary.
+
+Historical product update (2026-09-07): hosted use and optional self-hosting were planned with operator-managed inference. The [MCP-first plan](mcp-first-product.md) now makes a caregiver's compatible AI client the primary conversation surface. The caregiver-owned OAuth and separate hosting-fee approach below remains an earlier implementation proposal; do not treat it as a requirement for caregivers to open a provider API account. The E2EE boundary in this file remains binding.
 
 Adeno has one open-source codebase with two operating modes:
 

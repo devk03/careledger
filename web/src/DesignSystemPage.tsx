@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowRight, Check, Plus } from "lucide-react";
 import { AppHeader, Badge, Button, ButtonLink, Field, Notice, Select, Textarea } from "./ui";
+import { DayTimeline } from "./DayTimeline";
 
 export function DesignSystemPage() {
   const [note, setNote] = useState("");
@@ -13,7 +14,7 @@ export function DesignSystemPage() {
       <header>
         <Badge>Local design preview</Badge>
         <h1>One calm, familiar language.</h1>
-        <p>The same controls, spacing and feedback everywhere in Adeno. Examples below are fictional and stay in this tab. No records are loaded and no AI calls are made.</p>
+        <p>The same controls, spacing and feedback everywhere in adeno. Examples below are fictional and stay in this tab. No records are loaded and no AI calls are made.</p>
         <nav className="ui-preview-nav" aria-label="Preview pages">
           <a href="/setup">Setup</a><a href="/login">Sign in</a><a href="/records">Records</a>
           <a href="/workspace">Care dashboard</a><a href="/backup">Backup</a>
@@ -21,7 +22,7 @@ export function DesignSystemPage() {
       </header>
       <section className="ui-gallery-section" aria-labelledby="foundation-title">
         <h2 id="foundation-title">Warm paper. Clear hierarchy.</h2>
-        <p>Geist for reading and controls; Fraunces for the Adeno wordmark. Coral points to an action, not a medical conclusion.</p>
+        <p>Geist for reading and controls; Fraunces for the adeno wordmark. Coral points to an action, not a medical conclusion.</p>
         <div className="ui-gallery-grid">{["paper", "raised", "ink", "accent"].map(tone =>
           <figure key={tone}><div className={`ui-swatch ui-swatch-${tone}`} /><figcaption>{tone}</figcaption></figure>
         )}</div>
@@ -63,6 +64,27 @@ export function DesignSystemPage() {
         <Notice tone="info">SYNTHETIC TEST RECORD — NOT A REAL PATIENT. Demo appointment: 12 April 2030. Time zone not supplied.</Notice>
         <Notice>Example error: The sample file could not be read. Choose a clearer copy and try again.</Notice>
         <Notice tone="success">Example success: The sample note was saved. This does not confirm a medical finding.</Notice>
+      </section>
+      <section className="ui-gallery-section" aria-labelledby="timeline-preview-title">
+        <h2 id="timeline-preview-title">A day can hold more than one file</h2>
+        <p>Fictional layout example only. These files do not exist and nothing here is saved.</p>
+        <DayTimeline days={[
+          {
+            id: "example-day-one",
+            day: "2030-04-12",
+            files: [
+              { id: "example-file-one", name: "fictional-visit.pdf" },
+              { id: "example-file-two", name: "fictional-lab.pdf" },
+            ],
+            notes: [{ id: "example-note", text: "Family wrote down questions after the sample visit.", author: "Example adult" }],
+          },
+          {
+            id: "example-day-two",
+            day: "2030-04-09",
+            files: [{ id: "example-file-three", name: "fictional-referral.pdf" }],
+            notes: [],
+          },
+        ]} undatedCount={1} />
       </section>
     </main>
   </>;

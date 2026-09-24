@@ -26,7 +26,7 @@ export function BackupPage() {
         if (!cancelled) setSession(value);
       })
       .catch(() => {
-        if (!cancelled) setError("Adeno could not verify the owner session.");
+        if (!cancelled) setError("adeno could not verify the owner session.");
       });
     return () => {
       cancelled = true;
@@ -57,7 +57,7 @@ export function BackupPage() {
         setError(
           result.error === "INVALID_CREDENTIALS"
             ? "The account password was not correct. No backup was created."
-            : "Adeno could not create a verified backup.",
+            : "adeno could not create a verified backup.",
         );
         return;
       }
@@ -73,7 +73,7 @@ export function BackupPage() {
       setConfirmation("");
       setComplete(true);
     } catch {
-      setError("Adeno could not create the download. No live records were changed.");
+      setError("adeno could not create the download. No live records were changed.");
     } finally {
       setWorking(false);
     }
@@ -98,7 +98,7 @@ export function BackupPage() {
           <p className="section-note">Encrypted recovery copy</p>
           <h1>Make a backup you can actually restore.</h1>
           <p>
-            Adeno will snapshot the database, verify every original file, include the recovery
+            adeno will snapshot the database, verify every original file, include the recovery
             secret, and encrypt the complete archive before download.
           </p>
           <div className="backup-warning">
@@ -108,7 +108,7 @@ export function BackupPage() {
         </section>
         <form className="backup-form" onSubmit={exportBackup}>
           <div>
-            <label htmlFor="backup-account-password">Adeno account password</label>
+            <label htmlFor="backup-account-password">adeno account password</label>
             <Input id="backup-account-password" type="password" autoComplete="current-password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} required />
             <small>This confirms that the signed-in owner requested the export.</small>
           </div>
@@ -120,7 +120,7 @@ export function BackupPage() {
           <div>
             <label htmlFor="backup-confirmation">Repeat backup passphrase</label>
             <Input id="backup-confirmation" type="password" autoComplete="new-password" minLength={12} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
-            <small>{confirmation && confirmation !== passphrase ? "The two backup passphrases do not match." : "Adeno never stores this passphrase."}</small>
+            <small>{confirmation && confirmation !== passphrase ? "The two backup passphrases do not match." : "adeno never stores this passphrase."}</small>
           </div>
           <Button className="primary-button backup-submit" type="submit" disabled={working || passphrase.length < 12 || passphrase !== confirmation}>
             <Download aria-hidden="true" size={18} />

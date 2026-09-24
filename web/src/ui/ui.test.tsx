@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Button, ButtonLink, Field, Notice } from "./index";
 
-describe("Adeno shared controls", () => {
+describe("adeno shared controls", () => {
   it("defaults actions to non-submit buttons and blocks duplicate loading clicks", () => {
     const action = vi.fn();
     render(<Button loading onClick={action}>Saving note…</Button>);

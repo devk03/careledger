@@ -20,8 +20,8 @@ export function GitHubLink() {
   }, []);
   return <a className="github-link" href="https://github.com/devk03/careledger"
     target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"
-    aria-label={`Adeno on GitHub${stars === null ? "" : `, ${stars} stars${stale ? ", last known count" : ""}`}`}
-    title={stars === null ? "View Adeno's open-source repository" : stale ? "Last known GitHub star count; refresh temporarily unavailable" : "GitHub stars · refreshed at most hourly"}>
+    aria-label={`adeno on GitHub${stars === null ? "" : `, ${stars} stars${stale ? ", last known count" : ""}`}`}
+    title={stars === null ? "View adeno's open-source repository" : stale ? "Last known GitHub star count; refresh temporarily unavailable" : "GitHub stars · refreshed at most hourly"}>
     <Github size={17} aria-hidden="true" /><span>GitHub</span>
     {stars !== null && <span className="github-stars"><Star size={14} aria-hidden="true" />{stars.toLocaleString("en-US")}{stale ? "*" : ""}</span>}
   </a>;

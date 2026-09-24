@@ -1,26 +1,26 @@
-# Adeno
+# adeno
 
-Adeno is an open-source health workspace designed primarily as a hosted service for adults coordinating a parent or loved one's care.
+adeno is an open-source family health workspace centered on a day-by-day record timeline. Caregivers attach multiple files and notes to a care day through the website, then let their preferred agent read the authorized history through MCP. The core product stores and retrieves source material; it does not need a built-in analysis model.
 
-The intended core experience is: add records and notes after a visit or treatment, review a source-linked family update, and let each adult family member sign in to see the same approved update and their own responsibilities. Caregivers should not need to deploy software, obtain API keys, or choose models. Self-hosting remains an optional path from the same open-source codebase. The long-term funding goal is community-supported access with strictly metered operating costs, not profit.
+The intended core experience is: add records and notes after a visit or treatment, place them on the right day, and let each adult family member ask their chosen AI client about the same approved source material. The agent traverses the current record history backward from a selected day at query time; adeno does not cache an AI-generated consensus. adeno's connection should use individual sign-in rather than asking ordinary users to copy an adeno API key. The AI client has its own account and access terms. Self-hosting remains an optional path from the same open-source codebase. The long-term funding goal is community-supported access with strictly metered operating costs, not profit.
 
-The hosted service is under development. Today's runnable build is a local community preview; public signup, individual family access, versioned family updates, managed billing, research mode and complete E2EE integration are not yet available. The [core platform plan](docs/core-platform.md) controls the next build scope. Outbound email, WhatsApp and push are deferred.
+The hosted service is under development. Today's runnable Docker build is a local community preview on the existing Python backend; it does not have a production MCP endpoint, public signup, individual family access, the new multi-file day timeline, managed billing or complete E2EE integration. A separate TypeScript/Express pilot has tested family accounts, scoped day/source reads, grants, note review, and versioned day snapshots against fictional data. Its API runner is loopback-only and requires a separately prepared v7 database; it is not the Docker runtime or a finished web experience. The [pilot status and release gates](docs/all-typescript-family-pilot.md), [day timeline plan](docs/treatment-timeline-product.md), and [agent connector plan](docs/mcp-first-product.md) describe what remains. Outbound email, WhatsApp and push are deferred.
 
-Upload medical records, verify extracted facts against the original page, understand unfamiliar language, prepare questions for clinicians, and track what happens next.
+Store medical records by care day, preserve the originals and provenance, and let an authorized agent or family member traverse the source-linked history.
 
 ## Product promise
 
 - Originals remain immutable in the installation's storage; current server storage is not end-to-end encrypted.
 - Every important fact points to a document and page.
-- AI output starts as a draft and never silently becomes a medical fact.
+- AI extraction or summaries are optional derived material and never silently become a medical fact.
 - Patient evidence, clinician interpretation, family observations, and general research remain visibly separate.
-- The interface explains what is known, what it may mean, what remains unknown, and the next action.
+- The interface shows what is recorded, which files support it, and what remains undated or uncertain. It does not generate care advice.
 
 ## Run the local preview (optional)
 
 Install and open [Docker Desktop](https://www.docker.com/products/docker-desktop/) first. It includes Docker Compose; you do not need Python, Node.js, or a separate database.
 
-**1. Download Adeno.** With Git installed:
+**1. Download adeno.** With Git installed:
 
 ```bash
 git clone https://github.com/devk03/careledger.git adeno
@@ -57,7 +57,7 @@ docker compose exec careledger python -m app.setup_link
 
 The first build downloads dependencies and may take several minutes. Open the full setup URL printed by the second command, create your account, and save the recovery codes. After setup, use [localhost:8080](http://localhost:8080).
 
-The `careledger` command/service name is retained internally for compatibility; the application is Adeno. The setup link is private and expires after one hour. Run the second command again to obtain a fresh link if needed.
+The `careledger` command/service name is retained internally for compatibility; the application is adeno. The setup link is private and expires after one hour. Run the second command again to obtain a fresh link if needed.
 
 **Everyday commands**
 
@@ -71,11 +71,11 @@ Your records and account live in the persistent Docker volume, so stopping or re
 
 Keys stay on your local server and are excluded from Git and Docker build context. Never paste `.env`, setup links, or recovery codes into issues. The local edition is not end-to-end encrypted storage: your computer's server can read its records, and approved AI requests send selected content to the provider. Only your computer can connect to the default local port.
 
-No hosted database, object store, analytics account, email provider, or authentication service is required. Record storage, fingerprints, source viewing, and human organization work with AI disabled. When a caregiver adds their own OpenRouter or OpenAI key, Adeno asks for explicit confirmation before sending each original outside the deployment.
+No hosted database, object store, analytics account, email provider, or authentication service is required. Record storage, fingerprints, source viewing, and human organization work with AI disabled. When a caregiver adds their own OpenRouter or OpenAI key, adeno asks for explicit confirmation before sending each original outside the deployment.
 
 ## Important limits
 
-Adeno organizes evidence and drafts questions. It does not diagnose, prescribe, stage cancer, or replace clinicians.
+adeno organizes evidence and drafts questions. It does not diagnose, prescribe, stage cancer, or replace clinicians.
 
 This project is not HIPAA-compliant out of the box and does not provide a Business Associate Agreement. Compliance depends on the operator's deployment, contracts, policies, and use. Supplying an API key does not create a BAA or Zero Data Retention configuration.
 
@@ -87,6 +87,6 @@ The isolated repository, caregiver interface, persistent owner authentication, f
 
 The responsive Chromium/axe suite covers 320, 375, 414, 768 and 1280 CSS pixels. GitHub Actions runs only when a maintainer starts it manually; pushing changes does not trigger CI. The Docker runtime is configured with a read-only root filesystem and a memory-backed `/tmp`.
 
-Dedicated corrected-claim editing, local PDF text/OCR rendering, de-identified outside research, invitations, live restore switching, deletion/retention controls, and release publication remain active build work. Ollama is not yet presented as equivalent to the hosted Responses path because its supported request fields differ; local-model support will use an explicit adapter and compatibility tests.
+Dedicated corrected-claim editing, local PDF text/OCR rendering, de-identified outside research, recipient-bound invitations, live restore switching, deletion/retention controls, and release publication remain active build work. The TypeScript pilot's single-use bearer invitations are not yet wired into the Docker web app. Ollama is not yet presented as equivalent to the hosted Responses path because its supported request fields differ; local-model support will use an explicit adapter and compatibility tests.
 
 See [PLAN.md](PLAN.md), [docs/product.md](docs/product.md), [docs/architecture.md](docs/architecture.md), [docs/ingestion-security.md](docs/ingestion-security.md), [docs/openai-boundary.md](docs/openai-boundary.md), [docs/backup-restore.md](docs/backup-restore.md), [docs/deployment.md](docs/deployment.md), [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md), and [SECURITY.md](SECURITY.md).

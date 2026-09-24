@@ -1,5 +1,7 @@
 # Research, hosting, and API security plan
 
+Historical provider and hosting research. The [2026-09-22 MCP-first product plan](mcp-first-product.md) supersedes the earlier assumption that adeno pays for most chat inference. Prices and product availability below were checked in September 2026 and need revalidation before use. The encryption and spending gates remain in force for any adeno-operated processing.
+
 Status: proposed implementation plan, reviewed 2026-09-07. No hosted services or paid research calls were provisioned by this planning task. Current local testing uses the community edition; managed E2EE, research chat, shared family accounts, and paid inference are not yet integrated.
 
 ## Decisions
@@ -17,7 +19,7 @@ Public OpenRouter catalog checked 2026-09-07 (discovery only, no paid inference)
 | `qwen/qwen3.5-flash-02-23` | $0.065 | $0.26 | Inexpensive text/image candidate |
 | `google/gemma-3-27b-it` | $0.08 | $0.45 | Alternative text/image candidate |
 
-Listed prices are discovery prices, not guaranteed prices for an endpoint meeting the required privacy policy. Availability, modality, tool/structured-output support and endpoint policies must be verified before enablement. No candidate has yet passed Adeno's medical evaluation. Keep the current configured model unchanged until those evaluations pass.
+Listed prices are discovery prices, not guaranteed prices for an endpoint meeting the required privacy policy. Availability, modality, tool/structured-output support and endpoint policies must be verified before enablement. No candidate has yet passed adeno's medical evaluation. Keep the current configured model unchanged until those evaluations pass.
 
 At the listed Qwen rates, 10,000 input tokens plus 2,000 billed output tokens would cost $0.00117; 1,000 such requests would be $1.17 before search, image-accounting differences, additional reasoning tokens, retries, gateway credit fees and hosting. This is an arithmetic illustration, not a promised per-report price.
 
@@ -27,7 +29,7 @@ Sources: [live model catalog](https://openrouter.ai/api/v1/models), [free-model 
 
 Read-only provisioning check: Railway CLI is installed, but this checkout has no linked Railway project. The optional Stripe Projects catalog plugin was unavailable; no service was provisioned through it. No hosted deployment or funded inference was started during this decision update.
 
-Product update, 2026-09-07: the name is Adeno and the primary launch is a hosted service for nontechnical caregivers. Managed signup, family permissions and operator-managed AI billing take priority. Self-hosting remains available from the same open-source codebase as an optional advanced path. The Docker pilot below is an implementation stepping stone; it must not become the default caregiver onboarding. Earlier caregiver-funded OAuth remains a technical fallback, not the primary product experience. Hosted billing must still meet the existing E2EE and credential-isolation requirements before launch.
+Product update, 2026-09-07: the name is adeno and the primary launch is a hosted service for nontechnical caregivers. Managed signup, family permissions and operator-managed AI billing take priority. Self-hosting remains available from the same open-source codebase as an optional advanced path. The Docker pilot below is an implementation stepping stone; it must not become the default caregiver onboarding. Earlier caregiver-funded OAuth remains a technical fallback, not the primary product experience. Hosted billing must still meet the existing E2EE and credential-isolation requirements before launch.
 
 - Keep one open-source codebase and the portable Docker installation.
 - Start research with medical databases plus one configurable OpenRouter search engine. Do not pay for redundant search integrations on every question.
@@ -92,7 +94,7 @@ Cloudflare has runtime secret bindings and CLI secret installation; use secrets 
 
 ## Hosting choice
 
-Cloudflare CLI deployment is supported with Wrangler. The issue is compatibility, not CLI availability. Current Adeno relies on SQLite, originals, local generated secrets, backups, native Python packages, and in-process background workers. Cloudflare Containers explicitly has ephemeral disk, including after platform restarts; an unchanged container would not preserve `/data` reliably. Python Workers supports FastAPI, but storage, package support and job execution still need adaptation.
+Cloudflare CLI deployment is supported with Wrangler. The issue is compatibility, not CLI availability. Current adeno relies on SQLite, originals, local generated secrets, backups, native Python packages, and in-process background workers. Cloudflare Containers explicitly has ephemeral disk, including after platform restarts; an unchanged container would not preserve `/data` reliably. Python Workers supports FastAPI, but storage, package support and job execution still need adaptation.
 
 Recommended first pilot: one Railway Docker service, one durable `/data` volume, one replica, readiness check, HTTPS and backups. Its Hobby plan has a $5 monthly floor including $5 usage; actual resource consumption can exceed this. Use a provisional $15/month pilot infrastructure allowance, measured and revised before launch, rather than promising a fixed bill. Cloudflare DNS/TLS is optional; avoid extra proxy layers until their benefit is demonstrated. A shared public deployment is blocked by the current one-household database design and unfinished managed mode.
 

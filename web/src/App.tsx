@@ -30,7 +30,7 @@ const journey = [
   {
     number: "01",
     title: "Add the records",
-    body: "Upload PDFs or photos. Adeno keeps the original files unchanged and checks for duplicates.",
+    body: "Upload PDFs or photos. adeno keeps the original files unchanged and checks for duplicates.",
   },
   {
     number: "02",
@@ -44,7 +44,7 @@ const journey = [
   },
 ];
 
-function LandingPage() {
+export function LandingPage() {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
 
   useEffect(() => {
@@ -59,8 +59,8 @@ function LandingPage() {
   return (
     <div className="app-shell welcome-page">
       <header className="welcome-topbar">
-        <a className="wordmark" href="#top" aria-label="Adeno home">
-          Adeno
+        <a className="wordmark" href="#top" aria-label="adeno home">
+          adeno
         </a>
         <nav aria-label="Welcome navigation">
           <a href="#how-it-works">How it works</a>
@@ -75,7 +75,7 @@ function LandingPage() {
             <p className="context-line">For the people caring for someone.</p>
             <h1 id="welcome-title">Know what is happening. Know what to ask next.</h1>
             <p className="lede">
-              Adeno turns a pile of health records into a source-linked timeline, gentle
+              adeno turns a pile of health records into a source-linked timeline, gentle
               explanations, and a clear list for the next doctor visit.
             </p>
             <div className="welcome-actions">

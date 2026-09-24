@@ -1,0 +1,30 @@
+{
+  "name": "@adeno/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json",
+    "start:local-pilot": "node dist/runLocalPilot.js",
+    "stress:http": "npm run build && node stress/http.mjs",
+    "stress:ingest": "npm run build && node stress/ingest.mjs"
+  },
+  "dependencies": {
+    "@adeno/contracts": "file:../packages/contracts",
+    "@modelcontextprotocol/server": "2.0.0",
+    "@node-rs/argon2": "2.2.1",
+    "better-sqlite3": "13.0.3",
+    "express": "5.2.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.1",
+    "typescript": "5.8.3",
+    "vitest": "3.2.7"
+  }
+}

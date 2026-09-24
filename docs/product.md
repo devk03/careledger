@@ -1,20 +1,24 @@
 # Product Brief
 
-Current build priority: [core platform](core-platform.md). Outbound notifications and communication integrations are explicitly deferred; approved updates are read inside the family portal first.
+Current product center (2026-09-23): [The sparse day-by-day timeline](treatment-timeline-product.md) is the primary web interface and shared source of truth. Members attach files and notes to care days; their agents can query approved source material through MCP. Built-in analysis, generated updates and broad research are optional later work. The broader ideas below are context and backlog, not additional first-release screens.
+
+Earlier agent-connection direction (2026-09-22): the [MCP plan](mcp-first-product.md) lets each adult use a compatible AI client through their own adeno authorization. This is an additional interaction path. Uploads, the visual history, evidence review, update approval and access control remain on the website. No MCP endpoint exists yet.
+
+Current build priority: [source storage and agent connector](typescript-platform.md). Outbound notifications and communication integrations are deferred.
 
 Long-term direction: [community-funded access, fiscal sponsorship, and privacy commitments](long-term-goal.md). This is the controlling direction for funding and public/private tooling scope; implementation remains subject to the launch gates described there.
 
 ## Name and primary experience
 
-The product name is Adeno. Hosted use comes first: a caregiver visits the website, creates an account, invites family, and starts adding records and thoughts. The operator handles infrastructure and AI access. Pricing covers inference, search, storage, hosting and payment costs transparently; the project has no profit objective. No API-key setup or model selection belongs in ordinary onboarding.
+The product name is adeno. The long-term release target is hosted use: a caregiver visits the website, creates an account, invites family, and starts adding records and thoughts. The operator handles infrastructure; the caregiver's chosen AI client handles interpretation through scoped MCP access. Optional adeno-operated processing, if ever added, must be cost-metered without a profit objective. No API-key setup or model selection belongs in ordinary onboarding.
 
 The caregiver application remains open source; private operator/admin tooling may be maintained separately. Self-hosting is an optional advanced path, documented separately from the caregiver journey. The current local build still uses installation-owner setup while hosted onboarding is developed; a restricted hosted preview is not a public production launch. Individual family logins and a versioned approved-update feed are not implemented yet.
 
-The home view answers “What needs attention?” with My responsibilities first and a Whole family switch. Records accepts files and unorganized notes; Timeline keeps event dates distinct from upload dates; Ask includes record questions and current research; Tasks shows owner, reason, source and due date. Google Calendar integration is planned, with explicit sharing of event details. Family permissions and explanation level are separate controls.
+The first web view centers a sparse care-day timeline and file/note intake. It keeps care dates distinct from document and upload dates. Family tasks, research, calendar sync and an in-app Ask view remain later possibilities; they do not define the core data store.
 
 ## Rename compatibility
 
-Use Adeno in visible UI, page metadata and product documentation. Existing internal `careledger` package names, repository/directory paths, container service/volume names, cookies, backup formats, crypto domain separators and storage identifiers remain compatibility identifiers. Renaming them requires a separate reviewed transition; branding alone must not invalidate records or keys. Public repository/domain changes are a publication task. The personal origin of the name is not included in public-facing copy.
+Use adeno in visible UI, page metadata and product documentation. Existing internal `careledger` package names, repository/directory paths, container service/volume names, cookies, backup formats, crypto domain separators and storage identifiers remain compatibility identifiers. Renaming them requires a separate reviewed transition; branding alone must not invalidate records or keys. Public repository/domain changes are a publication task. The personal origin of the name is not included in public-facing copy.
 
 ## Audience
 
@@ -24,16 +28,15 @@ Clinicians are not the primary users. Exports should be concise enough to share 
 
 ## Core job
 
-Upload records, confirm what the records actually say, understand the situation in plain language, and leave with a small prioritized list of next actions and doctor questions.
+Store original records and family notes on the right care days, retrieve the current source-linked history from any date, and let an authorized caregiver or their chosen agent inspect it without fabricated medical advice.
 
 ## The caregiver loop
 
-1. Add a care event: treatment, consultation, new result, discharge, or family observation.
-2. Upload its records and unorganized personal notes; preserve event, document and upload dates separately.
-3. Prepare one family-update draft with source-linked facts, simple explanations, uncertainties and proposed tasks.
-4. A permitted caregiver reviews, edits and approves the update. Approval is editorial, not medical verification.
-5. Family members sign in with their own accounts to read that approved version, open its sources and see their own responsibilities.
-6. Track commitments and questions for the next visit. No outbound message is needed to complete this loop.
+1. Upload original files and unorganized notes; record when they arrived.
+2. Place each item on its supported care day or leave it in “Date unclear.” Several files can share one day; empty days have no node.
+3. A permitted family member checks placement and visibility. Approval is editorial, not medical verification.
+4. Family members sign in separately to browse the same approved day history and source files.
+5. An authorized agent reads bounded, cited records through MCP and traverses backward from any selected day using current data. Adeno does not store an AI-generated consensus.
 
 ## Information hierarchy
 

@@ -59,7 +59,7 @@ export function Badge({ tone = "neutral", children }:
 export function AppHeader({ context = "Private installation", className, children }:
   { context?: ReactNode; className?: string; children?: ReactNode }) {
   return <header className={classes("ui-header", className)}>
-    <a className="wordmark" href="/" aria-label="Adeno home">Adeno</a>
+    <a className="wordmark" href="/" aria-label="adeno home">adeno</a>
     {children}
     <p><ShieldCheck aria-hidden="true" size={16} />{context}</p>
   </header>;

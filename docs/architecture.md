@@ -1,5 +1,7 @@
 # Architecture
 
+This file describes the current Python community implementation and its original server-side AI integration. The target architecture is [React/TanStack/Vite + Express/TypeScript with MCP as a read adapter](typescript-platform.md). The new architecture is being built additively; this file remains the description of the currently runnable backend. Do not treat the server-side AI section below as approval to expose hosted medical plaintext through MCP.
+
 ## Decision
 
 Use Python 3.12, FastAPI, Pydantic, the standard SQLite driver with FTS5, React, TypeScript, and Vite.

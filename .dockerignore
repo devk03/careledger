@@ -6,6 +6,11 @@
 !LICENSE
 !app/
 !app/**
+!packages/
+!packages/contracts/
+!packages/contracts/package.json
+!packages/contracts/src/
+!packages/contracts/src/**
 !web/
 !web/package.json
 !web/package-lock.json

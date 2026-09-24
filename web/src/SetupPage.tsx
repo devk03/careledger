@@ -10,10 +10,10 @@ type SetupResult = {
 };
 
 const setupErrors: Record<string, string> = {
-  INVALID_SETUP: "This private setup link is invalid or has expired. Restart Adeno to issue a new link.",
+  INVALID_SETUP: "This private setup link is invalid or has expired. Restart adeno to issue a new link.",
   SETUP_ALREADY_COMPLETE: "Private setup is already complete. Use the sign-in page instead.",
   TRY_LATER: "There have been several unsuccessful attempts. Please wait a little before trying again.",
-  ORIGIN_NOT_ALLOWED: "Adeno blocked this request because it did not come from this installation.",
+  ORIGIN_NOT_ALLOWED: "adeno blocked this request because it did not come from this installation.",
   INVALID_INPUT: "Please check each field and try again.",
 };
 
@@ -61,7 +61,7 @@ export function SetupPage() {
       });
       const result = (await response.json()) as SetupResult & { error?: string };
       if (!response.ok) {
-        setError(setupErrors[result.error ?? ""] ?? "Adeno could not finish setup. Please try again.");
+        setError(setupErrors[result.error ?? ""] ?? "adeno could not finish setup. Please try again.");
         return;
       }
       setToken("");
@@ -69,7 +69,7 @@ export function SetupPage() {
       setConfirmation("");
       setRecoveryCodes(result.recovery_codes);
     } catch {
-      setError("Adeno could not reach its private server. Check that it is running, then try again.");
+      setError("adeno could not reach its private server. Check that it is running, then try again.");
     } finally {
       setWorking(false);
     }
@@ -85,7 +85,7 @@ export function SetupPage() {
           <p className="auth-context">Private setup is complete</p>
           <h1 id="recovery-title">Save your recovery codes now.</h1>
           <p className="auth-lede">
-            Keep these somewhere separate from Adeno. Each code is intended for one recovery
+            Keep these somewhere separate from adeno. Each code is intended for one recovery
             and will not be shown again.
           </p>
           <ol className="recovery-codes" aria-label="One-time recovery codes">
@@ -112,7 +112,7 @@ export function SetupPage() {
           <LockKeyhole size={21} />
         </div>
         <p className="auth-context">First, protect the workspace</p>
-        <h1>Set up your private Adeno.</h1>
+        <h1>Set up your private adeno.</h1>
         <p className="auth-lede">
           This creates the owner account for your family’s installation. There is no public signup.
         </p>

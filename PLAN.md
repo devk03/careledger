@@ -1,10 +1,16 @@
 # End-to-End Build Plan
 
+The current product center is the [reviewed treatment timeline](docs/treatment-timeline-product.md). The older phases below describe foundations and backlog; the [execution plan](docs/mcp-first-execution-plan.md) orders the next work around the timeline.
+
+**2026-09-23 direction:** the [day-by-day treatment timeline](docs/treatment-timeline-product.md) is the product center. The website handles file drop, document review, day cards with multiple files, and change history; the [MCP connection](docs/mcp-first-product.md) lets an authorized agent ask about the same approved history. The phases below document existing foundations and outstanding gates. No MCP or hosted family access is implemented yet.
+
+Execution on the app repository's `feature/mcp-first-platform` branch is scoped in [the treatment timeline execution plan](docs/mcp-first-execution-plan.md). This branch is based on the app repo's `main`; the private parent workspace has a separate `master` branch.
+
 ## Product direction — 2026-09-07
 
-**Current scope override:** [Core platform](docs/core-platform.md) controls the next increment: individual adult logins and family authorization, records/notes grouped into care events, reviewed source-linked family updates, timeline and assigned tasks. Outbound communications, calendar sync, broad web research and payment UX are deferred. The phases below are the historical foundation/backlog, not a claim that those features are complete or all belong in the next increment. Hosted encryption, access, recovery and cost controls remain launch gates.
+**Current scope override:** [The sparse day timeline](docs/treatment-timeline-product.md) controls the next increment: original files and notes arranged by care day, reviewed visibility, individual family access and read-only MCP traversal. Generated updates, in-app AI, outbound communications, calendar sync, broad research and payment UX are deferred. The phases below are historical foundation/backlog, not a claim that those features belong in the next increment. Hosted encryption, access and recovery remain launch gates.
 
-The product is named Adeno. Hosted use is the primary release target; open-source self-hosting is optional. The first-run container experience below describes the existing community foundation, not the intended caregiver onboarding. Do not require ordinary caregivers to configure infrastructure or provider API keys.
+The product is named adeno. Hosted use is the primary release target; open-source self-hosting is optional. The first-run container experience below describes the existing community foundation, not the intended caregiver onboarding. Do not require ordinary caregivers to configure infrastructure or provider API keys.
 
 ## Current progress
 
@@ -15,7 +21,7 @@ The product is named Adeno. Hosted use is the primary release target; open-sourc
 - Complete: case home, accepted-fact timeline, local evidence search, questions, decisions, follow-ups, appointment-brief download/print, owner-encrypted export, and fresh-directory restore verification.
 - In progress: corrected-claim editing, local PDF text/OCR rendering, de-identified outside research, caregiver invitations, live restore switching, deletion/retention controls, full integration hardening, and release packaging.
 
-## Definition of done
+## Historical hosted definition of done (not the current TypeScript slice)
 
 A caregiver can open the hosted website, create an account, protect the family workspace, invite other adults, and publish a reviewed family update from records and personal notes. Each authorized adult can read the same update and see their tasks without infrastructure setup or provider credentials. E2EE, funded AI limits and credential isolation must satisfy the launch gates in `docs/research-hosting-plan.md`. A fresh clone must also remain runnable as the optional community Docker edition. Both paths preserve source citations, human review, persistent data and verified exports. Research and outbound messaging are not required for this core increment.
 
@@ -85,7 +91,7 @@ Deliverables:
 - Local FTS5 evidence search and cited answers.
 - General research is a separate mode: it shows and requires approval of a de-identified query before any web request, and never promotes research into patient fact automatically.
 
-Exit gate: summaries contain no uncited factual claims and every next step is labeled as clinician instruction, caregiver task, or AI draft.
+Exit gate: summaries contain no uncited factual claims. Any action item must be an attributed clinician instruction or an explicit caregiver-entered task; AI does not generate clinical next steps.
 
 ## Phase 6 - Operations, security, and recovery
 

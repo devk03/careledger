@@ -43,7 +43,7 @@ export interface ManagedInferenceResult {
 
 export class ManagedInferenceError extends Error {
   constructor() {
-    super("Adeno could not complete this explanation. Your original is still safe.");
+    super("adeno could not complete this explanation. Your original is still safe.");
     this.name = "ManagedInferenceError";
   }
 }

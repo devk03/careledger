@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 
-describe("Adeno caregiver entry", () => {
+describe("adeno caregiver entry", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",

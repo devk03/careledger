@@ -4,10 +4,10 @@ test("repository counter links to the right repo and fits mobile", async ({page}
   await page.setViewportSize({width:320,height:900});
   await page.route("**/api/public/project", route => route.fulfill({json:{stars:12345,stale:false}}));
   await page.goto("/");
-  const link=page.getByRole("link",{name:"Adeno on GitHub, 12345 stars"});
+  const link=page.getByRole("link",{name:"adeno on GitHub, 12345 stars"});
   await expect(link).toHaveAttribute("href","https://github.com/devk03/careledger");
   await expect(link).toBeVisible();
-  const prominent = page.getByRole("link", { name: "View Adeno source on GitHub (opens in a new tab)", exact: true });
+  const prominent = page.getByRole("link", { name: "View adeno source on GitHub (opens in a new tab)", exact: true });
   await expect(prominent).toBeVisible();
   await expect(prominent).toHaveAttribute("href", "https://github.com/devk03/careledger");
   expect(await prominent.evaluate(node => node.getBoundingClientRect().right)).toBeLessThanOrEqual(320);
@@ -20,6 +20,6 @@ test("repository counter links to the right repo and fits mobile", async ({page}
 test("counter outage does not hide the repository link", async ({page}) => {
   await page.route("**/api/public/project", route=>route.fulfill({status:503,body:"unavailable"}));
   await page.goto("/");
-  await expect(page.getByRole("link",{name:"Adeno on GitHub",exact:true})).toBeVisible();
+  await expect(page.getByRole("link",{name:"adeno on GitHub",exact:true})).toBeVisible();
   await expect(page.locator(".github-stars")).toHaveCount(0);
 });
