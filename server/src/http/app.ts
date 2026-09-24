@@ -16,7 +16,8 @@ import {
   InvalidPageRequest,
   SourcePageNotFound,
 } from "../timeline/sourcePage.js";
-import type { ApprovedPageRepository, AuthorizedScope, DayVersionRepository, PendingReviewRepository,
+import type { ApprovedPageRepository, AuthorizedScope, CareProfileRepository,
+  DayVersionRepository, PendingReviewRepository,
   TimelineRepository } from "../timeline/types.js";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthorizedScope | null>;
@@ -60,6 +61,7 @@ export function createHttpApp(dependencies: {
   sessions?: SessionRepository;
   reviews?: PendingReviewRepository;
   versions?: DayVersionRepository;
+  profiles?: CareProfileRepository;
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -71,6 +73,14 @@ export function createHttpApp(dependencies: {
   app.get("/health/live", (_request, response) => {
     response.json({ status: "ok" });
   });
+
+  if (dependencies.profiles !== undefined) {
+    app.get("/api/v2/care-profiles", async (request, response) => {
+      const scope = await dependencies.authenticate(request);
+      if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+      response.json({ profiles: await dependencies.profiles!.listVisibleCareProfiles(scope) });
+    });
+  }
 
   if (dependencies.accounts !== undefined && dependencies.sessions !== undefined &&
     dependencies.expectedOrigin !== undefined) {
@@ -381,6 +391,19 @@ export function createHttpApp(dependencies: {
         response.status(404).json({ error: "NOT_FOUND" }); return;
       }
       const hints = await dependencies.reviews!.listPendingChildReviews({
+        householdId: scope.householdId, userId: scope.userId,
+        careProfileId: request.params.careProfileId,
+      });
+      response.json({ pending: hints });
+    });
+    app.get("/api/v2/care-profiles/:careProfileId/reviews/notes/pending", async (request, response) => {
+      const scope = await dependencies.authenticate(request);
+      if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+      if (!(await dependencies.timeline.profileBelongsToHousehold(
+        request.params.careProfileId, scope.householdId))) {
+        response.status(404).json({ error: "NOT_FOUND" }); return;
+      }
+      const hints = await dependencies.reviews!.listPendingNoteReviews({
         householdId: scope.householdId, userId: scope.userId,
         careProfileId: request.params.careProfileId,
       });

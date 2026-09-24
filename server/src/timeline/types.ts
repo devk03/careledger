@@ -38,13 +38,19 @@ export interface ApprovedPageRepository {
   }): Promise<StoredPageChunk | null>;
 }
 
-export type PendingReviewHint = { id: string; targetCareDay: ISODate | null; createdAt: string };
+export type PendingReviewHint = { id: string; revisionId: string;
+  targetCareDay: ISODate | null; createdAt: string };
+export type PendingNoteHint = { revisionId: string; reviewRequestId: string | null;
+  targetCareDay: ISODate; createdAt: string };
 
 export interface PendingReviewRepository {
   /** No proposal content is returned; reviewer authority is rechecked on every call. */
   listPendingChildReviews(input: {
     householdId: string; userId: string; careProfileId: string;
   }): Promise<PendingReviewHint[]>;
+  listPendingNoteReviews(input: {
+    householdId: string; userId: string; careProfileId: string;
+  }): Promise<PendingNoteHint[]>;
 }
 
 export type DayVersion = { revision: number; publishedAt: string;
@@ -55,4 +61,12 @@ export interface DayVersionRepository {
     careProfileId: string; careDay: ISODate }): Promise<DayVersion[]>;
   readDayVersion(input: { householdId: string; userId: string;
     careProfileId: string; careDay: ISODate; revision: number }): Promise<TimelineDay | null>;
+}
+
+export type VisibleCareProfile = { id: string; preferredName: string };
+
+export interface CareProfileRepository {
+  /** List only profiles for which this active member currently has a capability. */
+  listVisibleCareProfiles(input: { householdId: string; userId: string }):
+    Promise<VisibleCareProfile[]>;
 }

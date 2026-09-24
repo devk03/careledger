@@ -80,6 +80,10 @@ describe("fictional v7 family timeline", () => {
       const adult = await reader.listApprovedDays({ ...input, userId: "adult-a" });
       expect(adult[0]?.sources).toEqual([]);
       expect(adult[0]?.statements).toHaveLength(1);
+      expect(await reader.listVisibleCareProfiles({ householdId: "family-a", userId: "adult-a" }))
+        .toEqual([{ id: "profile-a", preferredName: "Fictional person" }]);
+      expect(await reader.listVisibleCareProfiles({ householdId: "family-a", userId: "child-a" }))
+        .toEqual([]);
       expect(await reader.readApprovedPageChunk({ ...input, userId: "adult-a", documentId: "document-a", pageNumber: 1, offset: 0, maxChars: 6000 })).toBeNull();
       expect(await reader.listApprovedDays({ ...input, userId: "child-a" })).toEqual([]);
       writer.prepare("INSERT INTO document_access_events (id, care_profile_id, document_id, subject_user_id, event_no, allowed, actor_user_id, occurred_at) VALUES ('grant-source-a', 'profile-a', 'document-a', 'adult-a', 1, 1, 'owner-a', 103)").run();
@@ -89,6 +93,8 @@ describe("fictional v7 family timeline", () => {
       expect((await reader.listApprovedDays({ ...input, userId: "adult-a" }))[0]?.sources).toEqual([]);
       writer.prepare("INSERT INTO day_access_events (id, care_profile_id, care_day, subject_user_id, event_no, level, actor_user_id, occurred_at) VALUES ('revoke-day-a', 'profile-a', '2030-04-12', 'adult-a', 2, 'none', 'owner-a', 105)").run();
       expect(await reader.listApprovedDays({ ...input, userId: "adult-a" })).toEqual([]);
+      expect(await reader.listVisibleCareProfiles({ householdId: "family-a", userId: "adult-a" }))
+        .toEqual([]);
     } finally { reader.close(); writer.close(); }
   });
 
@@ -218,6 +224,15 @@ describe("fictional v7 family timeline", () => {
         .toEqual({ ok: false, error: "INVITATION_INVALID" });
       expect(await accounts.login({ loginName: "aunt.example", password: "wrong fictional pass", nowSeconds: 203 }))
         .toEqual({ ok: false, error: "INVALID_CREDENTIALS" });
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        await accounts.login({ loginName: "young.example", password: "wrong fictional pass",
+          nowSeconds: 203 });
+      }
+      expect(await accounts.login({ loginName: "young.example", password: "wrong fictional pass",
+        nowSeconds: 203 })).toEqual({ ok: false, error: "TRY_LATER" });
+      expect(await accounts.login({ loginName: "young.example",
+        password: "another fictional password", nowSeconds: 203 }))
+        .toEqual({ ok: false, error: "TRY_LATER" });
       const loggedIn = await accounts.login({ loginName: "aunt.example",
         password: "a long fictional password", nowSeconds: 204 });
       expect(loggedIn).toMatchObject({ ok: true, value: { userId: adult.value.userId } });
@@ -285,22 +300,38 @@ describe("fictional v7 family timeline", () => {
     const secret = Buffer.alloc(32, 6);
     const ownerToken = "o".repeat(43);
     const childToken = "c".repeat(43);
+    const adultToken = "d".repeat(43);
     writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-owner-review', 'owner-a', ?, ?, 1, 100, 1000, 100)")
       .run(sessionTokenSha256(ownerToken), secret);
     writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-child-review', 'child-a', ?, ?, 1, 100, 1000, 100)")
       .run(sessionTokenSha256(childToken), secret);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-adult-review', 'adult-a', ?, ?, 1, 100, 1000, 100)")
+      .run(sessionTokenSha256(adultToken), secret);
     const owner = { ok: true as const, tokenSha256: sessionTokenSha256(ownerToken),
       csrfToken: issueCsrfToken("session-owner-review", secret) };
     const child = { ok: true as const, tokenSha256: sessionTokenSha256(childToken),
       csrfToken: issueCsrfToken("session-child-review", secret) };
+    const adult = { ok: true as const, tokenSha256: sessionTokenSha256(adultToken),
+      csrfToken: issueCsrfToken("session-adult-review", secret) };
     const mutations = new SqliteFamilyMutations(path);
     const reader = new SqliteFamilyTimeline(path);
     try {
       expect(mutations.grantProfileIntake({ preflight: owner, careProfileId: "profile-a",
         subjectUserId: "child-a", allowed: true, nowSeconds: 200 })).toMatchObject({ ok: true });
+      expect(mutations.grantProfileIntake({ preflight: owner, careProfileId: "profile-a",
+        subjectUserId: "adult-a", allowed: true, nowSeconds: 200 })).toMatchObject({ ok: true });
       const proposal = mutations.proposeNote({ preflight: child, careProfileId: "profile-a",
         careDay: "2030-04-12", body: "Fictional child observation.", nowSeconds: 201 });
       if (!proposal.ok) throw new Error("Expected fictional proposal");
+      const adultProposal = mutations.proposeNote({ preflight: adult, careProfileId: "profile-a",
+        careDay: "2030-04-12", body: "Fictional adult observation.", nowSeconds: 201 });
+      if (!adultProposal.ok) throw new Error("Expected fictional adult proposal");
+      expect(adultProposal.reviewRequestId).toBeNull();
+      const pendingNotes = await reader.listPendingNoteReviews({ householdId: "family-a",
+        userId: "owner-a", careProfileId: "profile-a" });
+      expect(pendingNotes.map((hint) => hint.revisionId).sort())
+        .toEqual([proposal.revisionId, adultProposal.revisionId].sort());
+      expect(JSON.stringify(pendingNotes)).not.toContain("Fictional adult observation");
       expect(proposal.reviewRequestId).toBeTruthy();
       expect((writer.prepare("SELECT count(*) n FROM review_outbox_events WHERE kind = 'requested'").get() as { n: number }).n).toBe(1);
       const ownerHints = await reader.listPendingChildReviews({ householdId: "family-a",

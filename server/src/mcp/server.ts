@@ -3,7 +3,8 @@ import { z } from "zod/v4";
 
 import { getHistoryThroughDay, listTimelineDays, TimelineAccessDenied } from "../timeline/history.js";
 import { getApprovedSourcePage, InvalidPageRequest, SourcePageNotFound } from "../timeline/sourcePage.js";
-import type { ApprovedPageRepository, AuthorizedScope, PendingReviewRepository,
+import type { ApprovedPageRepository, AuthorizedScope, CareProfileRepository,
+  PendingReviewRepository,
   TimelineRepository } from "../timeline/types.js";
 
 const MAX_TOOL_TEXT_BYTES = 128_000;
@@ -28,8 +29,16 @@ export function createTimelineMcpServer(input: {
   timeline: TimelineRepository;
   pages: ApprovedPageRepository;
   reviews?: PendingReviewRepository;
+  profiles?: CareProfileRepository;
 }): McpServer {
   const server = new McpServer({ name: "adeno", version: "0.1.0" });
+
+  if (input.profiles !== undefined) {
+    server.registerTool("list_care_profiles", {
+      description: "List only care profiles for which the connected family member currently has a permission. Does not grant access to hidden days or original files.",
+      inputSchema: z.object({}),
+    }, async () => boundedTextResult({ profiles: await input.profiles!.listVisibleCareProfiles(input.scope) }));
+  }
 
   server.registerTool("get_history_through_day", {
     description: "Read the currently approved record history through a selected care day. This is source data, not medical advice or a reconstruction of what was known at that time.",
@@ -120,6 +129,17 @@ export function createTimelineMcpServer(input: {
         householdId: input.scope.householdId, userId: input.scope.userId, careProfileId,
       });
       return boundedTextResult({ pending });
+    });
+    server.registerTool("list_pending_note_reviews", {
+      description: "List authorized adult reviewers' pending family-note hints, including adult and child proposals, without note text. The revision ID can be reviewed through an authorized web mutation.",
+      inputSchema: z.object({ careProfileId: z.string().uuid() }),
+    }, async ({ careProfileId }) => {
+      if (!(await input.timeline.profileBelongsToHousehold(careProfileId, input.scope.householdId))) {
+        return { content: [{ type: "text", text: "Timeline not found" }], isError: true };
+      }
+      return boundedTextResult({ pending: await input.reviews!.listPendingNoteReviews({
+        householdId: input.scope.householdId, userId: input.scope.userId, careProfileId,
+      }) });
     });
   }
 

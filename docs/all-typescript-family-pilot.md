@@ -8,6 +8,8 @@ The Dockerfile still starts Python, and Compose defines only that service. The T
 
 Current invitation tokens are 256-bit, expire after 24 hours, and can be accepted once; they are **bearer links**. The owner must share them privately with the intended person. The current schema does not bind an invitation to a verified recipient, so forwarding or interception before acceptance would let another person claim the account. Claimed accounts start with no day or source grants. Recipient-bound delivery/verification is a release decision, not an implied property of the present implementation.
 
+The TypeScript login path currently uses bounded, per-login-name in-process backoff and a four-verification concurrency cap so one failed account does not lock out the whole family. This is not a durable or edge-level abuse-control system; a production deployment still needs reverse-proxy/IP rate limits and monitoring. Pending adult and child note proposals can be discovered by authorized adult reviewers without leaking the note text, and visible care profiles are permission-filtered on each read.
+
 Do not run independent Python and TypeScript writers against one medical database. Until cutover, Python remains the sole writer. The TypeScript service may read synthetic fixtures during development, but no real records go into a new pilot until the gates below pass.
 
 ## Critical path

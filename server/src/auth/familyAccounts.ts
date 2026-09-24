@@ -25,7 +25,6 @@ type UserRow = { id: string; householdId: string; displayName: string;
   status: "active" | "pending" | "disabled"; passwordHash: string | null; authVersion: number };
 type InvitationRow = { id: string; householdId: string; memberKind: "adult" | "child";
   expiresAt: number; acceptedAt: number | null };
-type ThrottleRow = { failures: number; lockedUntil: number | null };
 type AuditRow = { event_hash: string };
 
 export type AccountError = "INVALID_INPUT" | "INVALID_CREDENTIALS" | "TRY_LATER" |
@@ -37,6 +36,8 @@ export type IssuedLogin = { userId: string; displayName: string; role: "owner" |
 /** Separate accounts on a pre-migrated, trusted-local v7 database only. */
 export class SqliteFamilyAccounts {
   private readonly db: Database.Database;
+  private readonly loginAttempts = new Map<string, { failures: number; lockedUntil: number; lastSeen: number }>();
+  private activeVerifications = 0;
 
   constructor(path: string) {
     privateFile(path, true);
@@ -126,46 +127,51 @@ export class SqliteFamilyAccounts {
     const nowSeconds = input.nowSeconds ?? now();
     if (!LOGIN_PATTERN.test(input.loginName) || !validPassword(input.password))
       return { ok: false, error: "INVALID_INPUT" };
-    const throttle = this.db.prepare<[], ThrottleRow>(
-      "SELECT consecutive_failures failures, locked_until lockedUntil FROM auth_throttles WHERE scope = 'login'",
-    ).get();
-    if (throttle?.lockedUntil !== null && throttle?.lockedUntil !== undefined &&
-      throttle.lockedUntil > nowSeconds) return { ok: false, error: "TRY_LATER" };
+    const normalized = input.loginName.toLowerCase();
+    const throttle = this.loginAttempts.get(normalized);
+    if ((throttle && throttle.lockedUntil > nowSeconds) || this.activeVerifications >= 4)
+      return { ok: false, error: "TRY_LATER" };
     const user = this.db.prepare<[string], UserRow>(
       "SELECT id, household_id householdId, display_name displayName, role, member_kind memberKind, " +
       "status, password_hash passwordHash, auth_version authVersion FROM users " +
       "WHERE login_name_normalized = ? AND status = 'active'",
-    ).get(input.loginName.toLowerCase());
+    ).get(normalized);
     let passwordMatches = false;
-    try { passwordMatches = await verify(user?.passwordHash ?? DUMMY_PASSWORD_HASH, input.password); }
-    catch { passwordMatches = false; }
+    this.activeVerifications += 1;
+    try {
+      passwordMatches = await verify(user?.passwordHash ?? DUMMY_PASSWORD_HASH, input.password);
+    } catch { passwordMatches = false; }
+    finally { this.activeVerifications -= 1; }
     return this.db.transaction((): AccountResult<IssuedLogin> => {
-      const currentThrottle = this.db.prepare<[], ThrottleRow>(
-        "SELECT consecutive_failures failures, locked_until lockedUntil FROM auth_throttles WHERE scope = 'login'",
-      ).get();
-      if (currentThrottle?.lockedUntil !== null && currentThrottle?.lockedUntil !== undefined &&
-        currentThrottle.lockedUntil > nowSeconds) return { ok: false, error: "TRY_LATER" };
+      const currentThrottle = this.loginAttempts.get(normalized);
+      if (currentThrottle && currentThrottle.lockedUntil > nowSeconds)
+        return { ok: false, error: "TRY_LATER" };
       const current = user ? this.userById(user.id) : null;
       if (!passwordMatches || !current || current.status !== "active" ||
         current.passwordHash !== user?.passwordHash) {
         const failures = (currentThrottle?.failures ?? 0) + 1;
         const delay = failures <= 4 ? 0 : Math.min(2 ** (failures - 5) * 2, 900);
-        this.db.prepare("INSERT INTO auth_throttles (scope, consecutive_failures, locked_until, updated_at) " +
-          "VALUES ('login', ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
-          "consecutive_failures = excluded.consecutive_failures, " +
-          "locked_until = excluded.locked_until, updated_at = excluded.updated_at")
-          .run(failures, delay ? nowSeconds + delay : null, nowSeconds);
+        this.pruneLoginAttempts(nowSeconds);
+        this.loginAttempts.set(normalized,
+          { failures, lockedUntil: nowSeconds + delay, lastSeen: nowSeconds });
         return { ok: false, error: delay ? "TRY_LATER" : "INVALID_CREDENTIALS" };
       }
-      this.db.prepare("INSERT INTO auth_throttles (scope, consecutive_failures, locked_until, updated_at) " +
-        "VALUES ('login', 0, NULL, ?) ON CONFLICT(scope) DO UPDATE SET " +
-        "consecutive_failures = 0, locked_until = NULL, updated_at = excluded.updated_at")
-        .run(nowSeconds);
+      this.loginAttempts.delete(normalized);
       const issued = this.insertSession(current.id, current.authVersion, nowSeconds);
       this.audit(current.householdId, current.id, "login", "session", issued.sessionId, nowSeconds);
       return { ok: true, value: { userId: current.id, displayName: current.displayName,
         role: current.role, memberKind: current.memberKind, ...issued } };
     }).immediate();
+  }
+
+  private pruneLoginAttempts(nowSeconds: number): void {
+    for (const [key, entry] of this.loginAttempts) {
+      if (entry.lastSeen + 3600 < nowSeconds) this.loginAttempts.delete(key);
+    }
+    if (this.loginAttempts.size >= 10_000) {
+      const oldest = this.loginAttempts.keys().next().value;
+      if (oldest) this.loginAttempts.delete(oldest);
+    }
   }
 
   logout(preflight: Extract<MutationPreflight, { ok: true }>, nowSeconds = now()): AccountResult<null> {

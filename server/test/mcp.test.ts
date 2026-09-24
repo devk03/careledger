@@ -2,7 +2,8 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vitest";
 
 import { createTimelineMcpServer } from "../src/mcp/server.js";
-import type { ApprovedPageRepository, PendingReviewRepository, TimelineRepository } from "../src/timeline/types.js";
+import type { ApprovedPageRepository, CareProfileRepository,
+  PendingReviewRepository, TimelineRepository } from "../src/timeline/types.js";
 
 const profileId = "11111111-1111-4111-8111-111111111111";
 const documentId = "22222222-2222-4222-8222-222222222222";
@@ -13,12 +14,14 @@ async function withClient(
   run: (client: Client) => Promise<void>,
   pages: ApprovedPageRepository = { readApprovedPageChunk: async () => null },
   reviews?: PendingReviewRepository,
+  profiles?: CareProfileRepository,
 ) {
   const server = createTimelineMcpServer({
     scope: { householdId, userId: "fictional-adult" },
     timeline: repository,
     pages,
     ...(reviews === undefined ? {} : { reviews }),
+    ...(profiles === undefined ? {} : { profiles }),
   });
   const client = new Client({ name: "fictional-test-client", version: "0.1.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -182,9 +185,13 @@ describe("read-only MCP timeline adapter", () => {
       listPendingChildReviews: async ({ userId, careProfileId }) => {
         expect(userId).toBe("fictional-adult");
         expect(careProfileId).toBe(profileId);
-        return [{ id: "fictional-review", targetCareDay: "2026-09-18",
+        return [{ id: "fictional-review", revisionId: "fictional-revision",
+          targetCareDay: "2026-09-18",
           createdAt: "2026-09-19T00:00:00.000Z" }];
       },
+      listPendingNoteReviews: async () => [{ revisionId: "fictional-revision",
+        reviewRequestId: "fictional-review", targetCareDay: "2026-09-18",
+        createdAt: "2026-09-19T00:00:00.000Z" }],
     };
     await withClient(repository, "family-a", async (client) => {
       const result = await client.callTool({ name: "list_pending_child_reviews",
@@ -194,6 +201,33 @@ describe("read-only MCP timeline adapter", () => {
       if (block?.type !== "text") throw new Error("Expected text result");
       expect(JSON.parse(block.text).pending).toHaveLength(1);
       expect(block.text).not.toContain("child note text");
+      const noteResult = await client.callTool({ name: "list_pending_note_reviews",
+        arguments: { careProfileId: profileId } });
+      const noteBlock = noteResult.content[0];
+      if (noteBlock?.type !== "text") throw new Error("Expected note hint");
+      expect(JSON.parse(noteBlock.text).pending[0].revisionId).toBe("fictional-revision");
     }, undefined, reviews);
+  });
+
+  it("discovers only the connected member's visible care profiles", async () => {
+    const repository: TimelineRepository = {
+      profileBelongsToHousehold: async () => true,
+      listApprovedDays: async () => [],
+    };
+    const profiles: CareProfileRepository = {
+      listVisibleCareProfiles: async ({ householdId, userId }) => {
+        expect(householdId).toBe("family-a");
+        expect(userId).toBe("fictional-adult");
+        return [{ id: profileId, preferredName: "Fictional person" }];
+      },
+    };
+    await withClient(repository, "family-a", async (client) => {
+      const result = await client.callTool({ name: "list_care_profiles", arguments: {} });
+      const block = result.content[0];
+      if (block?.type !== "text") throw new Error("Expected profile result");
+      expect(JSON.parse(block.text).profiles).toEqual([
+        { id: profileId, preferredName: "Fictional person" },
+      ]);
+    }, undefined, undefined, profiles);
   });
 });

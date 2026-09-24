@@ -3,9 +3,9 @@ import { lstatSync } from "node:fs";
 
 import Database from "better-sqlite3";
 
-import type { ApprovedPageRepository, DayVersion, DayVersionRepository, ISODate,
-  PendingReviewHint, PendingReviewRepository,
-  StoredPageChunk, TimelineDay, TimelineRepository } from "../timeline/types.js";
+import type { ApprovedPageRepository, CareProfileRepository, DayVersion, DayVersionRepository, ISODate,
+  PendingNoteHint, PendingReviewHint, PendingReviewRepository,
+  StoredPageChunk, TimelineDay, TimelineRepository, VisibleCareProfile } from "../timeline/types.js";
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
 
 const MIGRATIONS = [
@@ -47,7 +47,7 @@ export class IncompatibleFamilyTimelineDatabase extends Error {
  * recheck user status and current grants, including after MCP connection setup.
  */
 export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRepository,
-  PendingReviewRepository, DayVersionRepository, SessionRepository {
+  PendingReviewRepository, DayVersionRepository, CareProfileRepository, SessionRepository {
   private readonly db: Database.Database;
 
   constructor(path: string) {
@@ -86,6 +86,22 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     return this.db.prepare<[string, string], { ok: number }>(
       "SELECT 1 ok FROM care_profiles WHERE id = ? AND household_id = ? AND archived_at IS NULL",
     ).get(careProfileId, householdId) !== undefined;
+  }
+
+  async listVisibleCareProfiles(input: { householdId: string; userId: string }):
+    Promise<VisibleCareProfile[]> {
+    return this.db.prepare<[string, string], { id: string; preferredName: string }>(
+      "SELECT p.id, p.preferred_name preferredName FROM care_profiles p " +
+      "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
+      "WHERE p.household_id = ? AND p.archived_at IS NULL " +
+      "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access a " +
+      "WHERE a.care_profile_id = p.id AND a.subject_user_id = u.id) " +
+      "OR EXISTS (SELECT 1 FROM current_document_access a " +
+      "WHERE a.care_profile_id = p.id AND a.subject_user_id = u.id) " +
+      "OR EXISTS (SELECT 1 FROM current_profile_intake a " +
+      "WHERE a.care_profile_id = p.id AND a.subject_user_id = u.id)) " +
+      "ORDER BY p.preferred_name, p.id",
+    ).all(input.userId, input.householdId);
   }
 
   async listApprovedDays(input: {
@@ -202,10 +218,12 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
   async listPendingChildReviews(input: {
     householdId: string; userId: string; careProfileId: string;
   }): Promise<PendingReviewHint[]> {
-    const rows = this.db.prepare<[string, string, string], { id: string;
+    const rows = this.db.prepare<[string, string, string], { id: string; revisionId: string;
       targetCareDay: string | null; createdAt: number }>(
-      "SELECT request.id, request.target_care_day targetCareDay, " +
+      "SELECT request.id, COALESCE(raw.note_revision_id, raw.placement_revision_id) revisionId, " +
+      "request.target_care_day targetCareDay, " +
       "request.created_at createdAt FROM pending_child_reviews request " +
+      "JOIN child_review_requests raw ON raw.id = request.id " +
       "JOIN care_profiles p ON p.id = request.care_profile_id AND p.archived_at IS NULL " +
       "JOIN users reviewer ON reviewer.id = ? AND reviewer.household_id = p.household_id " +
       "AND reviewer.status = 'active' AND reviewer.member_kind = 'adult' " +
@@ -215,7 +233,31 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       "AND grant_row.subject_user_id = reviewer.id AND grant_row.level = 'publish')) " +
       "ORDER BY request.created_at, request.id LIMIT 50",
     ).all(input.userId, input.householdId, input.careProfileId);
-    return rows.map((row) => ({ id: row.id, targetCareDay: row.targetCareDay,
+    return rows.map((row) => ({ id: row.id, revisionId: row.revisionId,
+      targetCareDay: row.targetCareDay,
+      createdAt: new Date(row.createdAt * 1000).toISOString() }));
+  }
+
+  async listPendingNoteReviews(input: { householdId: string; userId: string;
+    careProfileId: string }): Promise<PendingNoteHint[]> {
+    const rows = this.db.prepare<[string, string, string], { revisionId: string;
+      reviewRequestId: string | null; targetCareDay: string; createdAt: number }>(
+      "SELECT r.id revisionId, child.id reviewRequestId, r.care_day targetCareDay, " +
+      "r.created_at createdAt FROM family_note_revisions r " +
+      "JOIN family_notes n ON n.id = r.note_id " +
+      "JOIN care_profiles p ON p.id = n.care_profile_id AND p.archived_at IS NULL " +
+      "JOIN users reviewer ON reviewer.id = ? AND reviewer.household_id = p.household_id " +
+      "AND reviewer.status = 'active' AND reviewer.member_kind = 'adult' " +
+      "LEFT JOIN child_review_requests child ON child.note_revision_id = r.id " +
+      "WHERE p.household_id = ? AND p.id = ? AND r.care_day IS NOT NULL " +
+      "AND NOT EXISTS (SELECT 1 FROM family_note_reviews reviewed WHERE reviewed.revision_id = r.id) " +
+      "AND (reviewer.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access grant_row " +
+      "WHERE grant_row.care_profile_id = p.id AND grant_row.care_day = r.care_day " +
+      "AND grant_row.subject_user_id = reviewer.id AND grant_row.level = 'publish')) " +
+      "ORDER BY r.created_at, r.id LIMIT 50",
+    ).all(input.userId, input.householdId, input.careProfileId);
+    return rows.map((row) => ({ revisionId: row.revisionId,
+      reviewRequestId: row.reviewRequestId, targetCareDay: row.targetCareDay,
       createdAt: new Date(row.createdAt * 1000).toISOString() }));
   }
 
