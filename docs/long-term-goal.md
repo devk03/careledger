@@ -1,6 +1,8 @@
-# Adeno: long-term project goal
+# adeno: long-term project goal
 
 Recorded: 2026-09-07. User-confirmed direction, not a claim of completed implementation or nonprofit status.
+
+Direction update 2026-09-22: [MCP-first product plan](mcp-first-product.md) makes compatible caregiver-owned AI clients the primary conversation surface. The earlier pooled-inference funding model below is a fallback and still applies to any optional adeno-provided AI; storage, OCR and hosting still need funding. Ordinary caregivers should connect by signing in, without copying adeno access keys.
 
 ## Mission
 
@@ -32,7 +34,7 @@ Make it easier for adult family caregivers to organize a loved one's health info
 
 ## Fiscal sponsorship outreach shortlist
 
-Candidates researched on 2026-09-07; acceptance, terms, geography, and current fees must be confirmed directly. No organization has agreed to sponsor Adeno.
+Candidates researched on 2026-09-07; acceptance, terms, geography, and current fees must be confirmed directly. No organization has agreed to sponsor adeno.
 
 1. [Hack Club / HCB](https://hackclub.com/fiscal-sponsorship): first outreach candidate for accessible fiscal sponsorship and transparent financial tooling. Published fee at research time: 7% of revenue. Confirm health-AI eligibility and ownership terms.
 2. [Code for Science & Society](https://www.codeforsociety.org/become-a-fiscally-sponsored-project): first outreach candidate for public-interest technology sponsorship. Use the linked New Project Inquiry Form; request current fees and minimum commitments.
