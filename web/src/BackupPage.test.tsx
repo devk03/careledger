@@ -21,7 +21,7 @@ it("requires the owner password and two matching backup passphrases", async () =
 
   const button = await screen.findByRole("button", { name: "Create encrypted backup" });
   expect(button).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Adeno account password"), {
+  fireEvent.change(screen.getByLabelText("adeno account password"), {
     target: { value: "synthetic owner passphrase" },
   });
   fireEvent.change(screen.getByLabelText("New backup passphrase"), {

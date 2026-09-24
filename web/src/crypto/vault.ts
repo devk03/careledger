@@ -38,7 +38,7 @@ export function generateVaultKeyMaterial(): Uint8Array {
 
 export async function importVaultKey(keyMaterial: Uint8Array): Promise<CryptoKey> {
   if (keyMaterial.byteLength !== VAULT_KEY_BYTES) {
-    throw new Error("A Adeno vault key must contain 256 bits.");
+    throw new Error("An adeno vault key must contain 256 bits.");
   }
   return crypto.subtle.importKey(
     "raw",
@@ -169,7 +169,7 @@ function assertVaultKey(key: CryptoKey): void {
     !key.usages.includes("encrypt") ||
     !key.usages.includes("decrypt")
   ) {
-    throw new Error("Adeno requires a non-exportable AES-GCM vault key.");
+    throw new Error("adeno requires a non-exportable AES-GCM vault key.");
   }
 }
 

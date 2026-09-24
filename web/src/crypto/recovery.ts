@@ -31,7 +31,7 @@ export interface RecoverableVault {
 
 export class RecoveryError extends Error {
   constructor() {
-    super("Adeno could not open this recovery kit.");
+    super("adeno could not open this recovery kit.");
     this.name = "RecoveryError";
   }
 }

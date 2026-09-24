@@ -50,7 +50,7 @@ for (const width of widths) {
   for (const authPage of [
     {
       path: "/setup#token=synthetic-private-token",
-      heading: "Set up your private Adeno.",
+      heading: "Set up your private adeno.",
       name: "setup",
     },
     {

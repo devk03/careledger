@@ -20,15 +20,15 @@ for (const width of [320, 1280]) {
     await expect(page.getByRole("heading", { name: "The current server can read your records" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     expect((await new AxeBuilder({ page }).analyze()).violations.filter(v => ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
-    await page.getByRole("navigation", { name: "Information navigation" }).getByRole("link", { name: "About Adeno" }).click();
+    await page.getByRole("navigation", { name: "Information navigation" }).getByRole("link", { name: "About adeno" }).click();
     await expect(page.getByRole("heading", { name: "A little more clarity for the person helping." })).toBeVisible();
     await expect(page.getByText(/Fictional examples—not testimonials/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "A helper for understanding—not a clinician" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     expect((await new AxeBuilder({ page }).analyze()).violations.filter(v => ["serious", "critical"].includes(v.impact ?? ""))).toEqual([]);
-    await page.getByRole("link", { name: "Back to Adeno" }).click();
+    await page.getByRole("link", { name: "Back to adeno" }).click();
     await expect(page).toHaveURL(/\/$/);
-    await page.getByRole("link", { name: "Why we’re building Adeno" }).click();
+    await page.getByRole("link", { name: "Why we’re building adeno" }).click();
     await expect(page).toHaveURL(/\/about$/);
   });
 }

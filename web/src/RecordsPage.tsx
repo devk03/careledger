@@ -103,7 +103,7 @@ export function RecordsPage() {
         }
       } catch {
         if (!cancelled) {
-          setError("Adeno could not load the private workspace. Check the server and try again.");
+          setError("adeno could not load the private workspace. Check the server and try again.");
         }
       }
     }
@@ -126,7 +126,7 @@ export function RecordsPage() {
         const loaded = (await response.json()) as DocumentRecord[];
         if (!cancelled) setDocuments(loaded);
       } catch {
-        if (!cancelled) setError("Adeno could not load the record list.");
+        if (!cancelled) setError("adeno could not load the record list.");
       }
     }
     void refresh();
@@ -154,14 +154,14 @@ export function RecordsPage() {
       });
       const result = (await response.json()) as CareProfile & { error?: string };
       if (!response.ok) {
-        setError("Adeno could not create this care profile. Check the name and try again.");
+        setError("adeno could not create this care profile. Check the name and try again.");
         return;
       }
       setProfiles((current) => [...current, result]);
       setSelectedProfileId(result.id);
       setProfileName("");
     } catch {
-      setError("Adeno could not reach its private server. Please try again.");
+      setError("adeno could not reach its private server. Please try again.");
     } finally {
       setWorking(false);
     }
@@ -186,7 +186,7 @@ export function RecordsPage() {
         message?: string;
       };
       if (!response.ok) {
-        setError(result.message ?? "Adeno could not safely add this record.");
+        setError(result.message ?? "adeno could not safely add this record.");
         return;
       }
       setDocuments((current) => [result, ...current]);
@@ -194,7 +194,7 @@ export function RecordsPage() {
       const fileInput = document.querySelector<HTMLInputElement>("#record-file");
       if (fileInput) fileInput.value = "";
     } catch {
-      setError("Adeno could not reach its private server. Please try again.");
+      setError("adeno could not reach its private server. Please try again.");
     } finally {
       setWorking(false);
     }
@@ -221,7 +221,7 @@ export function RecordsPage() {
       }
       setConsentDocumentId("");
     } catch {
-      setError("Adeno could not reach the configured AI provider. The original is still safe.");
+      setError("adeno could not reach the configured AI provider. The original is still safe.");
     } finally {
       setReviewWorkingId("");
     }
@@ -236,13 +236,13 @@ export function RecordsPage() {
       });
       const result = (await response.json()) as ClaimProposal[] & { error?: string };
       if (!response.ok) {
-        setError("Adeno could not open these proposed facts. Please try again.");
+        setError("adeno could not open these proposed facts. Please try again.");
         return;
       }
       setProposals(result);
       setReviewDocumentId(documentId);
     } catch {
-      setError("Adeno could not open these proposed facts. Please try again.");
+      setError("adeno could not open these proposed facts. Please try again.");
     } finally {
       setReviewWorkingId("");
     }
@@ -278,7 +278,7 @@ export function RecordsPage() {
         );
       }
     } catch {
-      setError("Adeno could not save this review. Nothing was changed.");
+      setError("adeno could not save this review. Nothing was changed.");
     } finally {
       setReviewWorkingId("");
     }
@@ -289,7 +289,7 @@ export function RecordsPage() {
       <main className="records-gate">
         <LockKeyhole aria-hidden="true" size={25} />
         <h1>Sign in to open the family workspace.</h1>
-        <p>Adeno does not expose record names or counts before authentication.</p>
+        <p>adeno does not expose record names or counts before authentication.</p>
         <ButtonLink className="" href="/login">
           Sign in
           <ArrowRight aria-hidden="true" size={18} />
@@ -307,7 +307,7 @@ export function RecordsPage() {
           <p className="section-note">Originals first</p>
           <h1>Add records without losing where anything came from.</h1>
           <p>
-            Adeno checks each PDF or photo, preserves the original bytes, and records a
+            adeno checks each PDF or photo, preserves the original bytes, and records a
             SHA-256 fingerprint before proposing any explanation.
           </p>
         </header>
@@ -437,11 +437,11 @@ export function RecordsPage() {
                   {consentDocumentId === document.id ? (
                     <section className="analysis-consent" aria-labelledby={`consent-${document.id}`}>
                       <div>
-                        <p className="review-label">Before anything leaves Adeno</p>
+                        <p className="review-label">Before anything leaves adeno</p>
                         <h4 id={`consent-${document.id}`}>Send this original for an explanation?</h4>
                         <p>
                           The full record will be sent to {_providerLabel(aiStatus.provider)} using
-                          the explanation connection set up for this Adeno installation. The
+                          the explanation connection set up for this adeno installation. The
                           result returns as a draft that you must review before trusting it.
                         </p>
                         <p className="analysis-model">Model: {aiStatus.model}</p>
@@ -472,7 +472,7 @@ export function RecordsPage() {
           ) : (
             <div className="records-empty">
               <FileText aria-hidden="true" size={23} />
-              <p>Add one original report or a clear photo. Adeno will keep its source attached.</p>
+              <p>Add one original report or a clear photo. adeno will keep its source attached.</p>
             </div>
           )}
         </section>
@@ -599,7 +599,7 @@ function _providerLabel(provider: string): string {
 function _analysisError(code?: string): string {
   if (code === "DOCUMENT_NOT_READY") return "This original is still being prepared.";
   if (code === "AI_NOT_CONFIGURED") return "Add a caregiver-owned AI key before requesting an explanation.";
-  return "Adeno could not queue this explanation. The original was not changed.";
+  return "adeno could not queue this explanation. The original was not changed.";
 }
 
 function _evidenceLabel(kind: string): string {
