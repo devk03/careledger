@@ -37,3 +37,12 @@ export interface ApprovedPageRepository {
     maxChars: number;
   }): Promise<StoredPageChunk | null>;
 }
+
+export type PendingReviewHint = { id: string; targetCareDay: ISODate | null; createdAt: string };
+
+export interface PendingReviewRepository {
+  /** No proposal content is returned; reviewer authority is rechecked on every call. */
+  listPendingChildReviews(input: {
+    householdId: string; userId: string; careProfileId: string;
+  }): Promise<PendingReviewHint[]>;
+}

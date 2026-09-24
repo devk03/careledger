@@ -2,7 +2,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vitest";
 
 import { createTimelineMcpServer } from "../src/mcp/server.js";
-import type { ApprovedPageRepository, TimelineRepository } from "../src/timeline/types.js";
+import type { ApprovedPageRepository, PendingReviewRepository, TimelineRepository } from "../src/timeline/types.js";
 
 const profileId = "11111111-1111-4111-8111-111111111111";
 const documentId = "22222222-2222-4222-8222-222222222222";
@@ -12,11 +12,13 @@ async function withClient(
   householdId: string,
   run: (client: Client) => Promise<void>,
   pages: ApprovedPageRepository = { readApprovedPageChunk: async () => null },
+  reviews?: PendingReviewRepository,
 ) {
   const server = createTimelineMcpServer({
     scope: { householdId, userId: "fictional-adult" },
     timeline: repository,
     pages,
+    ...(reviews === undefined ? {} : { reviews }),
   });
   const client = new Client({ name: "fictional-test-client", version: "0.1.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -169,5 +171,29 @@ describe("read-only MCP timeline adapter", () => {
         type: "text", text: "Result too large. Request fewer days, then read individual source pages.",
       }]);
     });
+  });
+
+  it("provides an adult-agent review hint without sending child note text", async () => {
+    const repository: TimelineRepository = {
+      profileBelongsToHousehold: async (id, family) => id === profileId && family === "family-a",
+      listApprovedDays: async () => [],
+    };
+    const reviews: PendingReviewRepository = {
+      listPendingChildReviews: async ({ userId, careProfileId }) => {
+        expect(userId).toBe("fictional-adult");
+        expect(careProfileId).toBe(profileId);
+        return [{ id: "fictional-review", targetCareDay: "2026-09-18",
+          createdAt: "2026-09-19T00:00:00.000Z" }];
+      },
+    };
+    await withClient(repository, "family-a", async (client) => {
+      const result = await client.callTool({ name: "list_pending_child_reviews",
+        arguments: { careProfileId: profileId } });
+      expect(result.isError).not.toBe(true);
+      const block = result.content[0];
+      if (block?.type !== "text") throw new Error("Expected text result");
+      expect(JSON.parse(block.text).pending).toHaveLength(1);
+      expect(block.text).not.toContain("child note text");
+    }, undefined, reviews);
   });
 });

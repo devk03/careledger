@@ -3,7 +3,7 @@ import express, { type Request } from "express";
 import { issueCsrfToken, preflightCookieMutation, readCookieSession,
   sessionClearCookie, sessionSetCookie, type SessionRepository } from "../auth/cookieSession.js";
 import type { SqliteFamilyAccounts } from "../auth/familyAccounts.js";
-import type { GrantResult } from "../storage/sqliteFamilyMutations.js";
+import type { GrantResult, NoteProposalResult, NoteReviewResult } from "../storage/sqliteFamilyMutations.js";
 import {
   getHistoryThroughDay,
   InvalidTimelineDate,
@@ -15,7 +15,8 @@ import {
   InvalidPageRequest,
   SourcePageNotFound,
 } from "../timeline/sourcePage.js";
-import type { ApprovedPageRepository, AuthorizedScope, TimelineRepository } from "../timeline/types.js";
+import type { ApprovedPageRepository, AuthorizedScope, PendingReviewRepository,
+  TimelineRepository } from "../timeline/types.js";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthorizedScope | null>;
 export type DayAccessWriter = {
@@ -24,6 +25,23 @@ export type DayAccessWriter = {
     careProfileId: string; careDay: string; subjectUserId: string;
     level: "none" | "view" | "contribute" | "publish"; reason?: string;
   }): GrantResult;
+  grantDocumentAccess(input: {
+    preflight: { ok: true; tokenSha256: string; csrfToken: string };
+    careProfileId: string; documentId: string; subjectUserId: string; allowed: boolean;
+  }): GrantResult;
+  grantProfileIntake(input: {
+    preflight: { ok: true; tokenSha256: string; csrfToken: string };
+    careProfileId: string; subjectUserId: string; allowed: boolean;
+  }): GrantResult;
+  proposeNote(input: {
+    preflight: { ok: true; tokenSha256: string; csrfToken: string };
+    careProfileId: string; careDay: string; body: string;
+  }): NoteProposalResult;
+  reviewNote(input: {
+    preflight: { ok: true; tokenSha256: string; csrfToken: string };
+    careProfileId: string; revisionId: string; expectedDayRevision: number;
+    decision: "accepted" | "rejected"; reason?: string;
+  }): NoteReviewResult;
 };
 
 /**
@@ -39,6 +57,7 @@ export function createHttpApp(dependencies: {
   expectedOrigin?: string;
   accounts?: SqliteFamilyAccounts;
   sessions?: SessionRepository;
+  reviews?: PendingReviewRepository;
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -180,6 +199,101 @@ export function createHttpApp(dependencies: {
           }
         }
       });
+
+    app.post("/api/v2/care-profiles/:careProfileId/documents/:documentId/access",
+      express.json({ limit: "16kb", type: "application/json" }), (request, response) => {
+        const preflight = preflightCookieMutation(request, dependencies.expectedOrigin!);
+        if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const fields = body as Record<string, unknown>;
+        if (typeof fields.subjectUserId !== "string" || fields.subjectUserId.length < 1 ||
+          fields.subjectUserId.length > 64 || typeof fields.allowed !== "boolean") {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const result = dependencies.mutations!.grantDocumentAccess({
+          preflight, careProfileId: request.params.careProfileId,
+          documentId: request.params.documentId,
+          subjectUserId: fields.subjectUserId, allowed: fields.allowed,
+        });
+        response.status(result.ok ? 201 : result.status).json(result.ok
+          ? { eventId: result.eventId, eventNo: result.eventNo }
+          : { error: result.error });
+      });
+
+    app.post("/api/v2/care-profiles/:careProfileId/intake/access",
+      express.json({ limit: "16kb", type: "application/json" }), (request, response) => {
+        const preflight = preflightCookieMutation(request, dependencies.expectedOrigin!);
+        if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const fields = body as Record<string, unknown>;
+        if (typeof fields.subjectUserId !== "string" || fields.subjectUserId.length < 1 ||
+          fields.subjectUserId.length > 64 || typeof fields.allowed !== "boolean") {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const result = dependencies.mutations!.grantProfileIntake({
+          preflight, careProfileId: request.params.careProfileId,
+          subjectUserId: fields.subjectUserId, allowed: fields.allowed,
+        });
+        response.status(result.ok ? 201 : result.status).json(result.ok
+          ? { eventId: result.eventId, eventNo: result.eventNo }
+          : { error: result.error });
+      });
+
+    app.post("/api/v2/care-profiles/:careProfileId/timeline/days/:careDay/notes",
+      express.json({ limit: "16kb", type: "application/json" }), (request, response) => {
+        const preflight = preflightCookieMutation(request, dependencies.expectedOrigin!);
+        if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body) ||
+          typeof (body as Record<string, unknown>).body !== "string") {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        try {
+          const result = dependencies.mutations!.proposeNote({ preflight,
+            careProfileId: request.params.careProfileId, careDay: request.params.careDay,
+            body: (body as { body: string }).body });
+          response.status(result.ok ? 201 : result.status).json(result.ok ? result : { error: result.error });
+        } catch (error) {
+          if (error instanceof RangeError || error instanceof InvalidTimelineDate)
+            response.status(400).json({ error: "INVALID_BODY" });
+          else throw error;
+        }
+      });
+
+    app.post("/api/v2/care-profiles/:careProfileId/timeline/notes/:revisionId/review",
+      express.json({ limit: "16kb", type: "application/json" }), (request, response) => {
+        const preflight = preflightCookieMutation(request, dependencies.expectedOrigin!);
+        if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        const fields = body as Record<string, unknown>;
+        if ((fields.decision !== "accepted" && fields.decision !== "rejected") ||
+          !Number.isSafeInteger(fields.expectedDayRevision) ||
+          (fields.reason !== undefined && typeof fields.reason !== "string")) {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        try {
+          const result = dependencies.mutations!.reviewNote({
+            preflight, careProfileId: request.params.careProfileId,
+            revisionId: request.params.revisionId,
+            expectedDayRevision: fields.expectedDayRevision as number,
+            decision: fields.decision,
+            ...(fields.reason === undefined ? {} : { reason: fields.reason as string }),
+          });
+          response.status(result.ok ? 200 : result.status).json(result.ok ? result : { error: result.error });
+        } catch (error) {
+          if (error instanceof RangeError) response.status(400).json({ error: "INVALID_BODY" });
+          else throw error;
+        }
+      });
   }
 
   app.get("/api/v2/care-profiles/:careProfileId/timeline/history", async (request, response) => {
@@ -255,6 +369,22 @@ export function createHttpApp(dependencies: {
       }
     }
   });
+
+  if (dependencies.reviews !== undefined) {
+    app.get("/api/v2/care-profiles/:careProfileId/reviews/pending", async (request, response) => {
+      const scope = await dependencies.authenticate(request);
+      if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+      if (!(await dependencies.timeline.profileBelongsToHousehold(
+        request.params.careProfileId, scope.householdId))) {
+        response.status(404).json({ error: "NOT_FOUND" }); return;
+      }
+      const hints = await dependencies.reviews!.listPendingChildReviews({
+        householdId: scope.householdId, userId: scope.userId,
+        careProfileId: request.params.careProfileId,
+      });
+      response.json({ pending: hints });
+    });
+  }
 
   app.get("/api/v2/care-profiles/:careProfileId/documents/:documentId/pages/:pageNumber", async (request, response) => {
     const scope = await dependencies.authenticate(request);

@@ -84,12 +84,20 @@ export class SqliteFamilyAccounts {
     if (!TOKEN_PATTERN.test(input.token) || !LOGIN_PATTERN.test(input.loginName) ||
       input.displayName.trim().length < 1 || input.displayName.length > 120 ||
       !validPassword(input.password)) return { ok: false, error: "INVALID_INPUT" };
+    // Reject random/expired bearer tokens before an expensive Argon2 hash.
+    const tokenSha256 = createHash("sha256").update(input.token).digest("hex");
+    const preliminary = this.db.prepare<[string], InvitationRow>(
+      "SELECT id, household_id householdId, member_kind memberKind, " +
+      "expires_at expiresAt, accepted_at acceptedAt FROM invitations WHERE token_sha256 = ?",
+    ).get(tokenSha256);
+    if (!preliminary || preliminary.acceptedAt !== null || preliminary.expiresAt <= nowSeconds)
+      return { ok: false, error: "INVITATION_INVALID" };
     const passwordHash = await hash(input.password, PASSWORD_OPTIONS);
     return this.db.transaction((): AccountResult<IssuedLogin> => {
       const invitation = this.db.prepare<[string], InvitationRow>(
         "SELECT id, household_id householdId, member_kind memberKind, " +
         "expires_at expiresAt, accepted_at acceptedAt FROM invitations WHERE token_sha256 = ?",
-      ).get(createHash("sha256").update(input.token).digest("hex"));
+      ).get(tokenSha256);
       if (!invitation || invitation.acceptedAt !== null || invitation.expiresAt <= nowSeconds)
         return { ok: false, error: "INVITATION_INVALID" };
       const normalized = input.loginName.toLowerCase();

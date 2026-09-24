@@ -3,7 +3,8 @@ import { z } from "zod/v4";
 
 import { getHistoryThroughDay, listTimelineDays, TimelineAccessDenied } from "../timeline/history.js";
 import { getApprovedSourcePage, InvalidPageRequest, SourcePageNotFound } from "../timeline/sourcePage.js";
-import type { ApprovedPageRepository, AuthorizedScope, TimelineRepository } from "../timeline/types.js";
+import type { ApprovedPageRepository, AuthorizedScope, PendingReviewRepository,
+  TimelineRepository } from "../timeline/types.js";
 
 const MAX_TOOL_TEXT_BYTES = 128_000;
 
@@ -26,6 +27,7 @@ export function createTimelineMcpServer(input: {
   scope: AuthorizedScope;
   timeline: TimelineRepository;
   pages: ApprovedPageRepository;
+  reviews?: PendingReviewRepository;
 }): McpServer {
   const server = new McpServer({ name: "adeno", version: "0.1.0" });
 
@@ -105,6 +107,21 @@ export function createTimelineMcpServer(input: {
       throw error;
     }
   });
+
+  if (input.reviews !== undefined) {
+    server.registerTool("list_pending_child_reviews", {
+      description: "Show authorized adult reviewers pending child-contribution hints, without proposal text. Review and approval require an authorized web mutation.",
+      inputSchema: z.object({ careProfileId: z.string().uuid() }),
+    }, async ({ careProfileId }) => {
+      if (!(await input.timeline.profileBelongsToHousehold(careProfileId, input.scope.householdId))) {
+        return { content: [{ type: "text", text: "Timeline not found" }], isError: true };
+      }
+      const pending = await input.reviews!.listPendingChildReviews({
+        householdId: input.scope.householdId, userId: input.scope.userId, careProfileId,
+      });
+      return boundedTextResult({ pending });
+    });
+  }
 
   return server;
 }

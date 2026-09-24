@@ -125,6 +125,18 @@ describe("fictional v7 family timeline", () => {
         .toMatchObject({ ok: false, status: 403, error: "FORBIDDEN" });
       expect(mutations.grantDayAccess({ ...base, preflight: ownerPreflight, level: "view" }))
         .toMatchObject({ ok: true, eventNo: 1 });
+      expect(mutations.grantDocumentAccess({ preflight: ownerPreflight,
+        careProfileId: "profile-a", documentId: "document-a", subjectUserId: "adult-a",
+        allowed: true, nowSeconds: 200 })).toMatchObject({ ok: true, eventNo: 1 });
+      expect((await reader.readApprovedPageChunk({ householdId: "family-a", userId: "adult-a",
+        careProfileId: "profile-a", documentId: "document-a", pageNumber: 1,
+        offset: 0, maxChars: 6000 }))?.text).toBe(pageText);
+      expect(mutations.grantDocumentAccess({ preflight: ownerPreflight,
+        careProfileId: "profile-a", documentId: "document-a", subjectUserId: "adult-a",
+        allowed: false, nowSeconds: 200 })).toMatchObject({ ok: true, eventNo: 2 });
+      expect(await reader.readApprovedPageChunk({ householdId: "family-a", userId: "adult-a",
+        careProfileId: "profile-a", documentId: "document-a", pageNumber: 1,
+        offset: 0, maxChars: 6000 })).toBeNull();
       expect(await reader.listApprovedDays({ householdId: "family-a", userId: "child-a",
         careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 })).toHaveLength(1);
       writer.prepare("UPDATE sessions SET revoked_at = 201 WHERE id = 'session-owner'").run();
@@ -135,7 +147,7 @@ describe("fictional v7 family timeline", () => {
       const audit = writer.prepare("SELECT * FROM audit_events").all() as { id: string; event_hash: string; previous_hash: string | null;
         household_id: string; actor_user_id: string; action: string; entity_kind: string; entity_id: string;
         outcome: string; occurred_at: number }[];
-      expect(audit).toHaveLength(1);
+      expect(audit).toHaveLength(3);
       const row = audit[0]!;
       const canonical = JSON.stringify({ action: row.action, actor_user_id: row.actor_user_id,
         entity_id: row.entity_id, entity_kind: row.entity_kind, household_id: row.household_id,
@@ -266,5 +278,63 @@ describe("fictional v7 family timeline", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       reader.close(); accounts.close(); writer.close();
     }
+  });
+
+  it("holds a child's fictional note for adult review and publishes one immutable snapshot", async () => {
+    const { path, writer } = database();
+    const secret = Buffer.alloc(32, 6);
+    const ownerToken = "o".repeat(43);
+    const childToken = "c".repeat(43);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-owner-review', 'owner-a', ?, ?, 1, 100, 1000, 100)")
+      .run(sessionTokenSha256(ownerToken), secret);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-child-review', 'child-a', ?, ?, 1, 100, 1000, 100)")
+      .run(sessionTokenSha256(childToken), secret);
+    const owner = { ok: true as const, tokenSha256: sessionTokenSha256(ownerToken),
+      csrfToken: issueCsrfToken("session-owner-review", secret) };
+    const child = { ok: true as const, tokenSha256: sessionTokenSha256(childToken),
+      csrfToken: issueCsrfToken("session-child-review", secret) };
+    const mutations = new SqliteFamilyMutations(path);
+    const reader = new SqliteFamilyTimeline(path);
+    try {
+      expect(mutations.grantProfileIntake({ preflight: owner, careProfileId: "profile-a",
+        subjectUserId: "child-a", allowed: true, nowSeconds: 200 })).toMatchObject({ ok: true });
+      const proposal = mutations.proposeNote({ preflight: child, careProfileId: "profile-a",
+        careDay: "2030-04-12", body: "Fictional child observation.", nowSeconds: 201 });
+      if (!proposal.ok) throw new Error("Expected fictional proposal");
+      expect(proposal.reviewRequestId).toBeTruthy();
+      expect((writer.prepare("SELECT count(*) n FROM review_outbox_events WHERE kind = 'requested'").get() as { n: number }).n).toBe(1);
+      const ownerHints = await reader.listPendingChildReviews({ householdId: "family-a",
+        userId: "owner-a", careProfileId: "profile-a" });
+      expect(ownerHints).toMatchObject([{ id: proposal.reviewRequestId,
+        targetCareDay: "2030-04-12" }]);
+      expect(JSON.stringify(ownerHints)).not.toContain("Fictional child observation");
+      expect(await reader.listPendingChildReviews({ householdId: "family-a",
+        userId: "child-a", careProfileId: "profile-a" })).toEqual([]);
+      expect((await reader.listApprovedDays({ householdId: "family-a", userId: "owner-a",
+        careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 }))[0]?.statements)
+        .toHaveLength(1);
+      expect(mutations.reviewNote({ preflight: child, careProfileId: "profile-a",
+        revisionId: proposal.revisionId, expectedDayRevision: 1,
+        decision: "accepted", nowSeconds: 202 }))
+        .toMatchObject({ ok: false, status: 403, error: "FORBIDDEN" });
+      expect(mutations.reviewNote({ preflight: owner, careProfileId: "profile-a",
+        revisionId: proposal.revisionId, expectedDayRevision: 0,
+        decision: "accepted", nowSeconds: 202 }))
+        .toMatchObject({ ok: false, status: 409, error: "STALE_REVISION" });
+      expect(mutations.reviewNote({ preflight: owner, careProfileId: "profile-a",
+        revisionId: proposal.revisionId, expectedDayRevision: 1,
+        decision: "accepted", nowSeconds: 202 }))
+        .toMatchObject({ ok: true, revision: 2 });
+      const published = (await reader.listApprovedDays({ householdId: "family-a", userId: "owner-a",
+        careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 }))[0];
+      expect(published?.statements.map((s) => s.text)).toEqual([
+        "Fictional family note.", "Fictional child observation.",
+      ]);
+      expect(published?.revision).toBe(2);
+      expect((writer.prepare("SELECT count(*) n FROM review_outbox_events WHERE kind = 'resolved'").get() as { n: number }).n).toBe(1);
+      expect(await reader.listPendingChildReviews({ householdId: "family-a",
+        userId: "owner-a", careProfileId: "profile-a" })).toEqual([]);
+      expect((writer.prepare("SELECT count(*) n FROM day_snapshots WHERE day_node_id = 'day-a'").get() as { n: number }).n).toBe(2);
+    } finally { reader.close(); mutations.close(); writer.close(); }
   });
 });

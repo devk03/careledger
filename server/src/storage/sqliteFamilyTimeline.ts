@@ -3,7 +3,8 @@ import { lstatSync } from "node:fs";
 
 import Database from "better-sqlite3";
 
-import type { ApprovedPageRepository, ISODate, StoredPageChunk, TimelineDay, TimelineRepository } from "../timeline/types.js";
+import type { ApprovedPageRepository, ISODate, PendingReviewHint, PendingReviewRepository,
+  StoredPageChunk, TimelineDay, TimelineRepository } from "../timeline/types.js";
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
 
 const MIGRATIONS = [
@@ -44,7 +45,8 @@ export class IncompatibleFamilyTimelineDatabase extends Error {
  * The database is opened afresh as a read-only connection; all clinical reads
  * recheck user status and current grants, including after MCP connection setup.
  */
-export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRepository, SessionRepository {
+export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRepository,
+  PendingReviewRepository, SessionRepository {
   private readonly db: Database.Database;
 
   constructor(path: string) {
@@ -194,6 +196,26 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     const nextOffset = input.offset + text.length < row.text.length ? input.offset + text.length : null;
     return { documentId: input.documentId, pageNumber: input.pageNumber,
       sourceSha256: row.sourceSha256, offset: input.offset, text, nextOffset };
+  }
+
+  async listPendingChildReviews(input: {
+    householdId: string; userId: string; careProfileId: string;
+  }): Promise<PendingReviewHint[]> {
+    const rows = this.db.prepare<[string, string, string], { id: string;
+      targetCareDay: string | null; createdAt: number }>(
+      "SELECT request.id, request.target_care_day targetCareDay, " +
+      "request.created_at createdAt FROM pending_child_reviews request " +
+      "JOIN care_profiles p ON p.id = request.care_profile_id AND p.archived_at IS NULL " +
+      "JOIN users reviewer ON reviewer.id = ? AND reviewer.household_id = p.household_id " +
+      "AND reviewer.status = 'active' AND reviewer.member_kind = 'adult' " +
+      "WHERE p.household_id = ? AND p.id = ? " +
+      "AND (reviewer.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access grant_row " +
+      "WHERE grant_row.care_profile_id = p.id AND grant_row.care_day = request.target_care_day " +
+      "AND grant_row.subject_user_id = reviewer.id AND grant_row.level = 'publish')) " +
+      "ORDER BY request.created_at, request.id LIMIT 50",
+    ).all(input.userId, input.householdId, input.careProfileId);
+    return rows.map((row) => ({ id: row.id, targetCareDay: row.targetCareDay,
+      createdAt: new Date(row.createdAt * 1000).toISOString() }));
   }
 }
 
