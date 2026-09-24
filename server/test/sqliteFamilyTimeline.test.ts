@@ -105,6 +105,16 @@ describe("fictional v7 family timeline", () => {
     expect(() => new SqliteFamilyTimeline(path)).toThrow(IncompatibleFamilyTimelineDatabase);
   });
 
+  it("refuses a structurally valid database with a broken append-only audit chain", () => {
+    const { path, writer } = database();
+    writer.prepare("INSERT INTO audit_events (id, household_id, actor_user_id, action, entity_kind, " +
+      "entity_id, outcome, occurred_at, event_hash) " +
+      "VALUES ('bad-audit', 'family-a', 'owner-a', 'fictional_action', 'user', 'owner-a', " +
+      "'success', 200, ?)").run("0".repeat(64));
+    writer.close();
+    expect(() => new SqliteFamilyTimeline(path)).toThrow(IncompatibleFamilyTimelineDatabase);
+  });
+
   it("checks session and owner role inside a write transaction, then records an auditable grant", async () => {
     const { path, writer } = database();
     const ownerToken = "o".repeat(43);

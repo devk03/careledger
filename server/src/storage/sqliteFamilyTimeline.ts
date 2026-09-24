@@ -321,4 +321,23 @@ export function verifySchema(db: Database.Database): void {
     row.sha256 !== MIGRATIONS[i]?.[2])) throw new IncompatibleFamilyTimelineDatabase();
   if (db.prepare<[], { integrity_check: string }>("PRAGMA integrity_check").get()?.integrity_check !== "ok" ||
     db.prepare("PRAGMA foreign_key_check").get() !== undefined) throw new IncompatibleFamilyTimelineDatabase();
+  const events = db.prepare<[], { id: string; householdId: string; actorUserId: string | null;
+    action: string; entityKind: string; entityId: string | null; outcome: string;
+    occurredAt: number; previousHash: string | null; eventHash: string }>(
+      "SELECT id, household_id householdId, actor_user_id actorUserId, action, " +
+      "entity_kind entityKind, entity_id entityId, outcome, occurred_at occurredAt, " +
+      "previous_hash previousHash, event_hash eventHash FROM audit_events ORDER BY sequence",
+    ).iterate();
+  let previousHash: string | null = null;
+  for (const event of events) {
+    const canonical: string = JSON.stringify({ action: event.action, actor_user_id: event.actorUserId,
+      entity_id: event.entityId, entity_kind: event.entityKind,
+      household_id: event.householdId, id: event.id,
+      occurred_at: event.occurredAt, outcome: event.outcome,
+      previous_hash: previousHash });
+    const expected: string = createHash("sha256").update(canonical).digest("hex");
+    if (event.previousHash !== previousHash || event.eventHash !== expected)
+      throw new IncompatibleFamilyTimelineDatabase();
+    previousHash = expected;
+  }
 }
