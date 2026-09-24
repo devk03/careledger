@@ -1,5 +1,7 @@
 import express, { type Request } from "express";
 
+import { preflightCookieMutation } from "../auth/cookieSession.js";
+import type { GrantResult } from "../storage/sqliteFamilyMutations.js";
 import {
   getHistoryThroughDay,
   InvalidTimelineDate,
@@ -14,6 +16,13 @@ import {
 import type { ApprovedPageRepository, AuthorizedScope, TimelineRepository } from "../timeline/types.js";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthorizedScope | null>;
+export type DayAccessWriter = {
+  grantDayAccess(input: {
+    preflight: { ok: true; tokenSha256: string; csrfToken: string };
+    careProfileId: string; careDay: string; subjectUserId: string;
+    level: "none" | "view" | "contribute" | "publish"; reason?: string;
+  }): GrantResult;
+};
 
 /**
  * Transport composition only. Production must inject session authentication and a
@@ -23,6 +32,9 @@ export function createHttpApp(dependencies: {
   authenticate: AuthenticateRequest;
   timeline: TimelineRepository;
   pages: ApprovedPageRepository;
+  /** Only pass both fields for the trusted-local v7 family pilot. */
+  mutations?: DayAccessWriter;
+  expectedOrigin?: string;
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -34,6 +46,49 @@ export function createHttpApp(dependencies: {
   app.get("/health/live", (_request, response) => {
     response.json({ status: "ok" });
   });
+
+  if (dependencies.mutations !== undefined && dependencies.expectedOrigin !== undefined) {
+    app.post("/api/v2/care-profiles/:careProfileId/timeline/days/:careDay/access",
+      express.json({ limit: "16kb", type: "application/json" }), (request, response) => {
+        const preflight = preflightCookieMutation(request, dependencies.expectedOrigin!);
+        if (!preflight.ok) {
+          response.status(preflight.status).json({ error: preflight.error });
+          return;
+        }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body)) {
+          response.status(400).json({ error: "INVALID_BODY" });
+          return;
+        }
+        const fields = body as Record<string, unknown>;
+        const subjectUserId = fields.subjectUserId;
+        const level = fields.level;
+        const reason = fields.reason;
+        if (typeof subjectUserId !== "string" || subjectUserId.length < 1 || subjectUserId.length > 64 ||
+          !["none", "view", "contribute", "publish"].includes(String(level)) ||
+          (reason !== undefined && typeof reason !== "string")) {
+          response.status(400).json({ error: "INVALID_BODY" });
+          return;
+        }
+        try {
+          const result = dependencies.mutations!.grantDayAccess({
+            preflight, careProfileId: request.params.careProfileId,
+            careDay: request.params.careDay, subjectUserId,
+            level: level as "none" | "view" | "contribute" | "publish",
+            ...(reason === undefined ? {} : { reason: reason as string }),
+          });
+          response.status(result.ok ? 201 : result.status).json(result.ok
+            ? { eventId: result.eventId, eventNo: result.eventNo }
+            : { error: result.error });
+        } catch (error) {
+          if (error instanceof RangeError || error instanceof InvalidTimelineDate) {
+            response.status(400).json({ error: "INVALID_BODY" });
+          } else {
+            throw error;
+          }
+        }
+      });
+  }
 
   app.get("/api/v2/care-profiles/:careProfileId/timeline/history", async (request, response) => {
     const scope = await dependencies.authenticate(request);

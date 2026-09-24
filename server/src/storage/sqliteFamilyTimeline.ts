@@ -197,7 +197,7 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
   }
 }
 
-function privateFile(path: string, required: boolean): void {
+export function privateFile(path: string, required: boolean): void {
   try {
     const stat = lstatSync(path);
     if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0)
@@ -209,7 +209,7 @@ function privateFile(path: string, required: boolean): void {
   }
 }
 
-function verifySchema(db: Database.Database): void {
+export function verifySchema(db: Database.Database): void {
   if (db.pragma("application_id", { simple: true }) !== 1_129_071_687 ||
     db.pragma("user_version", { simple: true }) !== 7) throw new IncompatibleFamilyTimelineDatabase();
   const rows = db.prepare<[], MigrationRow>("SELECT version, name, sha256 FROM schema_migrations ORDER BY version").all();

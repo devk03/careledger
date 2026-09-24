@@ -3,11 +3,15 @@ import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Server } from "node:http";
 
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
+import { cookieAuthenticator, issueCsrfToken, SESSION_COOKIE_NAME, sessionTokenSha256 } from "../src/auth/cookieSession.js";
+import { createHttpApp } from "../src/http/app.js";
 import { SqliteFamilyTimeline, IncompatibleFamilyTimelineDatabase } from "../src/storage/sqliteFamilyTimeline.js";
+import { SqliteFamilyMutations } from "../src/storage/sqliteFamilyMutations.js";
 
 const directory = fileURLToPath(new URL("../../app/storage/migrations/", import.meta.url));
 const files = [
@@ -92,5 +96,83 @@ describe("fictional v7 family timeline", () => {
     writer.prepare("UPDATE schema_migrations SET sha256 = ? WHERE version = 7").run("0".repeat(64));
     writer.close();
     expect(() => new SqliteFamilyTimeline(path)).toThrow(IncompatibleFamilyTimelineDatabase);
+  });
+
+  it("checks session and owner role inside a write transaction, then records an auditable grant", async () => {
+    const { path, writer } = database();
+    const ownerToken = "o".repeat(43);
+    const adultToken = "d".repeat(43);
+    const secret = Buffer.alloc(32, 7);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-owner', 'owner-a', ?, ?, 1, 100, 1000, 100)")
+      .run(sessionTokenSha256(ownerToken), secret);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-adult', 'adult-a', ?, ?, 1, 100, 1000, 100)")
+      .run(sessionTokenSha256(adultToken), secret);
+    const ownerPreflight = { ok: true as const, tokenSha256: sessionTokenSha256(ownerToken),
+      csrfToken: issueCsrfToken("session-owner", secret) };
+    const adultPreflight = { ok: true as const, tokenSha256: sessionTokenSha256(adultToken),
+      csrfToken: issueCsrfToken("session-adult", secret) };
+    const mutations = new SqliteFamilyMutations(path);
+    const reader = new SqliteFamilyTimeline(path);
+    try {
+      const base = { careProfileId: "profile-a", careDay: "2030-04-12", subjectUserId: "child-a", nowSeconds: 200 };
+      expect(mutations.grantDayAccess({ ...base, preflight: adultPreflight, level: "view" }))
+        .toMatchObject({ ok: false, status: 403, error: "FORBIDDEN" });
+      expect(mutations.grantDayAccess({ ...base,
+        preflight: { ...ownerPreflight, csrfToken: "invalid" }, level: "view" }))
+        .toMatchObject({ ok: false, status: 403, error: "INVALID_CSRF" });
+      expect(mutations.grantDayAccess({ ...base, preflight: ownerPreflight, level: "publish" }))
+        .toMatchObject({ ok: false, status: 403, error: "FORBIDDEN" });
+      expect(mutations.grantDayAccess({ ...base, preflight: ownerPreflight, level: "view" }))
+        .toMatchObject({ ok: true, eventNo: 1 });
+      expect(await reader.listApprovedDays({ householdId: "family-a", userId: "child-a",
+        careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 })).toHaveLength(1);
+      writer.prepare("UPDATE sessions SET revoked_at = 201 WHERE id = 'session-owner'").run();
+      expect(mutations.grantDayAccess({ ...base, preflight: ownerPreflight, level: "none", nowSeconds: 202 }))
+        .toMatchObject({ ok: false, status: 401, error: "AUTH_REQUIRED" });
+      expect(writer.prepare("SELECT count(*) n FROM day_access_events WHERE subject_user_id = 'child-a'").get())
+        .toMatchObject({ n: 1 });
+      const audit = writer.prepare("SELECT * FROM audit_events").all() as { id: string; event_hash: string; previous_hash: string | null;
+        household_id: string; actor_user_id: string; action: string; entity_kind: string; entity_id: string;
+        outcome: string; occurred_at: number }[];
+      expect(audit).toHaveLength(1);
+      const row = audit[0]!;
+      const canonical = JSON.stringify({ action: row.action, actor_user_id: row.actor_user_id,
+        entity_id: row.entity_id, entity_kind: row.entity_kind, household_id: row.household_id,
+        id: row.id, occurred_at: row.occurred_at, outcome: row.outcome, previous_hash: row.previous_hash });
+      expect(row.event_hash).toBe(createHash("sha256").update(canonical).digest("hex"));
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
+  it("exposes the grant only through same-origin cookie and CSRF checks", async () => {
+    const { path, writer } = database();
+    const token = "o".repeat(43);
+    const secret = Buffer.alloc(32, 4);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES ('session-http', 'owner-a', ?, ?, 1, 100, 4000000000, 100)")
+      .run(sessionTokenSha256(token), secret);
+    const reader = new SqliteFamilyTimeline(path);
+    const mutations = new SqliteFamilyMutations(path);
+    const app = createHttpApp({ authenticate: cookieAuthenticator(reader), timeline: reader,
+      pages: reader, mutations, expectedOrigin: "http://127.0.0.1:9999" });
+    const server = await new Promise<Server>((resolve) => {
+      const started = app.listen(0, "127.0.0.1", () => resolve(started));
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("Test listener unavailable");
+    const url = `http://127.0.0.1:${address.port}/api/v2/care-profiles/profile-a/timeline/days/2030-04-12/access`;
+    const body = JSON.stringify({ subjectUserId: "child-a", level: "view" });
+    const headers = { "content-type": "application/json", cookie: `${SESSION_COOKIE_NAME}=${token}`,
+      "x-csrf-token": issueCsrfToken("session-http", secret), "sec-fetch-site": "same-origin" };
+    try {
+      const wrongOrigin = await fetch(url, { method: "POST", body,
+        headers: { ...headers, origin: "http://evil.invalid" } });
+      expect(wrongOrigin.status).toBe(403);
+      const allowed = await fetch(url, { method: "POST", body,
+        headers: { ...headers, origin: "http://127.0.0.1:9999" } });
+      expect(allowed.status).toBe(201);
+      expect((await allowed.json()).eventNo).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      reader.close(); mutations.close(); writer.close();
+    }
   });
 });
