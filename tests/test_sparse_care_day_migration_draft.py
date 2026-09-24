@@ -8,6 +8,9 @@ import pytest
 from app.storage.database import CURRENT_SCHEMA_VERSION, MIGRATIONS, Database, _statements
 
 SQL_PATH = Path(__file__).resolve().parents[1] / "app/storage/migrations/0006_sparse_care_days.sql"
+FAMILY_SQL_PATH = (
+    Path(__file__).resolve().parents[1] / "app/storage/migrations/0007_family_day_access.sql"
+)
 
 
 def _fictional_database(tmp_path: Path) -> sqlite3.Connection:
@@ -58,6 +61,291 @@ def _fictional_database(tmp_path: Path) -> sqlite3.Connection:
         )
     connection.commit()
     return connection
+
+
+def _apply_family_draft(connection: sqlite3.Connection) -> None:
+    for statement in _statements(FAMILY_SQL_PATH.read_text(encoding="utf-8")):
+        connection.execute(statement)
+
+
+def test_family_day_access_draft_applies_only_to_fictional_database(tmp_path: Path) -> None:
+    sql = FAMILY_SQL_PATH.read_text(encoding="utf-8").upper()
+    assert CURRENT_SCHEMA_VERSION == 5
+    assert all(migration.version not in (6, 7) for migration in MIGRATIONS)
+    assert all(term not in sql for term in ("DROP TABLE", "DROP INDEX", "DELETE FROM"))
+    with _fictional_database(tmp_path) as connection:
+        _apply_family_draft(connection)
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_schema")}
+        assert {
+            "day_access_events",
+            "day_nodes",
+            "day_snapshots",
+            "child_review_requests",
+        } <= tables
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+def _active_family_user(
+    connection: sqlite3.Connection,
+    user_id: str,
+    member_kind: str,
+) -> None:
+    connection.execute(
+        "INSERT INTO users (id, household_id, login_name, login_name_normalized, "
+        "display_name, role, status, password_hash, created_at, updated_at, "
+        "password_changed_at, member_kind) VALUES "
+        "(?, 'fictional-household', ?, ?, ?, 'caregiver', 'active', "
+        "'$argon2id$fictional', 30, 30, 30, ?)",
+        (user_id, user_id, user_id, user_id, member_kind),
+    )
+
+
+def test_day_and_source_grants_reject_child_publish_and_revoke_access(tmp_path: Path) -> None:
+    with _fictional_database(tmp_path) as connection:
+        _apply_family_draft(connection)
+        _active_family_user(connection, "fictional-child", "child")
+        _active_family_user(connection, "fictional-editor", "adult")
+
+        with pytest.raises(sqlite3.IntegrityError, match="day grant scope"):
+            connection.execute(
+                "INSERT INTO day_access_events "
+                "(id, care_profile_id, care_day, subject_user_id, event_no, level, "
+                "actor_user_id, occurred_at) VALUES "
+                "('child-publish', 'fictional-profile-a', '2026-01-07', "
+                "'fictional-child', 1, 'publish', 'fictional-owner', 31)"
+            )
+        connection.execute(
+            "INSERT INTO day_access_events "
+            "(id, care_profile_id, care_day, subject_user_id, event_no, level, "
+            "actor_user_id, occurred_at) VALUES "
+            "('adult-view', 'fictional-profile-a', '2026-01-07', "
+            "'fictional-editor', 1, 'view', 'fictional-owner', 31)"
+        )
+        assert (
+            connection.execute(
+                "SELECT level FROM current_day_access WHERE subject_user_id = 'fictional-editor'"
+            ).fetchone()[0]
+            == "view"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="sequence"):
+            connection.execute(
+                "INSERT INTO day_access_events "
+                "(id, care_profile_id, care_day, subject_user_id, event_no, level, "
+                "actor_user_id, occurred_at) VALUES "
+                "('replay', 'fictional-profile-a', '2026-01-07', "
+                "'fictional-editor', 1, 'publish', 'fictional-owner', 32)"
+            )
+        connection.execute(
+            "INSERT INTO day_access_events "
+            "(id, care_profile_id, care_day, subject_user_id, event_no, level, "
+            "actor_user_id, occurred_at) VALUES "
+            "('adult-revoke', 'fictional-profile-a', '2026-01-07', "
+            "'fictional-editor', 2, 'none', 'fictional-owner', 33)"
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM current_day_access WHERE subject_user_id = 'fictional-editor'"
+            ).fetchone()[0]
+            == 0
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO document_access_events "
+                "(id, care_profile_id, document_id, subject_user_id, event_no, "
+                "allowed, actor_user_id, occurred_at) VALUES "
+                "('crossed-source', 'fictional-profile-b', 'fictional-document-a', "
+                "'fictional-editor', 1, 1, 'fictional-owner', 34)"
+            )
+        connection.execute(
+            "INSERT INTO document_access_events "
+            "(id, care_profile_id, document_id, subject_user_id, event_no, "
+            "allowed, actor_user_id, occurred_at) VALUES "
+            "('source-grant', 'fictional-profile-a', 'fictional-document-a', "
+            "'fictional-editor', 1, 1, 'fictional-owner', 34)"
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM current_document_access "
+                "WHERE subject_user_id = 'fictional-editor'"
+            ).fetchone()[0]
+            == 1
+        )
+        connection.execute(
+            "INSERT INTO document_access_events "
+            "(id, care_profile_id, document_id, subject_user_id, event_no, "
+            "allowed, actor_user_id, occurred_at) VALUES "
+            "('source-revoke', 'fictional-profile-a', 'fictional-document-a', "
+            "'fictional-editor', 2, 0, 'fictional-owner', 35)"
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM current_document_access "
+                "WHERE subject_user_id = 'fictional-editor'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_child_review_outbox_and_immutable_day_snapshots(tmp_path: Path) -> None:
+    with _fictional_database(tmp_path) as connection:
+        _apply_family_draft(connection)
+        _active_family_user(connection, "fictional-child", "child")
+        with pytest.raises(sqlite3.IntegrityError, match="lacks intake"):
+            connection.execute(
+                "INSERT INTO family_notes (id, care_profile_id, created_by, created_at) "
+                "VALUES ('ungranted-child-note', 'fictional-profile-a', 'fictional-child', 30)"
+            )
+        connection.execute(
+            "INSERT INTO profile_intake_events "
+            "(id, care_profile_id, subject_user_id, event_no, allowed, "
+            "actor_user_id, occurred_at) VALUES "
+            "('child-intake', 'fictional-profile-a', 'fictional-child', 1, 1, "
+            "'fictional-owner', 31)"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="source or own-intake"):
+            connection.execute(
+                "INSERT INTO document_day_placements "
+                "(id, care_profile_id, document_id, created_by, created_at) "
+                "VALUES ('guessed-document', 'fictional-profile-a', "
+                "'fictional-document-a', 'fictional-child', 32)"
+            )
+        connection.execute(
+            "INSERT INTO family_notes (id, care_profile_id, created_by, created_at) "
+            "VALUES ('child-note', 'fictional-profile-a', 'fictional-child', 32)"
+        )
+        connection.execute(
+            "INSERT INTO family_note_revisions "
+            "(id, note_id, revision_no, care_day, body, created_by, created_at) "
+            "VALUES ('child-note-v1', 'child-note', 1, '2026-01-07', "
+            "'Fictional child observation.', 'fictional-child', 33)"
+        )
+        connection.execute(
+            "INSERT INTO child_review_requests "
+            "(id, care_profile_id, target_care_day, proposed_by, note_revision_id, "
+            "created_at) VALUES "
+            "('review-child-note', 'fictional-profile-a', '2026-01-07', "
+            "'fictional-child', 'child-note-v1', 34)"
+        )
+        assert (
+            connection.execute(
+                "SELECT kind FROM review_outbox_events "
+                "WHERE review_request_id = 'review-child-note'"
+            ).fetchone()[0]
+            == "requested"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="does not match"):
+            connection.execute(
+                "INSERT INTO review_outbox_events (review_request_id, kind, occurred_at) "
+                "VALUES ('review-child-note', 'resolved', 34)"
+            )
+        assert connection.execute("SELECT count(*) FROM pending_child_reviews").fetchone()[0] == 1
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO child_review_requests "
+                "(id, care_profile_id, target_care_day, proposed_by, note_revision_id, "
+                "created_at) VALUES "
+                "('duplicate-review', 'fictional-profile-a', '2026-01-07', "
+                "'fictional-child', 'child-note-v1', 34)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="authorized adult"):
+            connection.execute(
+                "INSERT INTO family_note_reviews "
+                "(id, revision_id, decision, reviewer_id, decided_at) "
+                "VALUES ('child-self-review', 'child-note-v1', 'accepted', "
+                "'fictional-child', 35)"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="lacks publish"):
+            connection.execute(
+                "INSERT INTO day_nodes (id, care_profile_id, care_day, created_by, created_at) "
+                "VALUES ('child-published-day', 'fictional-profile-a', '2026-01-07', "
+                "'fictional-child', 35)"
+            )
+        connection.execute(
+            "INSERT INTO family_note_reviews "
+            "(id, revision_id, decision, reviewer_id, decided_at) "
+            "VALUES ('adult-review', 'child-note-v1', 'accepted', "
+            "'fictional-owner', 35)"
+        )
+        assert [
+            row[0]
+            for row in connection.execute(
+                "SELECT kind FROM review_outbox_events "
+                "WHERE review_request_id = 'review-child-note' ORDER BY event_id"
+            )
+        ] == ["requested", "resolved"]
+        assert connection.execute("SELECT count(*) FROM pending_child_reviews").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM day_snapshots").fetchone()[0] == 0
+
+        connection.execute(
+            "INSERT INTO day_nodes (id, care_profile_id, care_day, created_by, created_at) "
+            "VALUES ('day-node', 'fictional-profile-a', '2026-01-07', "
+            "'fictional-owner', 36)"
+        )
+        connection.execute(
+            "INSERT INTO day_snapshots "
+            "(id, day_node_id, revision_no, previous_snapshot_id, content_sha256, "
+            "published_by, published_at) VALUES "
+            "('snapshot-1', 'day-node', 1, NULL, ?, 'fictional-owner', 37)",
+            ("a" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO day_snapshot_entries (snapshot_id, position, note_revision_id) "
+            "VALUES ('snapshot-1', 0, 'child-note-v1')"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="entry order"):
+            connection.execute(
+                "INSERT INTO day_snapshot_entries (snapshot_id, position, note_revision_id) "
+                "VALUES ('snapshot-1', 2, 'child-note-v1')"
+            )
+        connection.execute(
+            "INSERT INTO day_nodes (id, care_profile_id, care_day, created_by, created_at) "
+            "VALUES ('other-day-node', 'fictional-profile-a', '2026-01-08', "
+            "'fictional-owner', 37)"
+        )
+        connection.execute(
+            "INSERT INTO day_snapshots "
+            "(id, day_node_id, revision_no, previous_snapshot_id, content_sha256, "
+            "published_by, published_at) VALUES "
+            "('other-day-snapshot', 'other-day-node', 1, NULL, ?, 'fictional-owner', 38)",
+            ("d" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="this day"):
+            connection.execute(
+                "INSERT INTO day_snapshot_entries (snapshot_id, position, note_revision_id) "
+                "VALUES ('other-day-snapshot', 0, 'child-note-v1')"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="previous revision"):
+            connection.execute(
+                "INSERT INTO day_snapshots "
+                "(id, day_node_id, revision_no, previous_snapshot_id, content_sha256, "
+                "published_by, published_at) VALUES "
+                "('stale-snapshot', 'day-node', 2, NULL, ?, 'fictional-owner', 38)",
+                ("b" * 64,),
+            )
+        connection.execute(
+            "INSERT INTO day_snapshots "
+            "(id, day_node_id, revision_no, previous_snapshot_id, content_sha256, "
+            "published_by, published_at) VALUES "
+            "('snapshot-2', 'day-node', 2, 'snapshot-1', ?, 'fictional-owner', 38)",
+            ("b" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO day_snapshot_entries (snapshot_id, position, note_revision_id) "
+            "VALUES ('snapshot-2', 0, 'child-note-v1')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE day_snapshots SET content_sha256 = ? WHERE id = 'snapshot-1'",
+                ("c" * 64,),
+            )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM day_snapshots WHERE day_node_id = 'day-node'"
+            ).fetchone()[0]
+            == 2
+        )
 
 
 def _placement(connection: sqlite3.Connection, placement_id: str, document_id: str) -> None:
