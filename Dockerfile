@@ -6,8 +6,15 @@ COPY packages/contracts/src/ ./packages/contracts/src/
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY tools/reviewedPublicAssets.mjs tools/verifyPublicAssets.mjs /build/tools/
 COPY web/ ./
+RUN node /build/tools/verifyPublicAssets.mjs
 RUN npm run build
+RUN test -s dist/images/garden-1200.webp \
+    && test -s dist/images/garden-640.webp \
+    && test -s dist/images/notes-1200.webp \
+    && test -s dist/images/notes-1536.webp \
+    && test -s dist/images/notes-640.webp
 
 FROM python:3.12.10-slim@sha256:fd95fa221297a88e1cf49c55ec1828edd7c5a428187e67b5d1805692d11588db AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \

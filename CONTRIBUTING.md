@@ -9,6 +9,12 @@ Thank you for helping caregivers understand health records without losing the so
 - AI output is proposed evidence until a person reviews it beside the cited source.
 - Keep medical language cautious. Adeno organizes information; it does not diagnose or replace clinicians.
 - Include tests for behavior changes and accessibility checks for interface changes.
+- Before committing or pushing, stage intended files and run `node tools/privacyAudit.mjs`.
+  It checks staged paths/bytes and reachable Git history without printing
+  suspected content. A clean result is a heuristic, not proof that all private
+  information is absent; review the actual diff and public assets as well.
+  New public bitmap artwork needs an explicit path-and-hash allowlist update
+  after visual privacy review; do not bypass the gate for record images.
 
 ## Local setup
 
@@ -31,4 +37,7 @@ Describe the caregiver problem, the change, privacy impact, test evidence, and a
 
 CI never runs automatically on pushes or pull requests. To run it, open the repository's **Actions** tab, choose **CI**, select **Run workflow**, and confirm the run.
 
-The default manual run performs backend tests and static checks plus frontend unit tests, linting, and a production build. Select **Run browser end-to-end and Docker checks** only when the fuller, higher-minute suite is needed. Starting another run cancels an older run that is still in progress.
+The default manual run performs the repository privacy gate, backend tests and
+static checks, plus frontend unit tests, linting, and a production build. Select
+**Run browser end-to-end and Docker checks** only when the fuller, higher-minute
+suite is needed. Starting another run cancels an older run that is still in progress.
