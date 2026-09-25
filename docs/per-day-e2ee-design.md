@@ -4,6 +4,14 @@ Status: **design proposal, not implemented or approved for migration**. It recor
 the requirement implied by family-controlled E2EE plus private per-day grants.
 Do not enable managed startup or use real records on the strength of this file.
 
+The isolated browser prototype `web/src/crypto/dayKeyEnvelope.ts` now generates a
+random day key and recipient-specific P-256 ECDH/HKDF/AES-GCM envelopes over
+opaque IDs. It is not wired to hosted routes, persistence, grants, or the
+recovery kit. It does not authenticate who issued an envelope; the recipient's
+public key must come from a separately approved, authenticated enrollment flow.
+The current record-blob format also lacks the full profile/day/epoch binding
+and durable nonce reservation required for real-record use.
+
 ## Why the current schema and key are insufficient
 
 The current browser vault prototype encrypts with one household key. The v5
