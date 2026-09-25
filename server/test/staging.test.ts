@@ -64,4 +64,10 @@ describe("private original-byte staging", () => {
       .rejects.toBeInstanceOf(UnsafeStagingRoot);
     expect(await readdir(root)).toEqual([]);
   });
+
+  it("requires an absolute staging root before making any filesystem change", async () => {
+    const admission = inspectUploadBytes(fictionalPdf, { originalName: "fictional.pdf" });
+    await expect(stageOriginalBytes("relative-staging-root", fictionalPdf, admission))
+      .rejects.toBeInstanceOf(UnsafeStagingRoot);
+  });
 });

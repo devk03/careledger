@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { inspectUploadBytes, type AdmissionMetadata } from "./admission.js";
 
@@ -33,6 +33,7 @@ export async function stageOriginalBytes(
   bytes: Uint8Array,
   admission: AdmissionMetadata,
 ): Promise<StagedOriginal> {
+  if (!isAbsolute(root)) throw new UnsafeStagingRoot();
   const verified = inspectUploadBytes(bytes, {
     originalName: admission.displayName,
     claimedMediaType: admission.mediaType,
@@ -57,6 +58,16 @@ export async function stageOriginalBytes(
     await handle.sync();
   } finally {
     await handle.close();
+  }
+
+  // fsync the directory too: syncing only the file does not make its newly
+  // created name durable across a host crash. An fsync failure leaves a private
+  // orphan and fails the upload rather than claiming successful intake.
+  const directory = await open(root, "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
   }
 
   return {
