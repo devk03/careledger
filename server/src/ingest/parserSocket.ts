@@ -110,7 +110,10 @@ export function createParserSocketInspector(options: ParserSocketOptions): Struc
               await write(socket, header);
               for (let offset = 0; offset < bytes.length && !settled; offset += CHUNK_BYTES)
                 await write(socket, bytes.subarray(offset, offset + CHUNK_BYTES));
-              if (!settled) requestComplete = true;
+              if (!settled) {
+                requestComplete = true;
+                socket.end();
+              }
             })().catch(() => finish(rejected));
           });
         });

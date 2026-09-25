@@ -27,7 +27,7 @@ async function fakeWorker(mode: WorkerMode) {
   const peers = new Set<Socket>();
   let receivedResolve!: (value: Buffer) => void;
   const received = new Promise<Buffer>((resolve) => { receivedResolve = resolve; });
-  const server: Server = createServer((socket) => {
+  const server: Server = createServer({ allowHalfOpen: true }, (socket) => {
     peers.add(socket);
     socket.on("close", () => peers.delete(socket));
     if (mode === "early") {
@@ -35,17 +35,16 @@ async function fakeWorker(mode: WorkerMode) {
       return;
     }
     let data = Buffer.alloc(0);
-    let done = false;
     socket.on("data", (chunk: Buffer) => {
-      if (done) return;
       data = Buffer.concat([data, chunk]);
+    });
+    socket.on("end", () => {
       if (data.length < 4) return;
       const headerLength = data.readUInt32BE(0);
       if (headerLength > MAX_PARSER_HEADER_BYTES || data.length < 4 + headerLength) return;
       const request: ParserRequest = parseParserRequestHeader(data.subarray(4, 4 + headerLength));
       const payloadStart = 4 + headerLength;
-      if (data.length < payloadStart + request.byteSize) return;
-      done = true;
+      if (data.length !== payloadStart + request.byteSize) return socket.destroy();
       const payload = data.subarray(payloadStart, payloadStart + request.byteSize);
       receivedResolve(Buffer.from(payload));
       if (mode === "silent") return;
