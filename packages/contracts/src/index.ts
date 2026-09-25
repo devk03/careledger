@@ -2,6 +2,7 @@
 export * from "./dayKeyEnvelopeWire.js";
 export * from "./scopeKeyEnvelopeWireV2.js";
 export * from "./scopeEnvelopeActionV1.js";
+export * from "./scopeEnvelopeBackfillActionV1.js";
 export * from "./managedVaultWireV2.js";
 export * from "./indexHeadWire.js";
 export type ISODate = string;
