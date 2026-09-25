@@ -16,6 +16,7 @@ This is the binding gate for the public, family-controlled E2EE product. The old
 ### Family-controlled privacy and access
 
 - [ ] Browser encryption occurs before hosted transfer. Automated network capture, application/proxy/error logs, database/object files, backups, and analytics contain no marker from fictional record bytes, filenames, patient-like names, timeline text, or search terms; the hosted process never obtains an unwrapped family key.
+- [ ] The setup/privacy UI accurately discloses remaining hosted metadata exposure, including exact file length, chunk count, timing, and access patterns; it does not claim that E2EE hides those facts.
 - [ ] Ciphertext, IV, tag, chunk order, household, object, revision, and manifest-tampering tests all fail closed with no partial plaintext. A restored older but internally valid manifest is rejected by the documented key-continuity/rollback mechanism.
 - [ ] A recovery kit restores a fictional vault on a fresh device. Add-device, remove-device, key-rotation, encrypted export, backup restore, and loss-of-all-keys flows pass browser/end-to-end tests without giving the host a recovery key.
 - [ ] Two fictional households pass a denial matrix across list, direct ID, count, cursor, source link, export, search, past day revisions/snapshots, and MCP paths. Current grants and revocation also protect old revisions and sources later hidden or removed; an adult with a narrower day grant cannot infer a hidden day or source. An independent security review signs off on the actual sharing/key model before real records.

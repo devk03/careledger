@@ -4,7 +4,7 @@ const VAULT_KEY_BYTES = 32;
 const GCM_IV_BYTES = 12;
 const BLOB_ID_BYTES = 16;
 const GCM_TAG_BYTES = 16;
-const MAX_VAULT_BYTES = 100 * 1024 * 1024;
+export const MAX_VAULT_BYTES = 100 * 1024 * 1024;
 
 export interface VaultScope {
   householdId: string;

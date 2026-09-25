@@ -36,6 +36,9 @@ installed, signed client with reproducible builds, verified updates, and key con
    length.
 3. The server stores ciphertext, IVs, opaque IDs, sizes, and sync versions. It never receives the
    unwrapped household key or medical plaintext.
+   E2EE does not conceal exact file length, chunk count, upload timing, or access patterns from
+   the host; the UI and privacy notice must disclose these metadata leaks. Padding is a separate
+   design choice, not a protection in the current vault wire format.
 4. Browser-side processing renders and extracts records in an isolated worker. Search and review
    use a local decrypted index rather than a server-side medical index.
 5. Recovery wrapping is a release blocker, not a current feature. Before launch, encrypted exports
