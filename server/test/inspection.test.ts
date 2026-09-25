@@ -8,6 +8,7 @@ import { inspectUploadBytes } from "../src/ingest/admission.js";
 import { inspectStagedOriginal, InspectionRejected,
   isInspectedOriginal } from "../src/ingest/inspection.js";
 import { stageOriginalBytes } from "../src/ingest/staging.js";
+import { MAX_PDF_PAGES } from "../src/ingest/policy.js";
 
 const fictionalPdf = Buffer.from("%PDF-1.7\nFICTIONAL INSPECTION ONLY\n%%EOF");
 
@@ -51,6 +52,7 @@ describe("explicit scan and structural-inspection gate", () => {
     for (const outcome of [
       { status: "rejected" as const, pageCount: 1 },
       { status: "safe" as const, pageCount: 0 },
+      { status: "safe" as const, pageCount: MAX_PDF_PAGES + 1 },
     ]) {
       await expect(inspectStagedOriginal(original,
         { scan: async () => ({ verdict: "clean", engine: "fictional-test-scanner" }) },

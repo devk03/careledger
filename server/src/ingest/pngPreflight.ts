@@ -1,11 +1,10 @@
 import { crc32 } from "node:zlib";
 
 import { MAX_UPLOAD_BYTES } from "./admission.js";
+import { MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS } from "./policy.js";
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_CHUNKS = 10_000;
-const MAX_DIMENSION = 20_000;
-const MAX_PIXELS = 40_000_000;
 
 export class PngPreflightRejected extends Error {
   constructor() { super("PNG_PREFLIGHT_REJECTED"); }
@@ -68,8 +67,8 @@ export function checkPngContainer(input: Uint8Array): PngPreflight {
         0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8],
         4: [8, 16], 6: [8, 16],
       };
-      if (width < 1 || height < 1 || width > MAX_DIMENSION ||
-        height > MAX_DIMENSION || width * height > MAX_PIXELS ||
+      if (width < 1 || height < 1 || width > MAX_IMAGE_DIMENSION ||
+        height > MAX_IMAGE_DIMENSION || width * height > MAX_IMAGE_PIXELS ||
         !allowedDepths[colorType]?.includes(bitDepth) || payload[10] !== 0 ||
         payload[11] !== 0 || (payload[12] !== 0 && payload[12] !== 1))
         throw new PngPreflightRejected();

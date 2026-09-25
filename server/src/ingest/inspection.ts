@@ -4,6 +4,7 @@ import { open } from "node:fs/promises";
 
 import { inspectUploadBytes, MAX_UPLOAD_BYTES,
   type AdmittedMediaType } from "./admission.js";
+import { MAX_PDF_PAGES } from "./policy.js";
 import type { StagedOriginal } from "./staging.js";
 
 export class InspectionRejected extends Error {
@@ -98,7 +99,9 @@ export async function inspectStagedOriginal(
     throw new InspectionRejected("SCAN_NOT_CLEAN");
   const parsed = await parser.inspect(Buffer.from(bytes), snapshot.mediaType);
   if (parsed.status !== "safe" || !Number.isSafeInteger(parsed.pageCount) ||
-    parsed.pageCount < 1 || parsed.pageCount > 10_000)
+    parsed.pageCount < 1 ||
+    (snapshot.mediaType === "application/pdf" && parsed.pageCount > MAX_PDF_PAGES) ||
+    (snapshot.mediaType !== "application/pdf" && parsed.pageCount !== 1))
     throw new InspectionRejected("STRUCTURE_REJECTED");
   const finalBytes = await verifiedStageBytes(snapshot);
   if (!finalBytes.equals(bytes)) throw new InspectionRejected("STAGE_CHANGED");
