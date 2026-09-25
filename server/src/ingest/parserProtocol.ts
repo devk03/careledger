@@ -7,6 +7,7 @@ import { INGEST_POLICY_VERSION, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS,
 
 export const MAX_PARSER_HEADER_BYTES = 512;
 export const MAX_PARSER_REPLY_BYTES = 2048;
+export const PARSER_WORKER_VERSION = "adeno-parser-1";
 
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const common = {
@@ -18,7 +19,7 @@ const common = {
   mediaType: z.enum(["application/pdf", "image/jpeg", "image/png"]),
 };
 const requestSchema = z.strictObject(common);
-const replyCommon = { ...common, workerVersion: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/) };
+const replyCommon = { ...common, workerVersion: z.literal(PARSER_WORKER_VERSION) };
 const pdfSafeSchema = z.strictObject({
   ...replyCommon, mediaType: z.literal("application/pdf"), verdict: z.literal("safe"),
   pageCount: z.number().int().min(1).max(MAX_PDF_PAGES),
@@ -57,8 +58,8 @@ export function createParserRequest(input: {
   mediaType: AdmittedMediaType; sha256: string; byteSize: number;
 }): ParserRequest {
   const parsed = requestSchema.safeParse({
-    protocolVersion: 1, requestId: randomUUID(), policyVersion: INGEST_POLICY_VERSION,
     ...input,
+    protocolVersion: 1, requestId: randomUUID(), policyVersion: INGEST_POLICY_VERSION,
   });
   if (!parsed.success) throw new ParserProtocolError();
   return Object.freeze(parsed.data);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createParserRequest, encodeParserRequestHeader,
-  MAX_PARSER_REPLY_BYTES, parseParserReply, parseParserRequestHeader,
+  MAX_PARSER_REPLY_BYTES, PARSER_WORKER_VERSION, parseParserReply, parseParserRequestHeader,
   ParserProtocolError } from "../src/ingest/parserProtocol.js";
 
 const digest = "a".repeat(64);
@@ -25,7 +25,7 @@ describe("bounded parser-worker protocol", () => {
     const request = createParserRequest({
       mediaType: "application/pdf", sha256: digest, byteSize: 123,
     });
-    const valid = { ...request, workerVersion: "parser-1", verdict: "safe",
+    const valid = { ...request, workerVersion: PARSER_WORKER_VERSION, verdict: "safe",
       pageCount: 2, objectCount: 12, maxPageWidthPoints: 612,
       maxPageHeightPoints: 792, encrypted: false, activeContent: false };
     expect(parseParserReply(body(valid), request)).toEqual(valid);
@@ -35,6 +35,7 @@ describe("bounded parser-worker protocol", () => {
       { ...valid, objectCount: 100_001 },
       { ...valid, maxPageWidthPoints: 14_401 },
       { ...valid, activeContent: true },
+      { ...valid, workerVersion: "other-parser" },
       { ...valid, extractedText: "must never enter the protocol" },
     ]) expect(() => parseParserReply(body(changed), request)).toThrow(ParserProtocolError);
   });
@@ -43,7 +44,7 @@ describe("bounded parser-worker protocol", () => {
     const request = createParserRequest({
       mediaType: "image/png", sha256: digest, byteSize: 123,
     });
-    const valid = { ...request, workerVersion: "parser-1", verdict: "safe",
+    const valid = { ...request, workerVersion: PARSER_WORKER_VERSION, verdict: "safe",
       pageCount: 1, frameCount: 1, width: 1000, height: 2000 };
     expect(parseParserReply(body(valid), request)).toEqual(valid);
     for (const changed of [
@@ -51,7 +52,7 @@ describe("bounded parser-worker protocol", () => {
       { ...valid, frameCount: 2 },
       { ...valid, mediaType: "image/jpeg" },
     ]) expect(() => parseParserReply(body(changed), request)).toThrow(ParserProtocolError);
-    const rejected = { ...request, workerVersion: "parser-1",
+    const rejected = { ...request, workerVersion: PARSER_WORKER_VERSION,
       verdict: "rejected", code: "MALFORMED" };
     expect(parseParserReply(body(rejected), request)).toEqual(rejected);
   });
@@ -66,8 +67,18 @@ describe("bounded parser-worker protocol", () => {
       .toThrow(ParserProtocolError);
     expect(() => parseParserReply(Buffer.from([0xff, 0xfe]), request))
       .toThrow(ParserProtocolError);
-    expect(() => parseParserReply(body({ ...request, workerVersion: "parser-1",
+    expect(() => parseParserReply(body({ ...request, workerVersion: PARSER_WORKER_VERSION,
       verdict: "rejected", code: "UNEXPECTED" }), request))
       .toThrow(ParserProtocolError);
+  });
+
+  it("does not let extra caller fields override generated request identity or policy", () => {
+    const malicious = { mediaType: "application/pdf" as const, sha256: digest, byteSize: 123,
+      requestId: "00000000-0000-4000-8000-000000000000", policyVersion: "old",
+      protocolVersion: 999 };
+    const request = createParserRequest(malicious);
+    expect(request.requestId).not.toBe(malicious.requestId);
+    expect(request.policyVersion).not.toBe(malicious.policyVersion);
+    expect(request.protocolVersion).toBe(1);
   });
 });
