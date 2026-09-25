@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:net";
+import { createServer, type Server, type Socket } from "node:net";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,6 +87,40 @@ describe("local clamd INSTREAM adapter", () => {
       expect(await daemon.received).toEqual(multiChunk);
       await expect(scanner.scan(Buffer.alloc(MAX_UPLOAD_BYTES + 1), "image/png"))
         .resolves.toEqual({ verdict: "unavailable", engine: "clamd" });
+    } finally {
+      await close(daemon.server);
+    }
+  });
+
+  it("never treats an early success reply as a completed scan", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "adeno-fictional-early-clamd-"));
+    const socketPath = join(directory, "clamd.sock");
+    let peerSocket: Socket | undefined;
+    const server = createServer((socket) => {
+      peerSocket = socket;
+      socket.write(Buffer.from("stream: OK\0"));
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    try {
+      const scanner = createClamdScanner({ socketPath, timeoutMs: 1000 });
+      await expect(scanner.scan(Buffer.alloc(10_000_000, 0x46), "application/pdf"))
+        .resolves.toEqual({ verdict: "unavailable", engine: "clamd" });
+    } finally {
+      peerSocket?.destroy();
+      await close(server);
+    }
+  });
+
+  it("fails closed at its configured concurrency limit", async () => {
+    const daemon = await fakeDaemon(null);
+    try {
+      const scanner = createClamdScanner({ socketPath: daemon.socketPath,
+        maxConcurrentScans: 1, timeoutMs: 200 });
+      const first = scanner.scan(fictionalBytes, "application/pdf");
+      await daemon.received;
+      await expect(scanner.scan(fictionalBytes, "application/pdf"))
+        .resolves.toEqual({ verdict: "unavailable", engine: "clamd" });
+      await expect(first).resolves.toEqual({ verdict: "unavailable", engine: "clamd" });
     } finally {
       await close(daemon.server);
     }
