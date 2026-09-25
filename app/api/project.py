@@ -7,6 +7,8 @@ import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.config import get_settings
+
 router = APIRouter(tags=["public-project"])
 REPOSITORY_URL = "https://github.com/devk03/careledger"
 API_URL = "https://api.github.com/repos/devk03/careledger"
@@ -16,6 +18,10 @@ class ProjectStats(BaseModel):
     stars: int | None = None
     checked_at: int | None = None
     stale: bool = False
+
+
+class RuntimeMode(BaseModel):
+    restricted_preview: bool
 
 
 class StarCache:
@@ -61,3 +67,8 @@ star_cache = StarCache()
 @router.get("/api/public/project", response_model=ProjectStats)
 def project_stats() -> ProjectStats:
     return star_cache.get()
+
+
+@router.get("/api/public/runtime", response_model=RuntimeMode)
+def runtime_mode() -> RuntimeMode:
+    return RuntimeMode(restricted_preview=get_settings().app_environment == "staging")

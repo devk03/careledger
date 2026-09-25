@@ -20,6 +20,8 @@ Open `http://localhost:8080`. Retrieve the one-time setup URL using `docker comp
 
 The first Railway release is an access-restricted, single-household community preview for fictional testing. Managed E2EE and public family signup remain disabled. Set `APP_ENVIRONMENT=staging`, `APP_EDITION=community`, `AI_PROVIDER=disabled`, `DATA_DIR=/data`, the exact HTTPS `PUBLIC_BASE_URL`, and a random runtime `STAGING_ACCESS_PASSWORD` of at least 32 characters. The browser's outer access prompt uses username `adeno`; the normal application login remains independently required. Only GET health endpoints bypass the outer gate.
 
+The web UI also shows a persistent fictional-records-only notice in staging. It stays visible if the runtime-mode check fails and disappears only when the server explicitly reports a non-preview environment. Do not treat this notice as a substitute for the password gate or as permission to upload real records.
+
 Use one replica, a durable volume at `/data`, health check `/health/ready`, and start command `python -m app.railway_start`. Railway mounts volumes as root; set `RAILWAY_RUN_UID=0` only with this entrypoint. It adjusts the mount-root ownership without recursion, clears supplementary groups, and drops to UID/GID 10001 before launching the server. Verify the running process UID and a restart with the same volume. Never start `app.run` directly as root.
 
 Deploy only an audited `git archive` of the release commit, not the private parent workspace or a general filesystem copy. Docker's build context is allowlisted. Provider keys remain unset for this preview. Retrieve setup privately through the operator shell using `python -m app.setup_link`; never put its token in build/runtime logs or GitHub.
