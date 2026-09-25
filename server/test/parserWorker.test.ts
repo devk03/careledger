@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
-import { mkdtemp } from "node:fs/promises";
+import { lstat, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -16,6 +16,7 @@ async function worker() {
   const socketPath = join(directory, "parser.sock");
   const server = await startParserWorkerServer({ socketPath, timeoutMs: 1000 },
     { childScriptPath: join(process.cwd(), "dist/ingest/imageDecodeChild.js") });
+  expect((await lstat(socketPath)).mode & 0o777).toBe(0o660);
   return { socketPath, close: async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   } };

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat } from "node:fs/promises";
+import { chmod, lstat } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -174,5 +174,14 @@ export async function startParserWorkerServer(
       resolve();
     });
   });
+  try {
+    await chmod(options.socketPath, 0o660);
+    const socket = await lstat(options.socketPath);
+    if (!socket.isSocket() || socket.uid !== process.getuid!() ||
+      (socket.mode & 0o777) !== 0o660) throw new Error("UNSAFE_PARSER_SOCKET");
+  } catch (error) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw error;
+  }
   return server;
 }
