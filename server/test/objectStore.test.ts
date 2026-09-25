@@ -68,13 +68,21 @@ describe("private immutable object-store primitive", () => {
     const first = await provisionPrivateDirectory(objects, staged.sha256.slice(0, 2));
     const second = await provisionPrivateDirectory(first, staged.sha256.slice(2, 4));
     const orphan = join(second, "pending-00000000-0000-0000-0000-000000000000");
-    await writeFile(orphan, "incomplete fictional copy", { flag: "wx", mode: 0o600 });
+    await writeFile(orphan, fictionalPdf, { flag: "wx", mode: 0o600 });
+    const incomplete = join(second, "pending-11111111-1111-1111-1111-111111111111");
+    const incompleteBytes = Buffer.from("incomplete fictional copy");
+    expect(createHash("sha256").update(incompleteBytes).digest("hex").slice(0, 4))
+      .not.toBe(staged.sha256.slice(0, 4));
+    await writeFile(incomplete, incompleteBytes, { flag: "wx", mode: 0o600 });
+    expect((await inventoryPendingObjects(objects)).map((item) => item.state).sort())
+      .toEqual(["conflict", "unpublished"]);
     const stored = await commitStagedObject(objects, quarantine, staged);
     expect(stored.alreadyExisted).toBe(false);
     expect(await readFile(stored.path)).toEqual(fictionalPdf);
-    expect(await readFile(orphan, "utf8")).toBe("incomplete fictional copy");
+    expect(await readFile(orphan)).toEqual(fictionalPdf);
+    expect(await readFile(incomplete, "utf8")).toBe("incomplete fictional copy");
     expect((await inventoryPendingObjects(objects)).map((item) => item.state).sort())
-      .toEqual(["linked_alias", "unpublished"]);
+      .toEqual(["conflict", "duplicate_copy", "linked_alias"]);
   });
 
   it("handles concurrent identical uploads without overwriting the digest path", async () => {

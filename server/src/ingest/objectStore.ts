@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, lstat, open, readdir, realpath } from "node:fs/promises";
+import { chmod, link, lstat, open, opendir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 import { MAX_UPLOAD_BYTES } from "./admission.js";
@@ -23,6 +23,7 @@ export type StoredOriginal = {
 
 export type PendingObject = {
   pendingId: string;
+  shard: string;
   byteSize: number;
   sha256: string | null;
   state: "linked_alias" | "duplicate_copy" | "unpublished" | "conflict" | "unsafe";
@@ -180,17 +181,27 @@ export async function commitStagedObject(
 export async function inventoryPendingObjects(objectRoot: string): Promise<PendingObject[]> {
   const root = await assertPrivateRoot(objectRoot);
   const result: PendingObject[] = [];
-  for (const first of await readdir(root, { withFileTypes: true })) {
+  let inspectedEntries = 0;
+  let hashedBytes = 0;
+  const countEntry = () => {
+    inspectedEntries += 1;
+    if (inspectedEntries > 50_000) throw new ObjectIntegrityError();
+  };
+  for await (const first of await opendir(root)) {
+    countEntry();
     if (!/^[0-9a-f]{2}$/.test(first.name) || !first.isDirectory())
       throw new ObjectIntegrityError();
     const firstPath = join(root, first.name);
     await assertPrivateRoot(firstPath);
-    for (const second of await readdir(firstPath, { withFileTypes: true })) {
+    for await (const second of await opendir(firstPath)) {
+      countEntry();
       if (!/^[0-9a-f]{2}$/.test(second.name) || !second.isDirectory())
         throw new ObjectIntegrityError();
       const secondPath = join(firstPath, second.name);
       await assertPrivateRoot(secondPath);
-      for (const entry of await readdir(secondPath, { withFileTypes: true })) {
+      const shard = first.name + second.name;
+      for await (const entry of await opendir(secondPath)) {
+        countEntry();
         if (SHA256.test(entry.name)) continue;
         if (!/^pending-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(entry.name))
           throw new ObjectIntegrityError();
@@ -201,13 +212,19 @@ export async function inventoryPendingObjects(objectRoot: string): Promise<Pendi
         if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0 ||
           (process.getuid !== undefined && info.uid !== process.getuid()) ||
           info.size < 1 || info.size > MAX_UPLOAD_BYTES) {
-          result.push({ pendingId, byteSize: info.size, sha256: null, state: "unsafe" });
+          result.push({ pendingId, shard, byteSize: info.size, sha256: null, state: "unsafe" });
           continue;
         }
+        hashedBytes += info.size;
+        if (hashedBytes > 512 * 1024 * 1024) throw new ObjectIntegrityError();
         let digest: string;
         try { digest = await hashPrivateFile(path, info.size); }
         catch {
-          result.push({ pendingId, byteSize: info.size, sha256: null, state: "unsafe" });
+          result.push({ pendingId, shard, byteSize: info.size, sha256: null, state: "unsafe" });
+          continue;
+        }
+        if (digest.slice(0, 4) !== shard) {
+          result.push({ pendingId, shard, byteSize: info.size, sha256: digest, state: "conflict" });
           continue;
         }
         const destination = join(secondPath, digest);
@@ -225,7 +242,7 @@ export async function inventoryPendingObjects(objectRoot: string): Promise<Pendi
           state = typeof error === "object" && error !== null && "code" in error &&
             error.code === "ENOENT" ? "unpublished" : "conflict";
         }
-        result.push({ pendingId, byteSize: info.size, sha256: digest, state });
+        result.push({ pendingId, shard, byteSize: info.size, sha256: digest, state });
       }
     }
   }
