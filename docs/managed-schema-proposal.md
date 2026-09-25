@@ -3,7 +3,12 @@
 Status: **partial implementation, 2026-09-25**. The maintainer authorized
 creation of the managed migration files. The first identity/grant draft is
 [`0001_identity_scopes.sql`](../server/migrations/managed/0001_identity_scopes.sql).
-It is not registered with any runner and has not been applied to any database.
+The second, still-unapplied
+[`0002_ciphertext_intake.sql`](../server/migrations/managed/0002_ciphertext_intake.sql)
+draft adds session-bound upload intents, key-identity nonce reservations,
+chunk metadata and immutable committed ciphertext objects. A committed object
+is not a published timeline revision; revision CAS is a separate next slice.
+Neither migration is registered with a runner or applied to any database.
 Do not apply it to an existing, family, or production database. The first
 execution target, if separately approved, is a fresh database containing only
 wholly fictional families.
