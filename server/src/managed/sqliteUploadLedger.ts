@@ -13,6 +13,9 @@ import { MANAGED_APPLICATION_ID, MANAGED_MIGRATIONS } from
   "./managedSchemaManifest.js";
 import type { ManagedStagingIntent, ManagedUploadLedger,
   VerifiedUploadChunkRow } from "./stagedUploadStore.js";
+import { ManagedUploadReceiptCsrfError, type ManagedUploadReceiptReader,
+  type ManagedUploadReceipt } from
+  "./uploadReceipt.js";
 
 const HEX_32 = /^[0-9a-f]{32}$/u;
 const HEX_64 = /^[0-9a-f]{64}$/u;
@@ -52,7 +55,8 @@ export class IncompatibleManagedLedger extends Error {
  * leases stay charged until a separately reviewed cleanup path exists.
  * Never point it at a community/pilot database or real family records yet.
  */
-export class SqliteManagedUploadLedger implements ManagedUploadLedger {
+export class SqliteManagedUploadLedger implements ManagedUploadLedger,
+  ManagedUploadReceiptReader {
   private readonly db: Database.Database;
   private readonly maxStoredBytesPerFamily: number;
 
@@ -196,6 +200,46 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
 
   close(): void { this.db.close(); }
 
+  async readReceipt(input: Parameters<ManagedUploadReceiptReader["readReceipt"]>[0]):
+    Promise<ManagedUploadReceipt | null> {
+    const read = this.db.transaction((): ManagedUploadReceipt | null => {
+      const session = this.sessionByToken(input.tokenSha256);
+      if (!session) throw new ManagedVaultUploadSessionError();
+      if (!verifyCsrfToken(input.csrfToken, session.sessionId, session.csrfSecret))
+        throw new ManagedUploadReceiptCsrfError();
+      if (!HEX_32.test(input.intentId) || !HEX_32.test(input.blobId)) return null;
+      const row = this.db.prepare<[string, string, string, string],
+        { wireSha256: Buffer | null; wireBytes: number | null }>(
+        "SELECT b.wire_sha256 AS wireSha256, b.wire_bytes AS wireBytes " +
+        "FROM managed_upload_intents i " +
+        "JOIN managed_devices d ON d.household_id = i.household_id " +
+        "AND d.id = i.writer_device_id " +
+        "JOIN managed_grant_heads g ON g.household_id = i.household_id " +
+        "AND g.profile_id = i.profile_id AND g.scope_id = i.scope_id " +
+        "AND g.subject_device_id = i.writer_device_id " +
+        "JOIN managed_scopes sc ON sc.household_id = i.household_id " +
+        "AND sc.profile_id = i.profile_id AND sc.id = i.scope_id " +
+        "JOIN managed_profiles p ON p.household_id = i.household_id " +
+        "AND p.id = i.profile_id " +
+        "LEFT JOIN managed_committed_blobs b ON b.household_id = i.household_id " +
+        "AND b.intent_id = i.id AND b.blob_id = i.blob_id " +
+        "WHERE i.household_id = ? AND i.id = ? AND i.blob_id = ? " +
+        "AND d.account_id = ? AND d.state = 'active' " +
+        "AND (g.capability_mask & 2) = 2 AND sc.state = 'active' " +
+        "AND p.state = 'active'",
+      ).get(session.householdId, input.intentId, input.blobId, session.accountId);
+      if (!row) return null;
+      if (row.wireSha256 === null) return { status: "unconfirmed" };
+      if (!Buffer.isBuffer(row.wireSha256) || row.wireSha256.length !== 32 ||
+        !Number.isSafeInteger(row.wireBytes) || row.wireBytes === null ||
+        row.wireBytes < 65 || row.wireBytes > MAX_WIRE_BYTES)
+        throw new IncompatibleManagedLedger();
+      return { status: "committed", wireSha256: row.wireSha256.toString("hex"),
+        wireBytes: row.wireBytes };
+    });
+    return read.deferred();
+  }
+
   /** Count committed wires plus every uncommitted physical reservation. */
   private withinFamilyQuota(householdId: string, additionalBytes: number): boolean {
     const usage = this.db.prepare<[string, string], { bytes: number }>(
@@ -209,6 +253,12 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
   }
 
   private currentSession(tokenSha256: string, csrfToken: string): SessionRow | null {
+    const row = this.sessionByToken(tokenSha256);
+    if (!row || !verifyCsrfToken(csrfToken, row.sessionId, row.csrfSecret)) return null;
+    return row;
+  }
+
+  private sessionByToken(tokenSha256: string): SessionRow | null {
     if (!HEX_64.test(tokenSha256)) return null;
     const row = this.db.prepare<[Buffer], SessionRow>(
       "SELECT s.household_id AS householdId, s.account_id AS accountId, " +
@@ -224,8 +274,8 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
       "AND s.membership_auth_version = m.auth_version " +
       "AND a.state = 'active' AND m.state = 'active' AND f.state = 'active'",
     ).get(Buffer.from(tokenSha256, "hex"));
-    if (!row || !Buffer.isBuffer(row.csrfSecret) || row.csrfSecret.length !== 32 ||
-      !verifyCsrfToken(csrfToken, row.sessionId, row.csrfSecret)) return null;
+    if (!row || !Buffer.isBuffer(row.csrfSecret) || row.csrfSecret.length !== 32)
+      return null;
     return row;
   }
 
