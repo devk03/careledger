@@ -29,7 +29,15 @@ private chunks, re-reads each object through the commit-proof helper, checks
 the complete wire digest, and converts SHA-256 hex to 32-byte database values.
 There is still no durable managed ledger that atomically checks current grants,
 sessions, nonces and quota before inserting rows; no reconciler for orphaned
-objects; and no backup that selects and re-hashes database-referenced objects.
+objects. A ciphertext-only snapshot primitive can copy and re-hash an exact list
+of committed object references without scanning pending files; it publishes a
+completed snapshot only after staged files and its read-only manifest are synced.
+Failures before rename leave private, unpublished in-progress directories; a
+failure syncing the parent after rename can leave a complete directory that
+must be inspected before retry. Snapshot IDs are create-only reservations; a
+failed attempt uses a fresh ID rather than reusing the previous one. No consistent
+database-snapshot provider, full backup encryption/retention, or fresh-instance
+restore is implemented.
 Therefore no managed upload or read route may be enabled yet.
 Do not apply these drafts to an existing, family, or production database. The first
 execution target, if separately approved, is a fresh database containing only
