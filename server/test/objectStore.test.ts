@@ -57,6 +57,29 @@ describe("private immutable object-store primitive", () => {
     expect(await readFile(destination)).toEqual(Buffer.alloc(fictionalPdf.length, 0));
   });
 
+  it("ignores incomplete pending files from a prior crash and retries safely", async () => {
+    const { quarantine, objects } = await roots();
+    const staged = await stage(quarantine);
+    const first = await provisionPrivateDirectory(objects, staged.sha256.slice(0, 2));
+    const second = await provisionPrivateDirectory(first, staged.sha256.slice(2, 4));
+    const orphan = join(second, "pending-00000000-0000-0000-0000-000000000000");
+    await writeFile(orphan, "incomplete fictional copy", { flag: "wx", mode: 0o600 });
+    const stored = await commitStagedObject(objects, quarantine, staged);
+    expect(stored.alreadyExisted).toBe(false);
+    expect(await readFile(stored.path)).toEqual(fictionalPdf);
+    expect(await readFile(orphan, "utf8")).toBe("incomplete fictional copy");
+  });
+
+  it("handles concurrent identical uploads without overwriting the digest path", async () => {
+    const { quarantine, objects } = await roots();
+    const stages = await Promise.all([stage(quarantine), stage(quarantine)]);
+    const results = await Promise.all(stages.map((staged) =>
+      commitStagedObject(objects, quarantine, staged)));
+    expect(results[0]?.path).toBe(results[1]?.path);
+    expect(results.filter((result) => !result.alreadyExisted)).toHaveLength(1);
+    expect(await readFile(results[0]!.path)).toEqual(fictionalPdf);
+  });
+
   it("rejects a mutated or forged quarantine payload before publication", async () => {
     const { quarantine, objects } = await roots();
     const staged = await stage(quarantine);
