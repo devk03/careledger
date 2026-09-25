@@ -1,8 +1,7 @@
 import Database from "better-sqlite3";
 
 import { verifyCsrfToken } from "../auth/cookieSession.js";
-import { MANAGED_APPLICATION_ID, MANAGED_MIGRATIONS } from
-  "./managedSchemaManifest.js";
+import { assertManagedSchema } from "./managedSchemaGuard.js";
 import { verifyScopeEnvelopeAction,
   type ScopeEnvelopeRowCandidate,
   type SignedScopeEnvelopeActionRow } from "./verifyScopeEnvelopeAction.js";
@@ -11,7 +10,6 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const BYTE_TAG = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag)?.get;
 
-type SchemaRow = { version: number; name: string; sha256: string };
 type IssuerRow = { householdId: string; sessionId: string;
   csrfSecret: Buffer; signingPublicKey: Buffer };
 type ScopeRow = { recipientPublicKey: Buffer; keyCommitment: Buffer;
@@ -26,7 +24,7 @@ export class ManagedScopeEnvelopeIssueDenied extends Error {
 }
 
 /**
- * Unmounted v7 writer. Pass only an already opened private managed SQLite
+ * Unmounted managed-v8 writer. Pass only an already opened private managed SQLite
  * connection. This does not open/create databases, run migrations, expose a
  * route, prove recipient HPKE decryptability, or authorize later reads.
  * A mounted caller must authenticate the request and bound its size before
@@ -54,7 +52,7 @@ export function issueScopeEnvelopeV2(db: Database.Database, input: {
     const tokenSha256 = Buffer.from(input.tokenSha256, "hex");
     const csrfToken = input.csrfToken;
     const issue = db.transaction(() => {
-      assertSchema(db);
+      assertManagedSchema(db);
       const issuer = db.prepare<[Buffer, string, string], IssuerRow>(
         "SELECT s.household_id AS householdId, s.id AS sessionId, " +
         "s.csrf_secret AS csrfSecret, d.signing_public_key AS signingPublicKey " +
@@ -173,21 +171,6 @@ export function issueScopeEnvelopeV2(db: Database.Database, input: {
     });
     issue.immediate();
   } catch { throw new ManagedScopeEnvelopeIssueDenied(); }
-}
-
-function assertSchema(db: Database.Database): void {
-  if (db.pragma("foreign_keys", { simple: true }) !== 1 ||
-    db.pragma("application_id", { simple: true }) !== MANAGED_APPLICATION_ID ||
-    db.pragma("user_version", { simple: true }) !== MANAGED_MIGRATIONS.length)
-    throw new ManagedScopeEnvelopeIssueDenied();
-  const rows = db.prepare<[], SchemaRow>(
-    "SELECT version, name, sha256 FROM managed_schema_migrations ORDER BY version",
-  ).all();
-  if (rows.length !== MANAGED_MIGRATIONS.length || rows.some((row, index) => {
-    const expected = MANAGED_MIGRATIONS[index];
-    return !expected || row.version !== expected[0] ||
-      row.name !== expected[1] || row.sha256 !== expected[2];
-  })) throw new ManagedScopeEnvelopeIssueDenied();
 }
 
 function copyBytes(value: Uint8Array, length: number): Uint8Array {

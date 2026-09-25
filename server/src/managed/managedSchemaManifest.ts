@@ -9,4 +9,5 @@ export const MANAGED_MIGRATIONS = [
   [5, "non_day_intake", "4079814ea0db0ec83bc36674bce9085b4d2b47e9be576175abff0dcd0e259f44"],
   [6, "active_scope_keys", "a8e4fddaa37ac7f0b28d5ef56e20c8ddbdb7f06684de08dc3f6da226b92507d7"],
   [7, "scope_key_envelopes_v2", "7e19dd5800d22858a945d7feb28686600bbe515994d5e02f06eb268e0e45972e"],
+  [8, "historical_scope_key_backfill", "4913f5948ce1f0993f8027b664c3a9eb43be48e331db3a2933965c4bafdc319e"],
 ] as const;
