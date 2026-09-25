@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
+import { PreviewBanner } from "./PreviewBanner";
 
 type Session = {
   authenticated: boolean;
@@ -347,6 +348,7 @@ export function RecordsPage() {
                   accept="application/pdf,image/jpeg,image/png"
                   onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
                 />
+                <PreviewBanner placement="upload" />
                 <Button
                   className="primary-button records-submit"
                   type="submit"

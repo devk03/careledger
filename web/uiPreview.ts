@@ -24,6 +24,7 @@ export function uiPreview(): Plugin {
   const question = { id: "demo-question", text: "What should we bring to the sample appointment?", priority: "at_next_visit", state: "open", due_date: null };
   const payloads: Record<string, unknown> = {
     "/api/system/setup-status": { setup_required: true, ai_available: false },
+    "/api/public/runtime": { restricted_preview: true },
     "/api/auth/session": { authenticated: true, csrf_token: "synthetic-not-valid", user: { display_name: "Demo caregiver", role: "owner" } },
     "/api/ai/status": { enabled: false, provider: "disabled", model: null, external_transfer_required: false },
     "/api/care-profiles": [profile],
