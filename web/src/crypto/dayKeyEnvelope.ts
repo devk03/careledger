@@ -1,48 +1,21 @@
 import { Aes256Gcm, CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from "@hpke/core";
+import { DAY_KEY_ENVELOPE_FORMAT, assertDayKeyEnvelopeShape, encodeDayKeyHeader,
+  type DayKeyContext, type DayKeyEnvelope, type DayKeyIdentity } from "@adeno/contracts";
 
 import { importVaultKey } from "./vault";
 
-export const DAY_KEY_ENVELOPE_FORMAT = "hpke-x25519-hkdf-sha256-aes256gcm-v1" as const;
+export { DAY_KEY_ENVELOPE_FORMAT } from "@adeno/contracts";
+export type { DayKeyContext, DayKeyEnvelope, DayKeyIdentity } from "@adeno/contracts";
 const DAY_KEY_BYTES = 32;
-const TAG_BYTES = 16;
-const ENCAPSULATED_KEY_BYTES = 32;
 const MAX_RECIPIENTS = 32;
 const OPAQUE_ID = /^[0-9a-f]{32}$/u;
-const FINGERPRINT = /^[0-9a-f]{64}$/u;
-const HEADER_MAGIC = new Uint8Array([0x41, 0x44, 0x4b, 0x59]); // ADKY
-const HEADER_VERSION = 1;
-const HEADER_SUITE = 1;
-const HEADER_AUTH_MODE = 0; // HPKE base mode: sender is not authenticated.
-const HEADER_RESERVED = 0;
-const ID_BYTES = 16;
-export const DAY_KEY_HEADER_BYTES = 140;
-export const DAY_KEY_WIRE_BYTES = DAY_KEY_HEADER_BYTES + DAY_KEY_BYTES + TAG_BYTES;
 const HPKE_INFO = new TextEncoder().encode(
   "adeno:day-content:hpke-x25519-hkdf-sha256-aes256gcm-v1",
 );
 const IDENTITY_KEYS = ["careProfileId", "householdId", "keyEpoch", "opaqueDayId"];
 const CONTEXT_KEYS = [...IDENTITY_KEYS, "recipientDeviceId"];
-const ENVELOPE_KEYS = ["ciphertext", "context", "encapsulatedKey", "format",
-  "recipientKeySha256"];
 const suite = new CipherSuite({ kem: new DhkemX25519HkdfSha256(),
   kdf: new HkdfSha256(), aead: new Aes256Gcm() });
-
-export type DayKeyIdentity = {
-  householdId: string;
-  careProfileId: string;
-  opaqueDayId: string;
-  keyEpoch: number;
-};
-
-export type DayKeyContext = DayKeyIdentity & { recipientDeviceId: string };
-
-export type DayKeyEnvelope = {
-  format: typeof DAY_KEY_ENVELOPE_FORMAT;
-  context: DayKeyContext;
-  recipientKeySha256: string;
-  encapsulatedKey: Uint8Array;
-  ciphertext: ArrayBuffer;
-};
 
 export class DayKeyEnvelopeError extends Error {
   constructor() {
@@ -160,48 +133,6 @@ async function sealDayKeyMaterial(material: Uint8Array, context: DayKeyContext,
   return envelope;
 }
 
-/** Canonical v1 header: every server-visible scope byte is HPKE-authenticated. */
-export function encodeDayKeyHeader(envelope: Pick<DayKeyEnvelope,
-  "format" | "context" | "recipientKeySha256" | "encapsulatedKey">): Uint8Array {
-  if (envelope?.format !== DAY_KEY_ENVELOPE_FORMAT || !envelope.context ||
-    !FINGERPRINT.test(envelope.recipientKeySha256) ||
-    !(envelope.encapsulatedKey instanceof Uint8Array) ||
-    envelope.encapsulatedKey.byteLength !== ENCAPSULATED_KEY_BYTES)
-    throw new DayKeyEnvelopeError();
-  assertContext(envelope.context);
-  const header = new Uint8Array(DAY_KEY_HEADER_BYTES);
-  header.set(HEADER_MAGIC);
-  header[4] = HEADER_VERSION;
-  header[5] = HEADER_SUITE;
-  header[6] = HEADER_AUTH_MODE;
-  header[7] = HEADER_RESERVED;
-  let offset = 8;
-  for (const id of [envelope.context.householdId, envelope.context.careProfileId,
-    envelope.context.opaqueDayId, envelope.context.recipientDeviceId]) {
-    header.set(fromHex(id), offset);
-    offset += ID_BYTES;
-  }
-  new DataView(header.buffer).setUint32(offset, envelope.context.keyEpoch, false);
-  offset += 4;
-  header.set(fromHex(envelope.recipientKeySha256), offset);
-  offset += 32;
-  header.set(envelope.encapsulatedKey, offset);
-  return header;
-}
-
-/** Structural validation only; HPKE open and signed grant checks are separate. */
-export function assertDayKeyEnvelopeShape(envelope: DayKeyEnvelope): void {
-  if (!envelope || envelope.format !== DAY_KEY_ENVELOPE_FORMAT ||
-    !hasOnlyKeys(envelope, ENVELOPE_KEYS) ||
-    !envelope.context || !FINGERPRINT.test(envelope.recipientKeySha256) ||
-    !(envelope.encapsulatedKey instanceof Uint8Array) ||
-    envelope.encapsulatedKey.byteLength !== ENCAPSULATED_KEY_BYTES ||
-    Object.prototype.toString.call(envelope.ciphertext) !== "[object ArrayBuffer]" ||
-    envelope.ciphertext.byteLength !== DAY_KEY_BYTES + TAG_BYTES)
-    throw new DayKeyEnvelopeError();
-  assertContext(envelope.context);
-}
-
 function assertIdentity(identity: DayKeyIdentity): void {
   if (!identity || !hasOnlyKeys(identity, IDENTITY_KEYS)) throw new DayKeyEnvelopeError();
   assertIdentityFields(identity);
@@ -253,14 +184,6 @@ async function sha256Hex(value: Uint8Array): Promise<string> {
 
 function hex(value: Uint8Array): string {
   return [...value].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function fromHex(value: string): Uint8Array {
-  const bytes = new Uint8Array(value.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
 }
 
 function toArrayBuffer(value: Uint8Array): ArrayBuffer {

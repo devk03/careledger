@@ -20,6 +20,11 @@ HPKE `info` fixes the `day-content` purpose and suite. The decoder rejects unkno
 versions and extensions, but decoding is **not** proof of who issued the envelope,
 that its grant is current, or that the host served the latest revision. The host
 can still observe opaque IDs, recipient correlation, sizes, timing, and access.
+The dependency-free framing code lives in
+`packages/contracts/src/dayKeyEnvelopeWire.ts`; the browser uses it and a
+TypeScript-server interoperability test parses browser-produced bytes. No
+production server route is mounted. Both consumers build the shared package
+from source before runtime imports; only the browser holds HPKE keys.
 
 ## Why the current schema and key are insufficient
 

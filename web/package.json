@@ -4,12 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "preview:ui": "vite --mode ui-preview --host 127.0.0.1 --port 5175 --strictPort",
-    "build": "tsc -b && vite build",
+    "build:contracts": "tsc -p ../packages/contracts/tsconfig.json",
+    "dev": "npm run build:contracts && vite --host 0.0.0.0",
+    "preview:ui": "npm run build:contracts && vite --mode ui-preview --host 127.0.0.1 --port 5175 --strictPort",
+    "build": "npm run build:contracts && tsc -b && vite build",
     "lint": "eslint . --max-warnings 0",
-    "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test": "npm run build:contracts && vitest run",
+    "test:e2e": "npm run build:contracts && playwright test"
   },
   "dependencies": {
     "@adeno/contracts": "file:../packages/contracts",

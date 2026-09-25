@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "build:contracts": "tsc -p ../packages/contracts/tsconfig.json",
+    "typecheck": "npm run build:contracts && tsc --noEmit",
     "test": "npm run build && vitest run",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "npm run build:contracts && tsc -p tsconfig.build.json",
     "start:local-pilot": "node dist/runLocalPilot.js",
     "start:parser-worker": "flock -n /run/adeno-parser/worker.lock node dist/runParserWorker.js",
     "stress:http": "npm run build && node stress/http.mjs",

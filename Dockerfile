@@ -6,6 +6,7 @@ ENV VITE_ADENO_RELEASE_SHA=${ADENO_RELEASE_SHA}
 ENV ADENO_RELEASE_BUILD=${ADENO_RELEASE_BUILD}
 WORKDIR /build
 COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/contracts/tsconfig.json ./packages/contracts/tsconfig.json
 COPY packages/contracts/src/ ./packages/contracts/src/
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
