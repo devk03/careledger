@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { encryptVaultBlob, generateVaultKeyMaterial, importVaultKey,
@@ -32,14 +34,15 @@ function staging() {
   const pending: { index: number; iv: Buffer; ciphertext: Buffer }[] = [];
   let published = false;
   let aborted = false;
+  let wireSha256: string | null = null;
   const sink: VaultWireStagingSink = {
     begin: () => { expect(pending).toHaveLength(0); },
     append: (chunk) => { pending.push(chunk); },
-    commit: () => { published = true; },
+    commit: (_header, digest) => { wireSha256 = digest; published = true; },
     abort: () => { aborted = true; pending.length = 0; },
   };
   return { sink, pending, get published() { return published; },
-    get aborted() { return aborted; } };
+    get aborted() { return aborted; }, get wireSha256() { return wireSha256; } };
 }
 
 describe("bounded encrypted vault wire stream", () => {
@@ -52,6 +55,7 @@ describe("bounded encrypted vault wire stream", () => {
       plaintextSize: VAULT_CHUNK_BYTES + 17, chunkCount: 2,
       expectedWireBytes: wire.byteLength });
     expect(store.published).toBe(true);
+    expect(store.wireSha256).toBe(createHash("sha256").update(wire).digest("hex"));
     expect(store.aborted).toBe(false);
     expect(store.pending).toHaveLength(2);
     for (const [index, chunk] of store.pending.entries()) {

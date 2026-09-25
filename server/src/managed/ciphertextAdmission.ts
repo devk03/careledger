@@ -22,7 +22,8 @@ export type ManagedVaultUploadHeader = VaultWireHeader & { wireVersion: 2 };
 export interface ManagedVaultUploadSink {
   begin(header: ManagedVaultUploadHeader): Promise<void> | void;
   append(chunk: VaultWireChunk): Promise<void> | void;
-  commit(header: ManagedVaultUploadHeader, signal: AbortSignal): Promise<void> | void;
+  commit(header: ManagedVaultUploadHeader, wireSha256: string,
+    signal: AbortSignal): Promise<void> | void;
   abort(): Promise<void> | void;
 }
 
@@ -32,7 +33,9 @@ export interface ManagedVaultUploadSink {
  * It must not derive the expected blob ID from the caller's URL. The returned
  * sink may stage privately, but commit MUST atomically recheck the current
  * session, intent, grant, expected revision, nonce reservations and signal
- * before publishing. Open and commit need their own bounded, cooperative
+ * before publishing. The supplied wireSha256 is the hash of the exact parsed
+ * request bytes; the store must compare it with its re-read object proof.
+ * Open and commit need their own bounded, cooperative
  * storage deadlines; the route timer below bounds ingress only. Abort must
  * discard all uncommitted staged material.
  * Nothing here proves that a client actually encrypted its bytes.
@@ -134,13 +137,13 @@ export function createManagedCiphertextAdmissionRouter(input: {
           return currentSink.begin(header);
         },
         append: (chunk) => currentSink.append(chunk),
-        commit: (header) => {
+        commit: (header, wireSha256) => {
           if (!isV2Header(header) || header.blobId !== blobId)
             throw new VaultWireStreamError();
           if (ingressTimer !== null) clearTimeout(ingressTimer);
           ingressTimer = null;
           if (controller.signal.aborted) throw new VaultWireStreamError();
-          return currentSink.commit(header, controller.signal);
+          return currentSink.commit(header, wireSha256, controller.signal);
         },
         abort: () => {
           sinkAborted = true;

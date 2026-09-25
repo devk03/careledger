@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { decodeManagedVaultBlobV2, encodeManagedVaultBlobV2,
@@ -24,14 +26,15 @@ function staging() {
   const chunks: Buffer[] = [];
   let committed = false;
   let aborted = false;
+  let wireSha256: string | null = null;
   const sink: VaultWireStagingSink = {
     begin: () => undefined,
     append: (chunk) => { chunks.push(chunk.ciphertext); },
-    commit: () => { committed = true; },
+    commit: (_header, digest) => { wireSha256 = digest; committed = true; },
     abort: () => { aborted = true; chunks.length = 0; },
   };
   return { sink, chunks, get committed() { return committed; },
-    get aborted() { return aborted; } };
+    get aborted() { return aborted; }, get wireSha256() { return wireSha256; } };
 }
 
 describe("server-only managed v2 framing contract", () => {
@@ -44,9 +47,24 @@ describe("server-only managed v2 framing contract", () => {
     expect(header).toEqual({ wireVersion: 2, blobId: "11".repeat(16), plaintextSize: 3,
       chunkCount: 1, expectedWireBytes: wire.byteLength });
     expect(store.committed).toBe(true);
+    expect(store.wireSha256).toBe(createHash("sha256").update(wire).digest("hex"));
     expect(store.chunks[0]).toEqual(Buffer.alloc(19, 0x33));
     await expect(stageVaultWireStream(fragments(wire), staging().sink))
       .rejects.toBeInstanceOf(VaultWireStreamError);
+  });
+
+  it("hashes every byte of a two-chunk v2 upload across fragments", async () => {
+    const wire = encodeManagedVaultBlobV2({ ...blob,
+      plaintextSize: MANAGED_VAULT_CHUNK_BYTES + 1,
+      chunks: [{ iv: new Uint8Array(12).fill(1),
+        ciphertext: new Uint8Array(MANAGED_VAULT_CHUNK_BYTES + 16).fill(3).buffer },
+      { iv: new Uint8Array(12).fill(2),
+        ciphertext: new Uint8Array(17).fill(4).buffer }] });
+    const store = staging();
+    await stageManagedVaultWireV2Stream(fragments(wire), store.sink);
+    expect(store.committed).toBe(true);
+    expect(store.chunks).toHaveLength(2);
+    expect(store.wireSha256).toBe(createHash("sha256").update(wire).digest("hex"));
   });
 
   it("rejects legacy v1, unknown versions, truncated and trailing bytes", async () => {

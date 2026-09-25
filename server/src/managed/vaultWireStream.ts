@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { MANAGED_VAULT_CHUNK_BYTES, MANAGED_VAULT_WIRE_VERSION,
   MAX_MANAGED_VAULT_BYTES } from "@adeno/contracts";
 
@@ -37,7 +39,7 @@ export type VaultWireChunk = {
 export interface VaultWireStagingSink {
   begin(header: VaultWireHeader): Promise<void> | void;
   append(chunk: VaultWireChunk): Promise<void> | void;
-  commit(header: VaultWireHeader): Promise<void> | void;
+  commit(header: VaultWireHeader, wireSha256: string): Promise<void> | void;
   abort(): Promise<void> | void;
 }
 
@@ -95,6 +97,7 @@ async function stageVersionedVaultWireStream(
       throw new VaultWireStreamError();
     const expectedWireBytes = HEADER_BYTES + plaintextSize +
       chunkCount * (CHUNK_HEADER_BYTES + TAG_BYTES);
+    const wireHash = createHash("sha256").update(bytes);
     reader.setExactLimit(expectedWireBytes);
     const header = { wireVersion: requiredVersion,
       blobId: bytes.subarray(5, 21).toString("hex"),
@@ -108,17 +111,19 @@ async function stageVersionedVaultWireStream(
       const ivId = iv.toString("hex");
       if (seenIvs?.has(ivId)) throw new VaultWireStreamError();
       seenIvs?.add(ivId);
-      const length = (await reader.readExactly(4)).readUInt32BE(0);
+      const lengthBytes = await reader.readExactly(4);
+      const length = lengthBytes.readUInt32BE(0);
       const expected = Math.max(0, Math.min(CHUNK_BYTES,
         plaintextSize - index * CHUNK_BYTES)) + TAG_BYTES;
       if (length !== expected) throw new VaultWireStreamError();
       const ciphertext = await reader.readExactly(length);
+      wireHash.update(iv).update(lengthBytes).update(ciphertext);
       await sink.append({ index, iv, ciphertext });
       reader.checkAbort();
     }
     await reader.expectEof();
     reader.checkAbort();
-    await sink.commit(header);
+    await sink.commit(header, wireHash.digest("hex"));
     committed = true;
     return header;
   } catch (error) {

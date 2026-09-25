@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { request as httpRequest, type Server } from "node:http";
 
 import { encodeManagedVaultBlobV2, MANAGED_VAULT_CHUNK_BYTES,
@@ -59,6 +59,7 @@ async function fixture(options: { revokeBeforeCommit?: boolean;
   let opened = 0;
   let committed = 0;
   let aborted = 0;
+  let committedWireSha256: string | null = null;
   const store: ManagedVaultUploadStore = {
     open: async ({ session, preflight, intentId: requestedIntent, signal }) => {
       if (session.scope.householdId !== "fictional-family-a" ||
@@ -73,7 +74,7 @@ async function fixture(options: { revokeBeforeCommit?: boolean;
             ciphertext: Buffer.from(value.ciphertext) });
           if (options.revokeBeforeCommit) rows.get(preflight.tokenSha256)!.revokedAt = now;
         },
-        commit: (value, commitSignal) => {
+        commit: (value, wireSha256, commitSignal) => {
           if (commitSignal.aborted) throw new ManagedVaultUploadSessionError();
           if (options.failOnCommit)
             throw new Error("FICTIONAL_INTERNAL_MARKER_NOT_A_REAL_RECORD");
@@ -92,6 +93,7 @@ async function fixture(options: { revokeBeforeCommit?: boolean;
             blobId: Buffer.from(blobId, "hex"),
             plaintextSize: value.plaintextSize, chunkSize: MANAGED_VAULT_CHUNK_BYTES,
             chunks: payload }));
+          committedWireSha256 = wireSha256;
           committed += 1;
         },
         abort: () => { aborted += 1; chunks.length = 0; },
@@ -117,7 +119,8 @@ async function fixture(options: { revokeBeforeCommit?: boolean;
   });
   return { base, rows, stored, first: identity(first), second: identity(second),
     firstDigest: first.sha256, get opened() { return opened; },
-    get committed() { return committed; }, get aborted() { return aborted; } };
+    get committed() { return committed; }, get aborted() { return aborted; },
+    get committedWireSha256() { return committedWireSha256; } };
 }
 
 function headers(identity: { cookie: string; csrf: string },
@@ -137,6 +140,8 @@ describe("unmounted managed ciphertext admission seam", () => {
     expect(response.status).toBe(201);
     expect(test.opened).toBe(1);
     expect(test.committed).toBe(1);
+    expect(test.committedWireSha256).toBe(
+      createHash("sha256").update(wire).digest("hex"));
     expect(Buffer.from(test.stored.get(`fictional-family-a:${blobId}`)!)).toEqual(wire);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect((await response.text())).not.toContain(blobId);

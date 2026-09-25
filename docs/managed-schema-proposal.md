@@ -15,8 +15,9 @@ authority and compare-and-swap heads. None of these migrations is registered
 with a runner or applied to any database.
 
 The chunk schema now records the opaque storage object ID returned by the
-existing private chunk writer. An unmounted commit-proof helper re-reads each
-object and reconstructs the exact v2 wire digest before publication. There is
+existing private chunk writer. The streaming parser supplies the digest of the
+exact received wire bytes to an unmounted commit-proof helper, which re-reads
+each object and reconstructs that digest before publication. There is
 still no durable adapter that calls that helper before the commit transaction,
 converts its hex SHA-256 to the 32-byte database digest, reconciles orphaned
 objects, or selects and re-hashes database-referenced objects for backup.
