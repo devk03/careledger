@@ -15,6 +15,10 @@ const expected = { ...identity, recipientDeviceId };
 const recordScope = { householdId: identity.householdId,
   objectId: identity.opaqueDayId, revision: 1 };
 const fictional = new TextEncoder().encode("FICTIONAL WIRE MARKER — NO REAL RECORD");
+// Same wholly fictional structural vector is checked by the Node server suite.
+const goldenHex = "41444b5901010000" +
+  "aa".repeat(16) + "bb".repeat(16) + "cc".repeat(16) + "dd".repeat(16) +
+  "00000001" + "ee".repeat(32) + "11".repeat(32) + "22".repeat(48);
 
 async function fixture() {
   const recipient = await generateDeviceEncryptionKeys();
@@ -22,6 +26,21 @@ async function fixture() {
     [{ deviceId: recipientDeviceId, publicKey: recipient.publicKey }]);
   return { recipient, key, envelope: envelopes[0]! };
 }
+
+it("uses the same canonical structural ADKY vector as the server", () => {
+  const envelope = {
+    format: "hpke-x25519-hkdf-sha256-aes256gcm-v1" as const,
+    context: { householdId: "aa".repeat(16), careProfileId: "bb".repeat(16),
+      opaqueDayId: "cc".repeat(16), recipientDeviceId: "dd".repeat(16), keyEpoch: 1 },
+    recipientKeySha256: "ee".repeat(32),
+    encapsulatedKey: new Uint8Array(32).fill(0x11),
+    ciphertext: new Uint8Array(48).fill(0x22).buffer,
+  };
+  expect([...encodeDayKeyEnvelope(envelope)].map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")).toBe(goldenHex);
+  expect(encodeDayKeyEnvelope(decodeDayKeyEnvelope(encodeDayKeyEnvelope(envelope))))
+    .toEqual(encodeDayKeyEnvelope(envelope));
+});
 
 it("round-trips exactly 188 opaque bytes and opens only after HPKE authentication", async () => {
   const { recipient, key, envelope } = await fixture();
