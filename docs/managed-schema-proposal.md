@@ -11,7 +11,9 @@ ciphertext objects. A committed object is not a published timeline revision.
 The third, still-unapplied
 [`0003_day_revisions.sql`](../server/migrations/managed/0003_day_revisions.sql)
 draft adds append-only day snapshot revisions, session-bound adult publish
-authority and compare-and-swap heads. None of these migrations is registered
+authority and compare-and-swap heads. The fourth, still-unapplied
+[`0004_staging_leases.sql`](../server/migrations/managed/0004_staging_leases.sql)
+draft adds one pre-write lease per day upload intent. None of these migrations is registered
 with the production startup path or applied to any database. An explicit
 fictional-only runner pins their SHA-256 checksums and creates a fresh private
 temporary database only after a separate approval flag; it has not been run.
@@ -27,9 +29,10 @@ existing private chunk writer. The streaming parser supplies the digest of the
 exact received wire bytes to an unmounted staging adapter. That adapter writes
 private chunks, re-reads each object through the commit-proof helper, checks
 the complete wire digest, and converts SHA-256 hex to 32-byte database values.
-There is still no durable managed ledger that atomically checks current grants,
-sessions, nonces and quota before inserting rows; no reconciler for orphaned
-objects. A ciphertext-only snapshot primitive can copy and re-hash an exact list
+An unmounted managed ledger now drafts an atomic current-grant/session/nonce
+commit and per-family lease quota, but it has not run against an applied schema;
+there is no reconciler for orphaned objects or safe retry path. The draft remains
+day-only. A ciphertext-only snapshot primitive can copy and re-hash an exact list
 of committed object references without scanning pending files; it publishes a
 completed snapshot only after staged files and its read-only manifest are synced.
 Failures before rename leave private, unpublished in-progress directories; a

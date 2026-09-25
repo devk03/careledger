@@ -24,6 +24,8 @@ export type LocalFile = {
 export type LocalDraftInput = {
   identity: LocalDraftIdentity;
   key: CryptoKey;
+  /** Two server-reserved IDs obtained before encryption; never infer from a URL. */
+  reservedBlobIds: { content: string; metadata: string };
   clientSelectedAt: string;
   candidateCareDays: readonly string[];
 } & (
@@ -73,7 +75,7 @@ export async function prepareLocalEncryptedDraft(input: LocalDraftInput):
     const metadataScope = draftScope(stable.identity, metadataObjectId);
     const digest = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", content)));
     const encryptedContent = await encryptManagedVaultBlobV2(stable.key,
-      content, contentScope);
+      content, contentScope, fromHex(stable.reservedBlobIds.content));
     const metadata = stable.kind === "file" ? {
       format: "adeno.local-review-draft.v1", kind: "file",
       clientSelectedAt: stable.clientSelectedAt,
@@ -92,7 +94,7 @@ export async function prepareLocalEncryptedDraft(input: LocalDraftInput):
     const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata));
     try {
       const encryptedMetadata = await encryptManagedVaultBlobV2(stable.key,
-        metadataBytes, metadataScope);
+        metadataBytes, metadataScope, fromHex(stable.reservedBlobIds.metadata));
       return { opaqueDraftId: stable.identity.opaqueDraftId,
         contentObjectId, metadataObjectId,
         contentBlobId: hex(encryptedContent.blobId),
@@ -106,6 +108,7 @@ export async function prepareLocalEncryptedDraft(input: LocalDraftInput):
 function snapshotInput(input: LocalDraftInput): LocalDraftInput {
   validateInput(input);
   const common = { identity: { ...input.identity }, key: input.key,
+    reservedBlobIds: { ...input.reservedBlobIds },
     clientSelectedAt: input.clientSelectedAt,
     candidateCareDays: [...input.candidateCareDays] };
   const stable: LocalDraftInput = input.kind === "file" ? (() => {
@@ -120,12 +123,17 @@ function snapshotInput(input: LocalDraftInput): LocalDraftInput {
 }
 
 function validateInput(input: LocalDraftInput): void {
-  if (!input || !input.identity ||
+  if (!input || !input.identity || !input.reservedBlobIds ||
     ![input.identity.householdId, input.identity.careProfileId,
       input.identity.opaqueDraftId].every((id) =>
       typeof id === "string" && OPAQUE_ID.test(id)) ||
     !Number.isSafeInteger(input.identity.keyEpoch) ||
     input.identity.keyEpoch < 1 || input.identity.keyEpoch > 0xffffffff ||
+    typeof input.reservedBlobIds.content !== "string" ||
+    !OPAQUE_ID.test(input.reservedBlobIds.content) ||
+    typeof input.reservedBlobIds.metadata !== "string" ||
+    !OPAQUE_ID.test(input.reservedBlobIds.metadata) ||
+    input.reservedBlobIds.content === input.reservedBlobIds.metadata ||
     !validTimestamp(input.clientSelectedAt) ||
     !Array.isArray(input.candidateCareDays) ||
     input.candidateCareDays.length > 366 ||
@@ -190,4 +198,11 @@ function hex(bytes: Uint8Array): string {
   let result = "";
   for (const byte of bytes) result += byte.toString(16).padStart(2, "0");
   return result;
+}
+
+function fromHex(value: string): Uint8Array {
+  const bytes = new Uint8Array(value.length / 2);
+  for (let index = 0; index < bytes.length; index++)
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  return bytes;
 }

@@ -22,10 +22,11 @@ test("fictional file selection stays on device and becomes an encrypted local dr
       { type: "application/pdf" });
     const identity = { householdId: "a".repeat(32), careProfileId: "b".repeat(32),
       opaqueDraftId: "c".repeat(32), keyEpoch: 1 };
+    const reservedBlobIds = { content: "d".repeat(32), metadata: "e".repeat(32) };
     const selectedAt = "2026-04-09T12:00:00.000Z";
     const candidateCareDays = ["2026-04-07"];
     const draft = await prepareLocalEncryptedDraft({ kind: "file", file, key,
-      identity, clientSelectedAt: selectedAt, candidateCareDays });
+      identity, reservedBlobIds, clientSelectedAt: selectedAt, candidateCareDays });
     const scope = (objectId: string) => ({ householdId: identity.householdId,
       careProfileId: identity.careProfileId, opaqueScopeId: identity.opaqueDraftId,
       objectId, keyEpoch: 1, purpose: "review-draft" as const, revision: 1 });
@@ -42,11 +43,14 @@ test("fictional file selection stays on device and becomes an encrypted local dr
       selectedAt: metadata.clientSelectedAt,
       candidateCareDays: metadata.candidateCareDays,
       uploadTimeInvented: Object.hasOwn(metadata, "uploadedAt"),
+      reservedIdsBound: draft.contentBlobId === reservedBlobIds.content &&
+        draft.metadataBlobId === reservedBlobIds.metadata,
       keyExtractable: key.extractable };
   });
   expect(result).toEqual({ contentRestored: true, contentWireHasMarker: false,
     metadataWireHasName: false, selectedAt: "2026-04-09T12:00:00.000Z",
     candidateCareDays: ["2026-04-07"], uploadTimeInvented: false,
+    reservedIdsBound: true,
     keyExtractable: false });
   expect(requests.filter((request) => request.method !== "GET")).toEqual([]);
   expect(requests.some((request) => request.url.includes("/api/v3/vault/") ||

@@ -70,6 +70,22 @@ it("keeps an encrypted index in a purpose-separated v2 key domain", async () => 
     .rejects.toBeInstanceOf(ManagedVaultIntegrityV2Error);
 });
 
+it("binds a pre-reserved blob ID before encryption starts", async () => {
+  const dayKey = await key();
+  const reserved = new Uint8Array(16).fill(0xab);
+  const encryption = encryptManagedVaultBlobV2(dayKey, new Uint8Array([5]),
+    scope, reserved);
+  reserved.fill(0);
+  const blob = await encryption;
+  expect(blob.blobId).toEqual(new Uint8Array(16).fill(0xab));
+  expect(new Uint8Array(encodeManagedVaultBlobV2(blob).slice(5, 21)))
+    .toEqual(new Uint8Array(16).fill(0xab));
+  expect(await decryptManagedVaultBlobV2(dayKey, blob, scope))
+    .toEqual(new Uint8Array([5]));
+  await expect(encryptManagedVaultBlobV2(dayKey, new Uint8Array([5]),
+    scope, new Uint8Array(15))).rejects.toBeInstanceOf(ManagedVaultIntegrityV2Error);
+});
+
 it("rejects a different day key even when all opaque scope fields match", async () => {
   const { blob } = await encrypted();
   await expect(decryptManagedVaultBlobV2(await key(), blob, scope))

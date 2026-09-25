@@ -35,16 +35,25 @@ export class ManagedVaultIntegrityV2Error extends Error {
  * day/source/draft key; this module does not grant access or reserve nonces.
  */
 export async function encryptManagedVaultBlobV2(key: CryptoKey,
-  input: Uint8Array, scope: ManagedVaultScopeV2): Promise<ManagedVaultBlobV2> {
+  input: Uint8Array, scope: ManagedVaultScopeV2,
+  reservedBlobId?: Uint8Array): Promise<ManagedVaultBlobV2> {
   assertKey(key);
   const stableScope = snapshotScope(scope);
   if (!ArrayBuffer.isView(input) ||
     Object.prototype.toString.call(input) !== "[object Uint8Array]" ||
     input.byteLength > MAX_MANAGED_VAULT_BYTES)
     throw new ManagedVaultIntegrityV2Error();
+  if (reservedBlobId !== undefined &&
+    (Object.prototype.toString.call(reservedBlobId) !== "[object Uint8Array]" ||
+      reservedBlobId.byteLength !== BLOB_ID_BYTES))
+    throw new ManagedVaultIntegrityV2Error();
+  // Copy before the first await: callers cannot swap the server-reserved ID
+  // while encryption is in progress. It is bound into every chunk's AAD.
+  const blobId = reservedBlobId === undefined ?
+    crypto.getRandomValues(new Uint8Array(BLOB_ID_BYTES)) :
+    Uint8Array.from(reservedBlobId);
   const plaintext = Uint8Array.from(input);
   try {
-    const blobId = crypto.getRandomValues(new Uint8Array(BLOB_ID_BYTES));
     const totalChunks = Math.max(1, Math.ceil(plaintext.byteLength / MANAGED_VAULT_CHUNK_BYTES));
     const seenIvs = new Set<string>();
     const chunks: ManagedVaultBlobV2["chunks"] = [];

@@ -71,9 +71,9 @@ authenticated session, same-origin CSRF, an opaque upload intent that reserves
 the exact blob ID and scope, v2 framing, and a store callback whose commit must
 atomically recheck grants and nonce reservations. Its timer bounds incoming
 bytes only; future session, intent and storage operations need their own
-cooperative deadlines. Fictional HTTP tests cover the seam, but
-there is **no durable implementation** of that callback and no route in the
-running app. It is not connected to real grants, nonce reservation, signed
+cooperative deadlines. Fictional HTTP tests cover the seam; an unmounted
+durable-ledger draft exists but has not run against an applied managed schema.
+There is still no route in the running app. It is not connected to real grants, nonce reservation, signed
 manifests, backup or MCP. V1 ciphertext is never treated as a per-day private
 record.
 
@@ -82,10 +82,15 @@ JPEG, PNG or family note. It encrypts the original bytes and a separate metadata
 object containing the filename or author, a client-side selection timestamp and
 explicit candidate care days. An empty day list stays undated; selection time is
 never promoted to care time or labeled as server receipt time. This preparer
-does not upload, save, scan, classify, authorize, recover or publish anything.
+requires two distinct server-reserved blob IDs **before** encryption so its
+AES-GCM AAD and v2 wire headers can match later upload intents. There is no
+managed draft-intent issuer yet. The preparer does not upload, save, scan,
+classify, authorize, recover or publish anything.
 It needs a future distinct review-draft key and enrolled reviewer devices;
 using an approved day key for drafts would violate draft isolation. The
-browser test uses only fictional content and checks that no record upload or
+production caller must supply a browser `File` snapshot rather than a mutable
+custom file-like object; bytes are copied after read and their digest is stored
+inside encrypted metadata. The browser test uses only fictional content and checks that no record upload or
 plaintext request occurs.
 
 The browser also has a fictional signed-index-head prototype. Ed25519 signs a
