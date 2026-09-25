@@ -7,6 +7,8 @@
 -- A committed blob is still an unreferenced encrypted object, not a published
 -- care-day revision. Revision compare-and-swap belongs to a later migration;
 -- no intake or read route may be mounted from this file alone.
+-- Each chunk's random storage_object_id refers to a private create-only object;
+-- the application must hash-check its bytes before commit, read, and backup.
 
 CREATE TABLE managed_upload_intents (
   household_id TEXT NOT NULL,
@@ -111,11 +113,15 @@ CREATE TABLE managed_blob_chunks (
   intent_id TEXT NOT NULL,
   chunk_index INTEGER NOT NULL CHECK (chunk_index BETWEEN 0 AND 99),
   nonce BLOB NOT NULL CHECK (length(nonce) = 12),
+  storage_object_id TEXT NOT NULL CHECK (
+    length(storage_object_id) = 32 AND storage_object_id NOT GLOB '*[^0-9a-f]*'
+  ),
   ciphertext_bytes INTEGER NOT NULL CHECK (
     ciphertext_bytes BETWEEN 16 AND 1048592
   ),
   ciphertext_sha256 BLOB NOT NULL CHECK (length(ciphertext_sha256) = 32),
   PRIMARY KEY (household_id, intent_id, chunk_index),
+  UNIQUE (household_id, storage_object_id),
   FOREIGN KEY (household_id, intent_id)
     REFERENCES managed_upload_intents(household_id, id) ON DELETE RESTRICT
 ) STRICT;

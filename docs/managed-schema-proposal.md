@@ -6,12 +6,20 @@ creation of the managed migration files. The first identity/grant draft is
 The second, still-unapplied
 [`0002_ciphertext_intake.sql`](../server/migrations/managed/0002_ciphertext_intake.sql)
 draft adds session-bound upload intents, key-identity nonce reservations,
-chunk metadata and immutable committed ciphertext objects. A committed object
-is not a published timeline revision. The third, still-unapplied
+chunk metadata with opaque private-storage object IDs, and immutable committed
+ciphertext objects. A committed object is not a published timeline revision.
+The third, still-unapplied
 [`0003_day_revisions.sql`](../server/migrations/managed/0003_day_revisions.sql)
 draft adds append-only day snapshot revisions, session-bound adult publish
 authority and compare-and-swap heads. None of these migrations is registered
 with a runner or applied to any database.
+
+The chunk schema now records the opaque storage object ID returned by the
+existing private chunk writer. This is only a structural match. There is no
+durable adapter that verifies each object on disk before the commit transaction,
+converts its hex SHA-256 to the 32-byte database digest, reconciles orphaned
+objects, or selects and re-hashes database-referenced objects for backup.
+Therefore no managed upload or read route may be enabled yet.
 Do not apply it to an existing, family, or production database. The first
 execution target, if separately approved, is a fresh database containing only
 wholly fictional families.
