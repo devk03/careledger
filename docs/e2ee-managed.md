@@ -16,6 +16,14 @@ ciphertext-only server routes and the browser setup, recovery, sync, consent, an
 are integrated and pass every launch blocker below. The cryptographic modules alone are not a
 managed product.
 
+The current one-household-key browser prototype and v5 managed schema do **not**
+provide private per-day grants: a member given that key could decrypt denied
+days. The [per-day design proposal](per-day-e2ee-design.md) describes the
+owner-only root, separate day/source keys, opaque encrypted date index, and
+schema/security work required before limited-member sharing. Do not wrap the
+current household key to an ordinary limited member or claim that server-side
+day grants provide E2EE isolation.
+
 An optional `createSyntheticVaultCanaryApp` is exercised only by server tests. It moves
 fictional encrypted bytes over HTTP into a bounded, in-memory two-household store with
 cookie/CSRF checks, then returns those exact bytes. It has no durable adapter, day grants,
@@ -82,8 +90,11 @@ installed, signed client with reproducible builds, verified updates, and key con
 
 ## Managed data path
 
-1. The browser generates a random 256-bit household data-encryption key.
-2. Originals and structured state are split into bounded chunks and encrypted with AES-256-GCM.
+1. The current prototype generates a random 256-bit household data-encryption
+   key. This is not the final limited-member key hierarchy; the proposed
+   managed design keeps an owner/admin recovery root separate from random
+   per-day and per-source content keys.
+2. Originals and structured state in the prototype are split into bounded chunks and encrypted with AES-256-GCM.
    Every chunk receives a fresh 96-bit IV and authenticated scope containing the format, random
    immutable blob ID, household, opaque object ID, revision, chunk position, and total plaintext
    length.
@@ -94,15 +105,20 @@ installed, signed client with reproducible builds, verified updates, and key con
    design choice, not a protection in the current vault wire format.
 4. Browser-side processing renders and extracts records in an isolated worker. Search and review
    use a local decrypted index rather than a server-side medical index.
-5. Recovery wrapping is a release blocker, not a current feature. Before launch, encrypted exports
-   must wrap the household key with a caregiver-held recovery secret. Losing every authorized
-   device and the recovery secret will mean the server cannot recover the vault; the UI must
+5. Current recovery wrapping protects one household key only. Before launch,
+   recovery must restore the owner root and every authorized day/source key
+   through authenticated envelopes. Losing every authorized device and the
+   recovery secret will mean the server cannot recover the vault; the UI must
    explain this before setup.
 
 Multi-caregiver sharing and rollback-resistant version manifests are also design-only. Sharing
-will wrap the household key separately to each approved caregiver device. A key-authenticated
+must wrap only approved day/source keys to a limited caregiver device, never the
+owner root. A key-authenticated
 version chain must prevent the server from replaying an older intact vault. Both designs require
 independent security review before invitations or managed sync are enabled.
+A recovered device without a prior trusted head cannot detect a replayed older
+but valid manifest from the host on its own; an independently authenticated
+latest-head mechanism is still an unresolved launch blocker.
 
 ## AI exception, stated plainly
 
