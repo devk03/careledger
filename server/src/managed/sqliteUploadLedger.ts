@@ -296,6 +296,12 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       "AND p.id = i.profile_id " +
       "JOIN managed_key_identities k ON k.household_id = i.household_id " +
       "AND k.key_id = i.key_id AND k.epoch = i.epoch " +
+      "JOIN managed_current_scope_keys current_key " +
+      "ON current_key.household_id = i.household_id " +
+      "AND current_key.profile_id = i.profile_id " +
+      "AND current_key.scope_id = i.scope_id " +
+      "AND current_key.key_id = i.key_id " +
+      "AND current_key.epoch = i.epoch " +
       "WHERE i.household_id = ? AND i.session_id = ? AND i.id = ? " +
       "AND d.account_id = ? AND d.state = 'active' " +
       "AND (g.capability_mask & 2) = 2 AND sc.state = 'active' " +

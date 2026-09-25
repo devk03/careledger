@@ -17,7 +17,10 @@ draft adds one pre-write lease per day upload intent. The fifth, still-unapplied
 [`0005_non_day_intake.sql`](../server/migrations/managed/0005_non_day_intake.sql)
 draft adds separate source/draft ciphertext identity, nonce/object claims,
 pre-write leases and a signed two-blob pending-draft pair registration. It does not
-relax day-revision checks. None of these migrations is registered
+relax day-revision checks. The sixth, still-unapplied
+[`0006_active_scope_keys.sql`](../server/migrations/managed/0006_active_scope_keys.sql)
+draft adds owner-signed monotonic current-key heads and guards both write paths;
+it never guesses an active key from an existing maximum epoch. None of these migrations is registered
 with the production startup path or applied to any database. An explicit
 fictional-only runner pins their SHA-256 checksums and creates a fresh private
 temporary database only after a separate approval flag; it has not been run.
@@ -124,9 +127,10 @@ separate keys or join the claim protocol before any managed client is enabled.
 The new source/draft object ID is unique within its scope, but the existing
 day-intent schema does not store an object ID, so this is not a cross-lineage
 object-ID uniqueness claim. A pending draft pair is not adult approval. Neither
-day nor non-day intents yet check a signed current-key head, so key rotation
-cannot be considered enforced until a later migration and runtime recheck close
-that gap across both paths. A draft must obtain both intents and open both
+day and non-day intents now have signed-current-key checks in the unapplied
+`0006` draft, but key rotation is not operational until the schema is tested,
+canonical signatures are verified in runtime, and a current head is activated
+for each scope. A draft must obtain both intents and open both
 staging leases atomically under one combined quota decision before writing
 either object. A sequential content-then-metadata lease request is not a
 supported protocol; no batch issuer/stager exists yet.
