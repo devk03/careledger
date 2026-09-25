@@ -9,8 +9,16 @@ random day key and recipient-specific X25519/HKDF-SHA256/AES-256-GCM HPKE envelo
 opaque IDs. It is not wired to hosted routes, persistence, grants, or the
 recovery kit. It does not authenticate who issued an envelope; the recipient's
 public key must come from a separately approved, authenticated enrollment flow.
-The current record-blob format also lacks the full profile/day/epoch binding
-and durable nonce reservation required for real-record use.
+The legacy v1 record-blob format lacks profile/day/epoch binding. A separate
+browser-only v2 blob primitive now authenticates opaque household, profile,
+day/source/draft scope, object, key epoch, purpose, revision, blob ID, and
+chunk position/size as binary AES-GCM associated data. Its distinct `ADEN`
+version 2 wire carries ciphertext without dates, names, or scope identifiers.
+The TypeScript streaming parser accepts v2 separately from v1, but only checks
+framing; it cannot prove that submitted bytes were actually encrypted. V2 is not
+wired to hosted intake or a durable grant store. Durable nonce reservation,
+key-to-scope provenance, signed enrollment, and rollback resistance remain
+required before real-record use.
 
 The prototype envelope wire is exactly 188 bytes: `ADKY`, version 1, suite 1,
 HPKE base-mode marker 0, reserved byte 0, four 16-byte opaque IDs, a big-endian

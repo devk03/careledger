@@ -47,7 +47,8 @@ describe("bounded encrypted vault wire stream", () => {
     const { encrypted, wire } = await fixture();
     const store = staging();
     const header = await stageVaultWireStream(fragments(wire), store.sink);
-    expect(header).toEqual({ blobId: Buffer.from(encrypted.blobId).toString("hex"),
+    expect(header).toEqual({ wireVersion: 1,
+      blobId: Buffer.from(encrypted.blobId).toString("hex"),
       plaintextSize: VAULT_CHUNK_BYTES + 17, chunkCount: 2,
       expectedWireBytes: wire.byteLength });
     expect(store.published).toBe(true);

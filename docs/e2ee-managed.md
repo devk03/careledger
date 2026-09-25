@@ -63,6 +63,14 @@ It is not connected to an HTTP route or database transaction; it cannot establis
 who may read a chunk, whether the bytes are genuinely encrypted, which care day
 they belong to, or whether an orphaned file is part of a committed backup.
 
+A separate v2 browser blob primitive binds encrypted chunks to opaque household,
+profile, day/source/draft scope, object, epoch, purpose, revision and chunk
+position. The shared v2 wire format has no care dates or labels and is rejected
+by the legacy v1 decoder. Fictional browser and server-framing tests exercise
+this format, but it is not connected to durable grants, nonce reservation,
+signed manifests, upload routes, backup or MCP. V1 ciphertext is never treated
+as a per-day private record.
+
 The browser-only `managed/timeline.ts` view projects already-decrypted, approved
 entries into sparse care days and a separate approved-undated queue; pending
 submissions still need a separate review inbox. Its backward query

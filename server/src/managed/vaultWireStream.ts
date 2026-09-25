@@ -1,11 +1,13 @@
+import { MANAGED_VAULT_CHUNK_BYTES, MANAGED_VAULT_WIRE_VERSION,
+  MAX_MANAGED_VAULT_BYTES } from "@adeno/contracts";
+
 const MAGIC = Buffer.from("ADEN", "ascii");
-const VERSION = 1;
 const HEADER_BYTES = 33;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const CHUNK_HEADER_BYTES = IV_BYTES + 4;
-const CHUNK_BYTES = 1024 * 1024;
-const MAX_PLAINTEXT_BYTES = 100 * CHUNK_BYTES;
+const CHUNK_BYTES = MANAGED_VAULT_CHUNK_BYTES;
+const MAX_PLAINTEXT_BYTES = MAX_MANAGED_VAULT_BYTES;
 const MAX_CHUNKS = MAX_PLAINTEXT_BYTES / CHUNK_BYTES;
 const MAX_WIRE_BYTES = HEADER_BYTES + MAX_PLAINTEXT_BYTES +
   MAX_CHUNKS * (CHUNK_HEADER_BYTES + TAG_BYTES);
@@ -14,6 +16,7 @@ const MAX_TOTAL_SOURCE_FRAGMENTS = 1_000_000;
 const MAX_TOTAL_EMPTY_FRAGMENTS = 1024;
 
 export type VaultWireHeader = {
+  wireVersion: 1 | 2;
   blobId: string;
   plaintextSize: number;
   chunkCount: number;
@@ -59,12 +62,30 @@ export async function stageVaultWireStream(
   sink: VaultWireStagingSink,
   signal?: AbortSignal,
 ): Promise<VaultWireHeader> {
+  return stageVersionedVaultWireStream(source, sink, 1, signal);
+}
+
+/** V2 framing for opaque day/source/draft ciphertext; still not authorization. */
+export async function stageManagedVaultWireV2Stream(
+  source: AsyncIterable<Uint8Array>,
+  sink: VaultWireStagingSink,
+  signal?: AbortSignal,
+): Promise<VaultWireHeader> {
+  return stageVersionedVaultWireStream(source, sink, MANAGED_VAULT_WIRE_VERSION, signal);
+}
+
+async function stageVersionedVaultWireStream(
+  source: AsyncIterable<Uint8Array>,
+  sink: VaultWireStagingSink,
+  requiredVersion: 1 | 2,
+  signal?: AbortSignal,
+): Promise<VaultWireHeader> {
   const reader = new BoundedReader(source, signal);
   let began = false;
   let committed = false;
   try {
     const bytes = await reader.readExactly(HEADER_BYTES);
-    if (!bytes.subarray(0, MAGIC.length).equals(MAGIC) || bytes[4] !== VERSION)
+    if (!bytes.subarray(0, MAGIC.length).equals(MAGIC) || bytes[4] !== requiredVersion)
       throw new VaultWireStreamError();
     const plaintextSize = bytes.readUInt32BE(21);
     const chunkSize = bytes.readUInt32BE(25);
@@ -75,13 +96,18 @@ export async function stageVaultWireStream(
     const expectedWireBytes = HEADER_BYTES + plaintextSize +
       chunkCount * (CHUNK_HEADER_BYTES + TAG_BYTES);
     reader.setExactLimit(expectedWireBytes);
-    const header = { blobId: bytes.subarray(5, 21).toString("hex"),
+    const header = { wireVersion: requiredVersion,
+      blobId: bytes.subarray(5, 21).toString("hex"),
       plaintextSize, chunkCount, expectedWireBytes };
     began = true;
     await sink.begin(header);
     reader.checkAbort();
+    const seenIvs = requiredVersion === MANAGED_VAULT_WIRE_VERSION ? new Set<string>() : null;
     for (let index = 0; index < chunkCount; index += 1) {
       const iv = await reader.readExactly(IV_BYTES);
+      const ivId = iv.toString("hex");
+      if (seenIvs?.has(ivId)) throw new VaultWireStreamError();
+      seenIvs?.add(ivId);
       const length = (await reader.readExactly(4)).readUInt32BE(0);
       const expected = Math.max(0, Math.min(CHUNK_BYTES,
         plaintextSize - index * CHUNK_BYTES)) + TAG_BYTES;
