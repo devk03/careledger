@@ -58,6 +58,28 @@ describe("worker protocol with synthetic images only", () => {
     } finally { await service.close(); }
   });
 
+  it("survives repeated successful requests without an unexpected worker exit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "adeno-fictional-worker-soak-"));
+    const socketPath = join(directory, "parser.sock");
+    const exits: number[] = [];
+    const server = await startParserWorkerServer({ socketPath, timeoutMs: 5000 }, {
+      childScriptPath: join(process.cwd(), "dist/ingest/imageDecodeChild.js"),
+      terminateProcess: (code) => { exits.push(code); return undefined as never; },
+    });
+    try {
+      const bytes = await fictionalImage("png");
+      const client = createParserSocketInspector({ socketPath,
+        trustedWorkerUid: process.getuid!(), timeoutMs: 5000 });
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await expect(client.inspect(bytes, "image/png"))
+          .resolves.toEqual({ status: "safe", pageCount: 1 });
+      }
+      expect(exits).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 60_000);
+
   it("rejects a header digest that does not match exact received payload bytes", async () => {
     const service = await worker();
     try {
