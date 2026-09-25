@@ -9,7 +9,8 @@ const AAD_DOMAIN = new TextEncoder().encode("adeno:managed-blob:v2\0");
 const SCOPE_KEYS = ["careProfileId", "householdId", "keyEpoch", "objectId",
   "opaqueScopeId", "purpose", "revision"];
 
-export type ManagedVaultPurposeV2 = "day-snapshot" | "source-original" | "review-draft";
+export type ManagedVaultPurposeV2 = "day-snapshot" | "source-original" |
+  "review-draft" | "encrypted-index";
 
 /** No care date, filename, or clinical label may be placed in a hosted scope. */
 export type ManagedVaultScopeV2 = {
@@ -124,7 +125,8 @@ function assertScope(scope: ManagedVaultScopeV2): void {
     !Number.isSafeInteger(scope.keyEpoch) || scope.keyEpoch < 1 ||
     scope.keyEpoch > 0xffffffff || !Number.isSafeInteger(scope.revision) ||
     scope.revision < 1 || scope.revision > 0xffffffff ||
-    !["day-snapshot", "source-original", "review-draft"].includes(scope.purpose))
+    !["day-snapshot", "source-original", "review-draft",
+      "encrypted-index"].includes(scope.purpose))
     throw new ManagedVaultIntegrityV2Error();
 }
 
@@ -154,7 +156,8 @@ function associatedData(scope: ManagedVaultScopeV2, blobId: Uint8Array,
   view.setUint32(offset, scope.keyEpoch, false);
   offset += 4;
   aad[offset] = scope.purpose === "day-snapshot" ? 1 :
-    scope.purpose === "source-original" ? 2 : 3;
+    scope.purpose === "source-original" ? 2 :
+    scope.purpose === "review-draft" ? 3 : 4;
   offset += 1;
   view.setUint32(offset, scope.revision, false);
   offset += 4;

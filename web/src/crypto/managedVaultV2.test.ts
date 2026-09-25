@@ -51,10 +51,22 @@ it("never silently treats old household-wide v1 blobs as per-day v2 blobs", asyn
 it.each([
   { householdId: "aa".repeat(16) }, { careProfileId: "aa".repeat(16) },
   { opaqueScopeId: "aa".repeat(16) }, { objectId: "aa".repeat(16) },
-  { keyEpoch: 2 }, { purpose: "source-original" as const }, { revision: 2 },
+  { keyEpoch: 2 }, { purpose: "source-original" as const },
+  { purpose: "encrypted-index" as const }, { revision: 2 },
 ])("rejects ciphertext under a different authenticated scope: %o", async (change) => {
   const { dayKey, blob } = await encrypted();
   await expect(decryptManagedVaultBlobV2(dayKey, blob, { ...scope, ...change }))
+    .rejects.toBeInstanceOf(ManagedVaultIntegrityV2Error);
+});
+
+it("keeps an encrypted index in a purpose-separated v2 key domain", async () => {
+  const indexKey = await key();
+  const indexScope = { ...scope, purpose: "encrypted-index" as const };
+  const index = new TextEncoder().encode("FICTIONAL_LOCAL_INDEX_NOT_A_REAL_RECORD");
+  const blob = await encryptManagedVaultBlobV2(indexKey, index, indexScope);
+  expect(new TextDecoder().decode(await decryptManagedVaultBlobV2(indexKey,
+    blob, indexScope))).toBe("FICTIONAL_LOCAL_INDEX_NOT_A_REAL_RECORD");
+  await expect(decryptManagedVaultBlobV2(indexKey, blob, scope))
     .rejects.toBeInstanceOf(ManagedVaultIntegrityV2Error);
 });
 

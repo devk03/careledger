@@ -1,6 +1,7 @@
 /** Wire-level data only. Authorization and persistence interfaces stay server-side. */
 export * from "./dayKeyEnvelopeWire.js";
 export * from "./managedVaultWireV2.js";
+export * from "./indexHeadWire.js";
 export type ISODate = string;
 
 export type SourceReference = {

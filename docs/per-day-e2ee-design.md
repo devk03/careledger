@@ -37,6 +37,18 @@ TypeScript-server suite checks the same fictional structural vector. No
 production server route is mounted. Both consumers build the shared package
 from source before runtime imports; only the browser holds HPKE keys.
 
+An additional browser-only `ADEN` v2 purpose now separates encrypted index
+content from day/source/draft content. A fixed-width Ed25519-signed index head
+can commit to the **exact ciphertext wire hash**, an opaque per-member view,
+key/object IDs, grant-head commitment and a predecessor head. It detects a
+fork, stale head or gap only relative to a checkpoint already trusted by that
+device. The supplied signing public key and grant commitment must come from a
+separately authenticated enrollment/grant path; a server-returned key is not
+authority. The verifier checks framing, signature and ciphertext hash, not
+AES-GCM decryption, complete index contents or latest-state freshness. A fresh
+recovered device still needs the independent witness described below. No
+index head is stored or served in production today.
+
 ## Why the current schema and key are insufficient
 
 The current browser vault prototype encrypts with one household key. The v5

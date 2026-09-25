@@ -88,6 +88,14 @@ using an approved day key for drafts would violate draft isolation. The
 browser test uses only fictional content and checks that no record upload or
 plaintext request occurs.
 
+The browser also has a fictional signed-index-head prototype. Ed25519 signs a
+canonical opaque header binding a member-specific view to an encrypted-index
+ciphertext hash and prior head. A device with an already trusted checkpoint
+can reject a changed or skipped head, but this does not establish the newest
+head for a fresh device, authenticate enrollment by itself, or prove the index
+decrypted and contained every authorized day. Neither a durable checkpoint nor
+an independent freshness witness is implemented.
+
 The browser-only `managed/timeline.ts` view projects already-decrypted, approved
 entries into sparse care days and a separate approved-undated queue; pending
 submissions still need a separate review inbox. Its backward query
