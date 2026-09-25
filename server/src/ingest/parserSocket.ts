@@ -9,7 +9,7 @@ import { createParserRequest, encodeParserRequestHeader, MAX_PARSER_REPLY_BYTES,
   parseParserReply } from "./parserProtocol.js";
 
 const CHUNK_BYTES = 64 * 1024;
-const rejected = { status: "rejected" as const, pageCount: 0 };
+const rejected = Object.freeze({ status: "rejected" as const, pageCount: 0 });
 
 export type ParserSocketOptions = Readonly<{
   socketPath: string;

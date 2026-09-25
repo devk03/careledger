@@ -115,6 +115,17 @@ describe("bounded parser Unix-socket transport, with a fictional worker", () => 
       .resolves.toEqual({ status: "rejected", pageCount: 0 });
   });
 
+  it("cannot turn later failures into success by mutating a prior rejection", async () => {
+    const absent = join(await mkdtemp(join(tmpdir(), "adeno-immutable-rejection-")), "none.sock");
+    const parser = inspector(absent);
+    const first = await parser.inspect(fictionalPdf, "application/pdf");
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Reflect.set(first, "status", "safe")).toBe(false);
+    expect(Reflect.set(first, "pageCount", 1)).toBe(false);
+    await expect(parser.inspect(fictionalPdf, "application/pdf"))
+      .resolves.toEqual({ status: "rejected", pageCount: 0 });
+  });
+
   it("fails closed at the per-adapter concurrency cap", async () => {
     const worker = await fakeWorker("silent");
     try {
