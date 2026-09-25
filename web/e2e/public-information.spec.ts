@@ -14,7 +14,21 @@ for (const width of [320, 1280]) {
       expect(href).not.toBe("#");
       if (href?.startsWith("#")) await expect(page.locator(href)).toHaveCount(1);
     }
-    await page.getByRole("link", { name: "Read the privacy model" }).click();
+    const previewPrivacy = page.getByRole("complementary", { name: "Preview safety notice" })
+      .getByRole("link", { name: "Read the privacy model" });
+    await expect(previewPrivacy).toBeVisible();
+    const bounds = await previewPrivacy.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.height).toBeGreaterThanOrEqual(44);
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    await previewPrivacy.focus();
+    await expect(previewPrivacy).toBeFocused();
+    await previewPrivacy.click();
+    await expect(page).toHaveURL(/\/privacy$/);
+    await page.goBack();
+    await page.getByRole("region", { name: "Safety principles" })
+      .getByRole("link", { name: "Read the privacy model" }).click();
     await expect(page).toHaveURL(/\/privacy$/);
     await expect(page.getByRole("heading", { name: "The privacy model", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "The current server can read your records" })).toBeVisible();

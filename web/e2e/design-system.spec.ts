@@ -4,8 +4,11 @@ import { expect, test } from "@playwright/test";
 for (const width of [320, 375, 414, 768, 1280]) {
   test(`shared library works with fictional data at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    const apiCalls: string[] = [];
-    page.on("request", request => { if(request.url().includes("/api/")) apiCalls.push(request.url()); });
+    const apiCalls: { method: string; url: string }[] = [];
+    page.on("request", request => {
+      const path = new URL(request.url()).pathname;
+      if (path.startsWith("/api/")) apiCalls.push({ method: request.method(), url: request.url() });
+    });
     await page.goto("/design-system");
     await expect(page.getByRole("heading", { name: "One calm, familiar language." })).toBeVisible();
     await page.getByRole("button", { name: "Save sample", exact: true }).click();
@@ -15,7 +18,11 @@ for (const width of [320, 375, 414, 768, 1280]) {
     await page.getByLabel("Fictional nickname").fill("Demo nickname");
     await page.getByRole("button", { name: "Check example" }).click();
     await expect(page.getByLabel("Fictional nickname")).not.toHaveAttribute("aria-invalid", "true");
-    expect(apiCalls).toEqual([]);
+    // The read-only runtime status check may show the safety notice. The
+    // isolated component gallery must never call record, auth or AI APIs.
+    const runtimeUrl = new URL("/api/public/runtime", page.url()).href;
+    expect(apiCalls.some(call => call.method === "GET" && call.url === runtimeUrl)).toBe(true);
+    expect(apiCalls.filter(call => call.method !== "GET" || call.url !== runtimeUrl)).toEqual([]);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     expect(overflow).toBe(false);
     const clipped = await page.locator("button, input:not([type=file]), select, textarea").evaluateAll(nodes => nodes
