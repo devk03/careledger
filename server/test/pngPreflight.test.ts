@@ -2,6 +2,7 @@ import { crc32, deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import { checkPngContainer, PngPreflightRejected } from "../src/ingest/pngPreflight.js";
+import { MAX_UPLOAD_BYTES } from "../src/ingest/admission.js";
 
 const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -58,5 +59,10 @@ describe("PNG container preflight (not a decoder)", () => {
     expect(() => checkPngContainer(Buffer.concat([signature, header, firstData,
       chunk("tEXt", Buffer.from("fictional")), firstData,
       chunk("IEND", Buffer.alloc(0))]))).toThrow(PngPreflightRejected);
+  });
+
+  it("rejects oversized input before making a copy", () => {
+    const oversized = Buffer.alloc(MAX_UPLOAD_BYTES + 1);
+    expect(() => checkPngContainer(oversized)).toThrow(PngPreflightRejected);
   });
 });

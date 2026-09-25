@@ -23,9 +23,11 @@ export type PngPreflight = Readonly<{
  * cannot stand in for isolated image decoding/structural inspection.
  */
 export function checkPngContainer(input: Uint8Array): PngPreflight {
+  if (input.byteLength < SIGNATURE.length + 12 || input.byteLength > MAX_UPLOAD_BYTES)
+    throw new PngPreflightRejected();
   const bytes = Buffer.from(input);
-  if (bytes.length < SIGNATURE.length + 12 || bytes.length > MAX_UPLOAD_BYTES ||
-    !bytes.subarray(0, SIGNATURE.length).equals(SIGNATURE)) throw new PngPreflightRejected();
+  if (!bytes.subarray(0, SIGNATURE.length).equals(SIGNATURE))
+    throw new PngPreflightRejected();
 
   let offset = SIGNATURE.length;
   let chunkCount = 0;
