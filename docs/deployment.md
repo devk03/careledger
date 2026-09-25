@@ -24,6 +24,8 @@ Use one replica, a durable volume at `/data`, health check `/health/ready`, and 
 
 Deploy only an audited `git archive` of the release commit, not the private parent workspace or a general filesystem copy. Docker's build context is allowlisted. Provider keys remain unset for this preview. Retrieve setup privately through the operator shell using `python -m app.setup_link`; never put its token in build/runtime logs or GitHub.
 
+When building a release image, pass the exact 40-character public Git commit as Docker build argument `ADENO_RELEASE_SHA`. The public footer then links to that source commit; absent or malformed values omit the link instead of displaying an unverifiable revision. Compare the live footer link with the archived release commit before admitting users. This is an operator-supplied provenance label, not a cryptographic attestation of the running image.
+
 For an internet-facing deployment:
 
 - Put Adeno behind a trusted TLS reverse proxy and set `PUBLIC_BASE_URL` to its exact `https://` origin.

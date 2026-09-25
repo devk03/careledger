@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 FROM node:22.23.2-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS web-builder
+ARG ADENO_RELEASE_SHA
+ENV VITE_ADENO_RELEASE_SHA=${ADENO_RELEASE_SHA}
 WORKDIR /build
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/contracts/src/ ./packages/contracts/src/

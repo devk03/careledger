@@ -65,6 +65,7 @@
 .public-footer a:hover { color: var(--color-accent-active); }
 .public-footer a:focus-visible, .caregiver-examples a:focus-visible { outline: 2px solid var(--color-button-focus); outline-offset: 3px; }
 .footer-purpose { flex-basis: 100%; }
+.source-revision { color: var(--color-ink-soft); font-size: var(--text-small); font-variant-numeric: tabular-nums; }
 .caregiver-examples { width: min(calc(100% - 2 * var(--space-lg)), var(--content-width)); margin: 0 auto; padding-block: var(--space-xl); border-top: 1px solid var(--color-rule); }
 .caregiver-examples h2, .information-content h1 { font-family: var(--font-wordmark); font-weight: 450; letter-spacing: -0.035em; text-wrap: balance; }
 .caregiver-examples h2 { font-size: clamp(1.75rem, 3vw, 2.75rem); margin-block: var(--space-sm); }

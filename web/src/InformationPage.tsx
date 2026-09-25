@@ -1,7 +1,9 @@
 import { ArrowRight, Github } from "lucide-react";
 import { ButtonLink } from "./ui";
+import { publicReleaseRevision } from "./releaseRevision";
 
 export function PublicFooter() {
+  const revision = publicReleaseRevision(import.meta.env.VITE_ADENO_RELEASE_SHA);
   return <footer className="footer public-footer">
     <p><span className="wordmark-small">adeno</span> keeps the source close.</p>
     <nav aria-label="About adeno">
@@ -15,6 +17,9 @@ export function PublicFooter() {
         </a>
       </span>
     </nav>
+    {revision && <a className="source-revision" href={`https://github.com/devk03/careledger/commit/${revision}`}
+      target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"
+      aria-label={`View source commit ${revision} on GitHub`}>Source {revision.slice(0, 8)}</a>}
     <p className="footer-purpose">For personal informational use. Not medical advice.</p>
   </footer>;
 }
