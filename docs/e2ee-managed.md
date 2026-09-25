@@ -77,6 +77,17 @@ running app. It is not connected to real grants, nonce reservation, signed
 manifests, backup or MCP. V1 ciphertext is never treated as a per-day private
 record.
 
+The browser can now prepare a **local-only** encrypted review draft from a PDF,
+JPEG, PNG or family note. It encrypts the original bytes and a separate metadata
+object containing the filename or author, a client-side selection timestamp and
+explicit candidate care days. An empty day list stays undated; selection time is
+never promoted to care time or labeled as server receipt time. This preparer
+does not upload, save, scan, classify, authorize, recover or publish anything.
+It needs a future distinct review-draft key and enrolled reviewer devices;
+using an approved day key for drafts would violate draft isolation. The
+browser test uses only fictional content and checks that no record upload or
+plaintext request occurs.
+
 The browser-only `managed/timeline.ts` view projects already-decrypted, approved
 entries into sparse care days and a separate approved-undated queue; pending
 submissions still need a separate review inbox. Its backward query
