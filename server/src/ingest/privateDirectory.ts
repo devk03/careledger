@@ -14,9 +14,9 @@ async function privateDirectory(path: string): Promise<void> {
 }
 
 /**
- * Create one child of an existing, private parent; never traverse arbitrary
- * caller-supplied subpaths. The parent must itself live in a trusted path.
- * The child name is durable before the function returns.
+ * Create one child of an existing, private, durably provisioned parent; never
+ * traverse arbitrary caller-supplied subpaths. The parent must itself live in
+ * a trusted path. The child name is durable before the function returns.
  */
 export async function provisionPrivateDirectory(parent: string, childName: string): Promise<string> {
   if (!isAbsolute(parent) || !/^[a-z][a-z0-9-]{0,63}$/.test(childName))
@@ -24,21 +24,20 @@ export async function provisionPrivateDirectory(parent: string, childName: strin
   try {
     await privateDirectory(parent);
     const canonicalParent = await realpath(parent);
+    await privateDirectory(canonicalParent);
     const child = join(canonicalParent, childName);
-    let created = false;
     try {
       await mkdir(child, { mode: 0o700 });
-      created = true;
     } catch (error) {
       if (typeof error !== "object" || error === null || !("code" in error) ||
         error.code !== "EEXIST") throw error;
     }
     await privateDirectory(child);
-    if (created) {
-      const directory = await open(canonicalParent, "r");
-      try { await directory.sync(); }
-      finally { await directory.close(); }
-    }
+    // Even on EEXIST, another concurrent creator (or a previous failed call)
+    // may not have synced the new name yet. Every success must sync the parent.
+    const directory = await open(canonicalParent, "r");
+    try { await directory.sync(); }
+    finally { await directory.close(); }
     return child;
   } catch {
     throw new UnsafeStorageDirectory();

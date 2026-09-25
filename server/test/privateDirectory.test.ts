@@ -15,6 +15,15 @@ describe("durable private intake directory provisioning", () => {
     expect(await readdir(parent)).toEqual(["quarantine"]);
   });
 
+  it("allows concurrent provisioning of the same child without partial results", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "adeno-fictional-concurrent-provision-"));
+    const children = await Promise.all(Array.from({ length: 16 }, () =>
+      provisionPrivateDirectory(parent, "quarantine")));
+    expect(new Set(children).size).toBe(1);
+    expect((await lstat(children[0]!)).mode & 0o777).toBe(0o700);
+    expect(await readdir(parent)).toEqual(["quarantine"]);
+  });
+
   it("rejects a public parent before making a child", async () => {
     const parent = await mkdtemp(join(tmpdir(), "adeno-fictional-public-parent-"));
     await chmod(parent, 0o755);
