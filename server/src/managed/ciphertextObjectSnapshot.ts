@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, readFile, readdir, realpath, rename } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { link, lstat, mkdir, open, readFile, readdir, realpath, rename } from
+  "node:fs/promises";
+import { isAbsolute, join, sep } from "node:path";
 
+import { provisionPrivateDirectory } from "../ingest/privateDirectory.js";
 import { readCiphertextChunk } from "./ciphertextObjectStore.js";
 
 const OPAQUE_ID = /^[0-9a-f]{32}$/u;
@@ -104,6 +106,85 @@ export async function verifyCiphertextObjectSnapshot(input: {
   snapshotId: string;
   expectedManifestSha256: string;
 }): Promise<CiphertextSnapshotProof> {
+  return (await loadVerifiedSnapshot(input)).proof;
+}
+
+/**
+ * Create a new private object root under a trusted parent, preserving opaque
+ * IDs. The caller must separately restore/verify the corresponding database
+ * snapshot before mounting it. Partial roots retain a pending-restore name.
+ */
+export async function restoreCiphertextObjectSnapshot(input: {
+  backupRoot: string;
+  snapshotId: string;
+  expectedManifestSha256: string;
+  targetParent: string;
+}): Promise<CiphertextSnapshotProof & { targetRoot: string }> {
+  const verified = await loadVerifiedSnapshot(input);
+  const targetParent = await privateDirectory(input.targetParent);
+  const backupRoot = await privateDirectory(input.backupRoot);
+  if (sameOrNested(targetParent, backupRoot) || sameOrNested(backupRoot, targetParent))
+    throw new CiphertextSnapshotError();
+  const suffix = randomUUID();
+  const targetRoot = join(targetParent, `pending-restore-${input.snapshotId}-${suffix}`);
+  const finalRoot = join(targetParent, `restored-${input.snapshotId}-${suffix}`);
+  try {
+    await mkdir(targetRoot, { mode: 0o700 });
+    await syncDirectory(targetParent);
+    for (const reference of verified.references) {
+      const bytes = await checkedFile(join(verified.directory, objectFilename(reference)),
+        0o400, reference.byteSize);
+      if (bytes.byteLength !== reference.byteSize ||
+        createHash("sha256").update(bytes).digest("hex") !== reference.sha256)
+        throw new CiphertextSnapshotError();
+      const hash = createHash("sha256").update(reference.householdId).digest("hex");
+      const first = await provisionPrivateDirectory(targetRoot, hash.slice(0, 2));
+      const second = await provisionPrivateDirectory(first, hash.slice(2, 4));
+      const householdDirectory = await provisionPrivateDirectory(second, hash);
+      const output = await open(join(householdDirectory, reference.storageObjectId),
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600);
+      try {
+        await output.writeFile(bytes);
+        await output.sync();
+        await output.chmod(0o400);
+        await output.sync();
+      } finally { await output.close(); }
+      await syncDirectory(householdDirectory);
+    }
+    for (const reference of verified.references) {
+      await readCiphertextChunk(targetRoot, reference.householdId,
+        reference.storageObjectId, reference.sha256, reference.byteSize);
+    }
+    const markerBytes = Buffer.from(JSON.stringify({ format: "adeno.object-restore.v1",
+      snapshotId: input.snapshotId, manifestSha256: verified.proof.manifestSha256 }));
+    const marker = await open(join(targetRoot, ".restore-marker-pending"),
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600);
+    try {
+      await marker.writeFile(markerBytes);
+      await marker.sync();
+      await marker.chmod(0o400);
+      await marker.sync();
+    } finally { await marker.close(); }
+    await link(join(targetRoot, ".restore-marker-pending"),
+      join(targetRoot, ".restore-complete"));
+    await syncDirectory(targetRoot);
+    const completed = await checkedFile(join(targetRoot, ".restore-complete"),
+      0o400, markerBytes.length);
+    if (!completed.equals(markerBytes)) throw new CiphertextSnapshotError();
+    await rename(targetRoot, finalRoot);
+    await syncDirectory(targetParent);
+    return { ...verified.proof, targetRoot: finalRoot };
+  } catch { throw new CiphertextSnapshotError(); }
+}
+
+async function loadVerifiedSnapshot(input: {
+  backupRoot: string;
+  snapshotId: string;
+  expectedManifestSha256: string;
+}): Promise<{ proof: CiphertextSnapshotProof;
+  references: CiphertextObjectReference[]; directory: string }> {
   if (!OPAQUE_ID.test(input.snapshotId) || !SHA256.test(input.expectedManifestSha256))
     throw new CiphertextSnapshotError();
   const root = await privateDirectory(input.backupRoot);
@@ -131,8 +212,13 @@ export async function verifyCiphertextObjectSnapshot(input: {
       createHash("sha256").update(object).digest("hex") !== reference.sha256)
       throw new CiphertextSnapshotError();
   }
-  return { manifestSha256, objectCount: references.length,
-    totalBytes: references.reduce((sum, reference) => sum + reference.byteSize, 0) };
+  return { proof: { manifestSha256, objectCount: references.length,
+    totalBytes: references.reduce((sum, reference) => sum + reference.byteSize, 0) },
+    references, directory };
+}
+
+function sameOrNested(path: string, parent: string): boolean {
+  return path === parent || path.startsWith(`${parent}${sep}`);
 }
 
 function canonicalReferences(input: readonly CiphertextObjectReference[]):

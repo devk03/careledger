@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { storeCiphertextChunk } from "../src/managed/ciphertextObjectStore.js";
+import { readCiphertextChunk, storeCiphertextChunk } from
+  "../src/managed/ciphertextObjectStore.js";
 import { CiphertextSnapshotError, createCiphertextObjectSnapshot,
-  verifyCiphertextObjectSnapshot, type CiphertextObjectReference } from
+  restoreCiphertextObjectSnapshot, verifyCiphertextObjectSnapshot,
+  type CiphertextObjectReference } from
   "../src/managed/ciphertextObjectSnapshot.js";
 
 const householdId = "11".repeat(16);
@@ -122,5 +124,49 @@ describe("ciphertext-only object snapshot", () => {
     expect(await verifyCiphertextObjectSnapshot({ backupRoot: test.backupRoot,
       snapshotId, expectedManifestSha256: success.value.manifestSha256 }))
       .toEqual(success.value);
+  });
+
+  it("restores pinned ciphertext IDs into a new private object root only", async () => {
+    const test = await fixture();
+    const proof = await createCiphertextObjectSnapshot({ sourceRoot: test.sourceRoot,
+      backupRoot: test.backupRoot, snapshotId, references: [test.reference] });
+    const targetParent = await mkdtemp(join(tmpdir(), "adeno-fictional-restore-"));
+    const restored = await restoreCiphertextObjectSnapshot({ backupRoot: test.backupRoot,
+      snapshotId, expectedManifestSha256: proof.manifestSha256, targetParent });
+    expect(restored).toEqual({ ...proof,
+      targetRoot: expect.stringContaining(`restored-${snapshotId}-`) });
+    expect(await readCiphertextChunk(restored.targetRoot, householdId,
+      test.first.storageObjectId, test.first.sha256, test.first.byteSize))
+      .toEqual(test.firstBytes);
+    await expect(readCiphertextChunk(restored.targetRoot, householdId,
+      test.second.storageObjectId, test.second.sha256, test.second.byteSize))
+      .rejects.toThrow();
+    expect((await lstat(join(restored.targetRoot, ".restore-complete"))).mode & 0o777)
+      .toBe(0o400);
+    expect((await lstat(join(restored.targetRoot, ".restore-complete"))).ino)
+      .toBe((await lstat(join(restored.targetRoot, ".restore-marker-pending"))).ino);
+    expect(JSON.parse((await readFile(join(restored.targetRoot, ".restore-complete")))
+      .toString("utf8"))).toEqual({ format: "adeno.object-restore.v1",
+      snapshotId, manifestSha256: proof.manifestSha256 });
+    await expect(restoreCiphertextObjectSnapshot({ backupRoot: test.backupRoot,
+      snapshotId, expectedManifestSha256: proof.manifestSha256,
+      targetParent: test.backupRoot }))
+      .rejects.toBeInstanceOf(CiphertextSnapshotError);
+  });
+
+  it("does not start restoration from a damaged or unpinned snapshot", async () => {
+    const test = await fixture();
+    const proof = await createCiphertextObjectSnapshot({ sourceRoot: test.sourceRoot,
+      backupRoot: test.backupRoot, snapshotId, references: [test.reference] });
+    const targetParent = await mkdtemp(join(tmpdir(), "adeno-fictional-restore-"));
+    const copied = join(test.backupRoot, snapshotId,
+      `${householdId}-${test.first.storageObjectId}`);
+    await chmod(copied, 0o600);
+    await writeFile(copied, Buffer.alloc(test.first.byteSize, 0));
+    await chmod(copied, 0o400);
+    await expect(restoreCiphertextObjectSnapshot({ backupRoot: test.backupRoot,
+      snapshotId, expectedManifestSha256: proof.manifestSha256, targetParent }))
+      .rejects.toBeInstanceOf(CiphertextSnapshotError);
+    expect(await readdir(targetParent)).toEqual([]);
   });
 });

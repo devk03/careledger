@@ -36,8 +36,19 @@ Failures before rename leave private, unpublished in-progress directories; a
 failure syncing the parent after rename can leave a complete directory that
 must be inspected before retry. Snapshot IDs are create-only reservations; a
 failed attempt uses a fresh ID rather than reusing the previous one. No consistent
-database-snapshot provider, full backup encryption/retention, or fresh-instance
-restore is implemented.
+database-snapshot provider or full backup encryption/retention is implemented.
+A separate, unmounted restore primitive can verify the pinned object manifest
+and copy those ciphertext objects with their original IDs into a newly created
+private, offline root. It publishes that root only after its objects are
+re-read and a synced completion marker is linked. That is **not** a usable
+fresh-instance restore until the matching DB
+snapshot, keys, grants, checkpoint freshness and startup checks are restored
+and verified together. Callers may mount only after successful return and
+separate startup verification. An interrupted `pending-restore-*` directory
+must not be mounted even if a marker was linked before the crash; a failure
+syncing the parent after rename may leave a complete `restored-*` directory
+that requires inspection before reuse. A process with the same storage UID can
+still alter local files, so backup/restore roots require offline operator control.
 Therefore no managed upload or read route may be enabled yet.
 Do not apply these drafts to an existing, family, or production database. The first
 execution target, if separately approved, is a fresh database containing only
