@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, lstat, open, realpath } from "node:fs/promises";
+import { chmod, link, lstat, open, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 import { MAX_UPLOAD_BYTES } from "./admission.js";
@@ -19,6 +19,13 @@ export type StoredOriginal = {
   byteSize: number;
   path: string;
   alreadyExisted: boolean;
+};
+
+export type PendingObject = {
+  pendingId: string;
+  byteSize: number;
+  sha256: string | null;
+  state: "linked_alias" | "duplicate_copy" | "unpublished" | "conflict" | "unsafe";
 };
 
 async function assertPrivateRoot(path: string): Promise<string> {
@@ -164,4 +171,63 @@ export async function commitStagedObject(
   await verifyStored(destination, staged);
   return { sha256: staged.sha256, byteSize: staged.byteSize,
     path: destination, alreadyExisted };
+}
+
+/**
+ * Read-only inventory for backup/reconciliation. It never deletes a pending
+ * alias, copies clinical bytes into output, or treats an orphan as published.
+ */
+export async function inventoryPendingObjects(objectRoot: string): Promise<PendingObject[]> {
+  const root = await assertPrivateRoot(objectRoot);
+  const result: PendingObject[] = [];
+  for (const first of await readdir(root, { withFileTypes: true })) {
+    if (!/^[0-9a-f]{2}$/.test(first.name) || !first.isDirectory())
+      throw new ObjectIntegrityError();
+    const firstPath = join(root, first.name);
+    await assertPrivateRoot(firstPath);
+    for (const second of await readdir(firstPath, { withFileTypes: true })) {
+      if (!/^[0-9a-f]{2}$/.test(second.name) || !second.isDirectory())
+        throw new ObjectIntegrityError();
+      const secondPath = join(firstPath, second.name);
+      await assertPrivateRoot(secondPath);
+      for (const entry of await readdir(secondPath, { withFileTypes: true })) {
+        if (SHA256.test(entry.name)) continue;
+        if (!/^pending-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(entry.name))
+          throw new ObjectIntegrityError();
+        if (result.length >= 10_000) throw new ObjectIntegrityError();
+        const path = join(secondPath, entry.name);
+        const info = await lstat(path);
+        const pendingId = entry.name.slice("pending-".length);
+        if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0 ||
+          (process.getuid !== undefined && info.uid !== process.getuid()) ||
+          info.size < 1 || info.size > MAX_UPLOAD_BYTES) {
+          result.push({ pendingId, byteSize: info.size, sha256: null, state: "unsafe" });
+          continue;
+        }
+        let digest: string;
+        try { digest = await hashPrivateFile(path, info.size); }
+        catch {
+          result.push({ pendingId, byteSize: info.size, sha256: null, state: "unsafe" });
+          continue;
+        }
+        const destination = join(secondPath, digest);
+        let state: PendingObject["state"];
+        try {
+          const published = await lstat(destination);
+          if (!published.isFile() || published.isSymbolicLink() ||
+            await hashPrivateFile(destination, info.size) !== digest) {
+            state = "conflict";
+          } else {
+            state = published.dev === info.dev && published.ino === info.ino
+              ? "linked_alias" : "duplicate_copy";
+          }
+        } catch (error) {
+          state = typeof error === "object" && error !== null && "code" in error &&
+            error.code === "ENOENT" ? "unpublished" : "conflict";
+        }
+        result.push({ pendingId, byteSize: info.size, sha256: digest, state });
+      }
+    }
+  }
+  return result.sort((a, b) => a.pendingId.localeCompare(b.pendingId));
 }

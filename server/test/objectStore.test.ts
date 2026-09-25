@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { inspectUploadBytes } from "../src/ingest/admission.js";
-import { commitStagedObject, ObjectIntegrityError } from "../src/ingest/objectStore.js";
+import { commitStagedObject, inventoryPendingObjects,
+  ObjectIntegrityError } from "../src/ingest/objectStore.js";
 import { provisionPrivateDirectory } from "../src/ingest/privateDirectory.js";
 import { stageOriginalBytes } from "../src/ingest/staging.js";
 
@@ -35,6 +36,8 @@ describe("private immutable object-store primitive", () => {
     expect(first.alreadyExisted).toBe(false);
     expect(await readFile(first.path)).toEqual(fictionalPdf);
     expect((await lstat(first.path)).mode & 0o777).toBe(0o400);
+    expect((await inventoryPendingObjects(objects)).map((item) => item.state))
+      .toEqual(["linked_alias"]);
     // A crash between link and chmod can leave a private but writable inode;
     // a verified duplicate retry must complete the read-only transition.
     await chmod(first.path, 0o600);
@@ -43,6 +46,8 @@ describe("private immutable object-store primitive", () => {
     expect(second.alreadyExisted).toBe(true);
     expect(await readFile(first.path)).toEqual(fictionalPdf);
     expect((await lstat(first.path)).mode & 0o777).toBe(0o400);
+    expect((await inventoryPendingObjects(objects)).map((item) => item.state))
+      .toEqual(["linked_alias"]);
   });
 
   it("rejects a corrupted existing digest path without overwriting it", async () => {
@@ -68,6 +73,8 @@ describe("private immutable object-store primitive", () => {
     expect(stored.alreadyExisted).toBe(false);
     expect(await readFile(stored.path)).toEqual(fictionalPdf);
     expect(await readFile(orphan, "utf8")).toBe("incomplete fictional copy");
+    expect((await inventoryPendingObjects(objects)).map((item) => item.state).sort())
+      .toEqual(["linked_alias", "unpublished"]);
   });
 
   it("handles concurrent identical uploads without overwriting the digest path", async () => {
