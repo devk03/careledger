@@ -21,10 +21,17 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    # Retry bounded crash exits; a healthy socket still needs an app-side probe.
+    healthcheck:
+      test: ["CMD", "node", "dist/runParserHealthcheck.js"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    # This retries crash exits only; Docker health status alone does not restart.
     restart: "on-failure:3"
     environment:
       ADENO_PARSER_SOCKET_PATH: /run/adeno-parser/parser.sock
+      ADENO_PARSER_HEALTH_SOCKET_PATH: /run/adeno-parser/health.sock
 
 volumes:
   parser_socket:

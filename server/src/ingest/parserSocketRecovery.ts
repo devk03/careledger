@@ -33,10 +33,12 @@ async function probeSocket(path: string): Promise<SocketState> {
  * Only the dedicated worker calls this before bind. It never deletes a socket:
  * a verified, unresponsive inode is moved to a private archive name.
  */
-export async function archiveStaleParserSocket(path: string): Promise<
+export async function archiveStaleParserSocket(
+  path: string, expectedName: "parser.sock" | "health.sock" = "parser.sock",
+): Promise<
   { state: "absent" } | { state: "archived"; archivePath: string }
 > {
-  if (!isAbsolute(path) || basename(path) !== "parser.sock" ||
+  if (!isAbsolute(path) || basename(path) !== expectedName ||
     process.getuid === undefined || process.getuid() === 0)
     throw new ParserSocketRecoveryError();
   const parentPath = dirname(path);

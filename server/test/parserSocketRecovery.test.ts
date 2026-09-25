@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import { archiveStaleParserSocket, ParserSocketRecoveryError } from
   "../src/ingest/parserSocketRecovery.js";
+import { checkParserLiveness, startParserHealthServer } from
+  "../src/ingest/parserHealthSocket.js";
 import { startParserWorkerServer } from "../src/ingest/parserWorker.js";
 
 async function privateSocketPath() {
@@ -55,5 +57,29 @@ describe("recoverable parser socket restart", () => {
     await expect(archiveStaleParserSocket(filePath))
       .rejects.toBeInstanceOf(ParserSocketRecoveryError);
     expect((await lstat(filePath)).isFile()).toBe(true);
+  });
+
+  it("archives and rebinds a stale private health socket", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "adeno-fictional-health-recovery-"));
+    const path = join(directory, "health.sock");
+    const child = spawn(process.execPath, ["-e",
+      'process.umask(0o077);require("node:net").createServer().listen(process.argv[1],()=>process.stdout.write("READY"))',
+      path], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", () => reject(new Error("Synthetic health listener exited early")));
+        child.stdout.once("data", () => resolve());
+      });
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => child.once("close", () => resolve()));
+      const result = await archiveStaleParserSocket(path, "health.sock");
+      expect(result.state).toBe("archived");
+      if (result.state !== "archived") throw new Error("Expected health socket archive");
+      expect((await lstat(result.archivePath)).isSocket()).toBe(true);
+      const server = await startParserHealthServer(path);
+      try { await expect(checkParserLiveness(path)).resolves.toBe(true); }
+      finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+    } finally { child.kill("SIGKILL"); }
   });
 });
