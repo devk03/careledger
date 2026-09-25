@@ -25,3 +25,16 @@ ENV NODE_ENV=production \
     ADENO_PARSER_SOCKET_PATH=/run/adeno-parser/parser.sock
 USER 10002:10003
 CMD ["flock", "-n", "/run/adeno-parser/worker.lock", "node", "dist/runParserWorker.js"]
+
+# Separate research target. Never deploy this as the parser worker or pass
+# patient files to it; its entrypoint generates fictional PDFs internally.
+FROM runtime AS pdf-probe
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends qpdf=11.3.0-1+deb12u1 \
+    && qpdf --version
+USER 10002:10003
+CMD ["node", "dist/runSyntheticQpdfProbe.js"]
+
+# Keep ordinary `docker build -f Dockerfile.parser` on the parser runtime.
+FROM runtime AS default

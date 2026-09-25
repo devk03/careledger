@@ -4,6 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.parser
+      target: runtime
     image: adeno-parser:dev
     user: "10002:10003"
     network_mode: none

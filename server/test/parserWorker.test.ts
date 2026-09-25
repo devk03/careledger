@@ -10,6 +10,7 @@ import { createParserRequest, encodeParserRequestHeader,
   parseParserReply } from "../src/ingest/parserProtocol.js";
 import { createParserSocketInspector } from "../src/ingest/parserSocket.js";
 import { startParserWorkerServer } from "../src/ingest/parserWorker.js";
+import { fictionalMinimalPdf } from "../src/synthetic/fictionalMinimalPdf.js";
 
 async function worker() {
   const directory = await mkdtemp(join(tmpdir(), "adeno-fictional-real-worker-"));
@@ -53,7 +54,7 @@ describe("worker protocol with synthetic images only", () => {
       await expect(parser(service.socketPath).inspect(await fictionalImage("jpeg"), "image/jpeg"))
         .resolves.toEqual({ status: "safe", pageCount: 1 });
       await expect(parser(service.socketPath).inspect(
-        Buffer.from("%PDF-1.7\nFICTIONAL WORKER TEST\n%%EOF"), "application/pdf"))
+        fictionalMinimalPdf(), "application/pdf"))
         .resolves.toEqual({ status: "rejected", pageCount: 0 });
     } finally { await service.close(); }
   });
