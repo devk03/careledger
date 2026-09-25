@@ -4,13 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
-
-const APPLICATION_ID = 0x41444e4f; // "ADNO", separate from community "CLDG".
-const MIGRATIONS = [
-  [1, "identity_scopes", "96e1b5541389650818a961f81eda1696929721b99a454f364ac3ce17d623721b"],
-  [2, "ciphertext_intake", "c727c2c1a4479a723753313fd2455e457c49e8c5361a71da63d8d2b6551ceae4"],
-  [3, "day_revisions", "a51fdb6b99c0f49776e00effbfe97f39e4d9149317ee021139b076e913c71ac8"],
-] as const;
+import { MANAGED_APPLICATION_ID, MANAGED_MIGRATIONS } from "./managedSchemaManifest.js";
 
 /**
  * Operator-only fictional schema smoke-test entrypoint. It always allocates a
@@ -26,7 +20,7 @@ function main(): void {
     Object.keys(process.env).some((name) => name.startsWith("RAILWAY_")))
     throw new Error("Fictional managed migration requires explicit approval and opt-in");
 
-  const statements = MIGRATIONS.map(([version, name, sha256]) => {
+  const statements = MANAGED_MIGRATIONS.map(([version, name, sha256]) => {
     const file = new URL(`../../migrations/managed/${String(version).padStart(4, "0")}_${name}.sql`,
       import.meta.url);
     const bytes = readFileSync(file);
@@ -54,8 +48,8 @@ function main(): void {
               "(version, name, sha256, applied_at) VALUES (?, ?, ?, unixepoch('now'))")
               .run(migration.version, migration.name, migration.sha256);
           }
-          db.pragma(`application_id = ${APPLICATION_ID}`);
-          db.pragma(`user_version = ${MIGRATIONS.length}`);
+          db.pragma(`application_id = ${MANAGED_APPLICATION_ID}`);
+          db.pragma(`user_version = ${MANAGED_MIGRATIONS.length}`);
           db.exec("COMMIT");
         } catch (error) {
           try { db.exec("ROLLBACK"); } catch { /* Preserve the migration failure. */ }

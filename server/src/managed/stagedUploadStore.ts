@@ -33,7 +33,7 @@ export type VerifiedUploadChunkRow = {
 };
 
 export interface ManagedUploadLedger {
-  /** Authorize the current session/device/grant, reserve bytes, and return a server-issued intent. */
+  /** Recheck current session/device/grant and return a previously issued intent. */
   openForStaging(input: {
     session: VerifiedSession;
     tokenSha256: string;
