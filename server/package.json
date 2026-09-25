@@ -8,6 +8,7 @@
     "typecheck": "npm run build:contracts && tsc --noEmit",
     "test": "npm run build && vitest run",
     "build": "npm run build:contracts && tsc -p tsconfig.build.json",
+    "build:fictional-schema": "tsc -p tsconfig.fictional-schema.json",
     "start:local-pilot": "node dist/runLocalPilot.js",
     "start:parser-worker": "flock -n /run/adeno-parser/worker.lock node dist/runParserWorker.js",
     "stress:http": "npm run build && node stress/http.mjs",

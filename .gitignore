@@ -64,6 +64,7 @@
 # Generated and dependency files
 node_modules/
 dist/
+dist-fictional/
 web/dist/
 .venv/
 __pycache__/

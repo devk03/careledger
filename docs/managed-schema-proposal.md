@@ -12,7 +12,15 @@ The third, still-unapplied
 [`0003_day_revisions.sql`](../server/migrations/managed/0003_day_revisions.sql)
 draft adds append-only day snapshot revisions, session-bound adult publish
 authority and compare-and-swap heads. None of these migrations is registered
-with a runner or applied to any database.
+with the production startup path or applied to any database. An explicit
+fictional-only runner pins their SHA-256 checksums and creates a fresh private
+temporary database only after a separate approval flag; it has not been run.
+That runner requires a source checkout containing `server/migrations/managed/`;
+it is compiled only by the explicit `build:fictional-schema` target, not by
+the ordinary server/Docker build (the regular typecheck still checks its source).
+It refuses to run when `NODE_ENV=production` or any `RAILWAY_*` variable is
+present. If failure occurs after a temporary directory is created, that private
+directory is retained and reported for inspection rather than deleted.
 
 The chunk schema now records the opaque storage object ID returned by the
 existing private chunk writer. The streaming parser supplies the digest of the

@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/managed/runFictionalSchema.ts"],
+  "exclude": [],
+  "compilerOptions": {
+    "outDir": "dist-fictional",
+    "rootDir": "src"
+  }
+}
