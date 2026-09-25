@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { decodeImageInWorker } from "./imageDecoder.js";
+import type { ImageDecodeResult, ImageMediaType } from "./imageDecoder.js";
+import { decodeImageInSubprocess } from "./imageDecodeProcess.js";
 import { MAX_PARSER_HEADER_BYTES, MAX_PARSER_REPLY_BYTES, PARSER_WORKER_VERSION,
   parseParserRequestHeader, type ParserRequest } from "./parserProtocol.js";
 
@@ -17,7 +19,9 @@ export type ParserWorkerOptions = Readonly<{
 
 /** Dependency overrides are for synthetic tests; production uses both defaults. */
 export type ParserWorkerDependencies = Readonly<{
-  decodeImage?: typeof decodeImageInWorker;
+  decodeImage?: (bytes: Uint8Array, mediaType: ImageMediaType,
+    signal: AbortSignal) => Promise<ImageDecodeResult>;
+  childScriptPath?: string;
   terminateProcess?: (exitCode: number) => never;
 }>;
 
@@ -45,14 +49,19 @@ export async function startParserWorkerServer(
   options: ParserWorkerOptions, dependencies: ParserWorkerDependencies = {},
 ): Promise<Server> {
   await assertPrivateSocketParent(options.socketPath);
-  const decodeImage = dependencies.decodeImage ?? decodeImageInWorker;
-  const terminateProcess = dependencies.terminateProcess ??
-    ((exitCode: number): never => process.exit(exitCode));
   const timeoutMs = options.timeoutMs ?? 30_000;
   const maxConcurrentRequests = options.maxConcurrentRequests ?? 1;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000 ||
     !Number.isSafeInteger(maxConcurrentRequests) || maxConcurrentRequests < 1 ||
     maxConcurrentRequests > MAX_CONNECTIONS) throw new Error("INVALID_PARSER_WORKER_LIMIT");
+  const childScriptPath = dependencies.childScriptPath ??
+    fileURLToPath(new URL("./imageDecodeChild.js", import.meta.url));
+  const decodeImage = dependencies.decodeImage ?? ((bytes: Uint8Array,
+    mediaType: ImageMediaType, signal: AbortSignal) =>
+    decodeImageInSubprocess(bytes, mediaType, { scriptPath: childScriptPath,
+      timeoutMs, signal }));
+  const terminateProcess = dependencies.terminateProcess ??
+    ((exitCode: number): never => process.exit(exitCode));
   let active = 0;
 
   const server = createServer({ allowHalfOpen: true }, (socket: Socket) => {
@@ -69,6 +78,7 @@ export async function startParserWorkerServer(
     let payloadUsed = 0;
     let invalid = false;
     let processing = false;
+    const decodeAbort = new AbortController();
     let terminating = false;
     let released = false;
     const release = () => {
@@ -79,6 +89,7 @@ export async function startParserWorkerServer(
     const fatal = (exitCode: number) => {
       if (terminating) return;
       terminating = true;
+      decodeAbort.abort();
       socket.destroy();
       // A native decoder is not reliably cancellable in-process. This worker
       // must run as its own container process so a hard exit ends the job.
@@ -146,7 +157,7 @@ export async function startParserWorkerServer(
         } else if (boundRequest.mediaType === "application/pdf") {
           outcome = { verdict: "rejected", code: "UNSUPPORTED" };
         } else {
-          outcome = await decodeImage(boundPayload, boundRequest.mediaType);
+          outcome = await decodeImage(boundPayload, boundRequest.mediaType, decodeAbort.signal);
         }
         if (!socket.destroyed) socket.end(replyFrame({ ...boundRequest,
           workerVersion: PARSER_WORKER_VERSION, ...outcome }));

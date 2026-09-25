@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "build": "tsc -p tsconfig.build.json",
     "start:local-pilot": "node dist/runLocalPilot.js",
     "stress:http": "npm run build && node stress/http.mjs",

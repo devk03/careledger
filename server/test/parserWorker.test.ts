@@ -14,7 +14,8 @@ import { startParserWorkerServer } from "../src/ingest/parserWorker.js";
 async function worker() {
   const directory = await mkdtemp(join(tmpdir(), "adeno-fictional-real-worker-"));
   const socketPath = join(directory, "parser.sock");
-  const server = await startParserWorkerServer({ socketPath, timeoutMs: 1000 });
+  const server = await startParserWorkerServer({ socketPath, timeoutMs: 1000 },
+    { childScriptPath: join(process.cwd(), "dist/ingest/imageDecodeChild.js") });
   return { socketPath, close: async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   } };
