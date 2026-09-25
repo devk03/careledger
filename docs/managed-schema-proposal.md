@@ -1,9 +1,12 @@
 # Hosted E2EE schema proposal — review before migration
 
-Status: **proposal only, 2026-09-25**. This document is not a migration or
-approval to create one. No SQL in this proposal may be applied to an existing,
-family, or production database. The first implementation target, if separately
-approved, is a fresh database containing only wholly fictional families.
+Status: **partial implementation, 2026-09-25**. The maintainer authorized
+creation of the managed migration files. The first identity/grant draft is
+[`0001_identity_scopes.sql`](../server/migrations/managed/0001_identity_scopes.sql).
+It is not registered with any runner and has not been applied to any database.
+Do not apply it to an existing, family, or production database. The first
+execution target, if separately approved, is a fresh database containing only
+wholly fictional families.
 
 ## Why this is a separate schema line
 
@@ -91,9 +94,10 @@ with verified hashes and a tested fresh restore.
 
 ## Fictional migration and acceptance sequence
 
-1. After explicit permission, create an independent forward-only managed schema
-   migration and apply it only to a new private test database with two invented
-   families. Never auto-apply it to community, Hermes, Railway, or real-family data.
+1. Create the independent forward-only managed schema migrations under the
+   maintainer's 2026-09-25 approval. Apply them only after separate approval,
+   initially to a new private test database with two invented families. Never
+   auto-apply them to community, Hermes, Railway, or real-family data.
 2. Assert no clinical plaintext columns; inspect every table, index, trigger,
    route, log and backup for a fictional name, care date, file name, note and key.
 3. Prove cross-family/profile/device FK rejection; invalid or stale sessions;
@@ -115,9 +119,10 @@ with verified hashes and a tested fresh restore.
    Railway secrets/volume and one TypeScript writer. A schema test is not
    permission to enable managed startup or accept real records.
 
-## Approval requested
+## Approval boundary
 
-Permission sought is limited to **creating and applying the initial managed
-schema migration in a fresh fictional local database**. It does not cover an
-existing database, real case data, production deployment, billing, a new
-external witness service, or a pull-request merge.
+The maintainer approved **creation** of the necessary migration files on
+2026-09-25. Application to a fresh fictional database was requested separately
+and is not yet approved. This does not cover an existing database, real case
+data, production deployment, billing, a new external witness service, or a
+pull-request merge.
