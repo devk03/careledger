@@ -17,6 +17,7 @@ import { createStagedManagedVaultUploadStore, type ManagedStagingIntent,
 
 const householdId = "11".repeat(16);
 const intentId = "22".repeat(16);
+const attemptId = "88".repeat(16);
 const blobId = "33".repeat(16);
 const accountId = "adult-fictional-a";
 const sessionId = "session-fictional-a";
@@ -41,7 +42,7 @@ async function fixture(overrides: Partial<ManagedStagingIntent> = {},
   ledgerOverride: Partial<ManagedUploadLedger> = {}) {
   const objectRoot = await mkdtemp(join(tmpdir(), "adeno-fictional-stage-"));
   const intent: ManagedStagingIntent = { householdId, accountId, sessionId,
-    intentId, blobId, plaintextBytes: 3, chunkCount: 1, ...overrides };
+    intentId, attemptId, blobId, plaintextBytes: 3, chunkCount: 1, ...overrides };
   const published: Parameters<ManagedUploadLedger["publishVerified"]>[0][] = [];
   const ledger: ManagedUploadLedger = {
     openForStaging: async () => intent,
@@ -73,6 +74,7 @@ describe("unmounted managed ciphertext staging adapter", () => {
     expect(test.published[0]!.chunks[0]!.storageObjectId)
       .toMatch(/^[0-9a-f]{32}$/u);
     expect(test.published[0]!.tokenSha256).toBe(preflight.tokenSha256);
+    expect(test.published[0]!.intent.attemptId).toBe(attemptId);
   });
 
   it("never calls the ledger when staged object bytes change before commit", async () => {

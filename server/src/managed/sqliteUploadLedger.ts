@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 
@@ -46,17 +47,18 @@ export class IncompatibleManagedLedger extends Error {
 
 /**
  * Unmounted, existing-schema-only ciphertext publication ledger. This is not
- * an intake service: issuing signed intents, reserving pre-staging disk quota,
- * orphan reconciliation and care-day CAS publication remain separate gates.
+ * an intake service: issuing signed intents, global disk quota, orphan
+ * reconciliation and care-day CAS publication remain separate gates. Aborted
+ * leases stay charged until a separately reviewed cleanup path exists.
  * Never point it at a community/pilot database or real family records yet.
  */
 export class SqliteManagedUploadLedger implements ManagedUploadLedger {
   private readonly db: Database.Database;
-  private readonly maxCommittedBytesPerFamily: number;
+  private readonly maxStoredBytesPerFamily: number;
 
-  constructor(path: string, maxCommittedBytesPerFamily: number) {
-    if (!isAbsolute(path) || !Number.isSafeInteger(maxCommittedBytesPerFamily) ||
-      maxCommittedBytesPerFamily < 65)
+  constructor(path: string, maxStoredBytesPerFamily: number) {
+    if (!isAbsolute(path) || !Number.isSafeInteger(maxStoredBytesPerFamily) ||
+      maxStoredBytesPerFamily < 65)
       throw new IncompatibleManagedLedger();
     assertPrivateDirectory(dirname(path));
     assertPrivateFile(path, true);
@@ -73,7 +75,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
       throw new IncompatibleManagedLedger();
     }
     this.db = db;
-    this.maxCommittedBytesPerFamily = maxCommittedBytesPerFamily;
+    this.maxStoredBytesPerFamily = maxStoredBytesPerFamily;
   }
 
   async openForStaging(input: Parameters<ManagedUploadLedger["openForStaging"]>[0]):
@@ -84,9 +86,32 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
       session.accountId !== input.session.scope.userId ||
       session.sessionId !== input.session.sessionId)
       throw new ManagedVaultUploadSessionError();
-    const row = this.currentIntent(session, input.intentId);
-    if (!row || input.signal.aborted) return null;
-    return asStagingIntent(row);
+    const reserve = this.db.transaction(() => {
+      if (input.signal.aborted) throw new ManagedVaultUploadDeniedError();
+      const currentSession = this.currentSession(input.tokenSha256, input.csrfToken);
+      if (!currentSession || currentSession.householdId !== session.householdId ||
+        currentSession.accountId !== session.accountId ||
+        currentSession.sessionId !== session.sessionId)
+        throw new ManagedVaultUploadSessionError();
+      const row = this.currentIntent(currentSession, input.intentId);
+      if (!row) return null;
+      const wireBytes = 33 + row.plaintextBytes + 32 * row.chunkCount;
+      if (!this.withinFamilyQuota(row.householdId, wireBytes))
+        throw new ManagedVaultUploadDeniedError();
+      const attemptId = randomBytes(16).toString("hex");
+      this.db.prepare<[string, string, string, number, number]>(
+        "INSERT INTO managed_staging_leases " +
+        "(household_id, intent_id, attempt_id, reserved_bytes, opened_at) " +
+        "VALUES (?, ?, ?, ?, ?)",
+      ).run(row.householdId, row.intentId, attemptId, wireBytes,
+        Math.floor(Date.now() / 1000));
+      if (input.signal.aborted) throw new ManagedVaultUploadDeniedError();
+      return asStagingIntent(row, attemptId);
+    });
+    try { return reserve.immediate(); } catch (error) {
+      if (isUniqueConstraint(error)) throw new ManagedVaultUploadExistsError();
+      throw error;
+    }
   }
 
   async publishVerified(input: Parameters<ManagedUploadLedger["publishVerified"]>[0]):
@@ -109,16 +134,19 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
       const row = this.currentIntent(session, input.intent.intentId);
       if (!row || !sameIntent(input.intent, row))
         throw new ManagedVaultUploadDeniedError();
+      const lease = this.db.prepare<[string, string, string],
+        { reservedBytes: number }>(
+        "SELECT reserved_bytes AS reservedBytes FROM managed_staging_leases " +
+        "WHERE household_id = ? AND intent_id = ? AND attempt_id = ? " +
+        "AND committed_at IS NULL",
+      ).get(row.householdId, row.intentId, input.intent.attemptId);
+      if (!lease || lease.reservedBytes !== input.wireBytes)
+        throw new ManagedVaultUploadDeniedError();
       if (input.chunks.length !== row.chunkCount ||
         input.wireBytes !== 33 + row.plaintextBytes + 32 * row.chunkCount ||
         !validChunks(input.chunks, row.plaintextBytes))
         throw new ManagedVaultUploadDeniedError();
-      const usage = this.db.prepare<[string], { bytes: number }>(
-        "SELECT COALESCE(SUM(wire_bytes), 0) AS bytes FROM managed_committed_blobs " +
-        "WHERE household_id = ?",
-      ).get(row.householdId);
-      if (!usage || !Number.isSafeInteger(usage.bytes) ||
-        usage.bytes > this.maxCommittedBytesPerFamily - input.wireBytes)
+      if (!this.withinFamilyQuota(row.householdId, 0))
         throw new ManagedVaultUploadDeniedError();
 
       const now = Math.floor(Date.now() / 1000);
@@ -158,9 +186,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
       if (error instanceof ManagedVaultUploadDeniedError ||
         error instanceof ManagedVaultUploadSessionError) throw error;
       if (typeof error === "object" && error !== null && "code" in error) {
-        if (error.code === "SQLITE_CONSTRAINT_PRIMARYKEY" ||
-          error.code === "SQLITE_CONSTRAINT_UNIQUE")
-          throw new ManagedVaultUploadExistsError();
+        if (isUniqueConstraint(error)) throw new ManagedVaultUploadExistsError();
         if (error.code === "SQLITE_CONSTRAINT_TRIGGER")
           throw new ManagedVaultUploadDeniedError();
       }
@@ -169,6 +195,18 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
   }
 
   close(): void { this.db.close(); }
+
+  /** Count committed wires plus every uncommitted physical reservation. */
+  private withinFamilyQuota(householdId: string, additionalBytes: number): boolean {
+    const usage = this.db.prepare<[string, string], { bytes: number }>(
+      "SELECT (SELECT COALESCE(SUM(wire_bytes), 0) " +
+      "FROM managed_committed_blobs WHERE household_id = ?) + " +
+      "(SELECT COALESCE(SUM(reserved_bytes), 0) FROM managed_staging_leases " +
+      "WHERE household_id = ? AND committed_at IS NULL) AS bytes",
+    ).get(householdId, householdId);
+    return !!usage && Number.isSafeInteger(usage.bytes) &&
+      usage.bytes <= this.maxStoredBytesPerFamily - additionalBytes;
+  }
 
   private currentSession(tokenSha256: string, csrfToken: string): SessionRow | null {
     if (!HEX_64.test(tokenSha256)) return null;
@@ -222,17 +260,25 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger {
   }
 }
 
-function asStagingIntent(row: IntentRow): ManagedStagingIntent {
+function asStagingIntent(row: IntentRow, attemptId: string): ManagedStagingIntent {
   return { householdId: row.householdId, accountId: row.accountId,
-    sessionId: row.sessionId, intentId: row.intentId, blobId: row.blobId,
+    sessionId: row.sessionId, intentId: row.intentId, attemptId,
+    blobId: row.blobId,
     plaintextBytes: row.plaintextBytes, chunkCount: row.chunkCount };
 }
 
 function sameIntent(expected: ManagedStagingIntent, actual: IntentRow): boolean {
-  const value = asStagingIntent(actual);
+  if (!HEX_32.test(expected.attemptId)) return false;
+  const value = asStagingIntent(actual, expected.attemptId);
   return Object.keys(value).every((key) =>
     value[key as keyof ManagedStagingIntent] ===
       expected[key as keyof ManagedStagingIntent]);
+}
+
+function isUniqueConstraint(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error &&
+    (error.code === "SQLITE_CONSTRAINT_PRIMARYKEY" ||
+      error.code === "SQLITE_CONSTRAINT_UNIQUE");
 }
 
 function validChunks(chunks: readonly VerifiedUploadChunkRow[], plaintextBytes: number): boolean {

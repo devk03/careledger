@@ -19,6 +19,7 @@ export type ManagedStagingIntent = {
   accountId: string;
   sessionId: string;
   intentId: string;
+  attemptId: string;
   blobId: string;
   plaintextBytes: number;
   chunkCount: number;
@@ -33,7 +34,7 @@ export type VerifiedUploadChunkRow = {
 };
 
 export interface ManagedUploadLedger {
-  /** Recheck current session/device/grant and return a previously issued intent. */
+  /** Recheck current authority; reserve one full wire before any object write. */
   openForStaging(input: {
     session: VerifiedSession;
     tokenSha256: string;
@@ -85,6 +86,7 @@ export function createStagedManagedVaultUploadStore(input: {
       intentId, signal: openSignal }), openSignal);
     if (!loaded || openSignal.aborted) return null;
     if (!OPAQUE_ID.test(loaded.householdId) || !OPAQUE_ID.test(loaded.intentId) ||
+      !OPAQUE_ID.test(loaded.attemptId) ||
       !OPAQUE_ID.test(loaded.blobId) || loaded.intentId !== intentId ||
       loaded.householdId !== session.scope.householdId ||
       loaded.accountId !== session.scope.userId ||
