@@ -39,6 +39,7 @@ COPY app ./app
 RUN pip install --no-cache-dir uv==0.6.16
 RUN uv sync --frozen --no-dev --no-editable --no-cache
 COPY --from=web-builder /build/web/dist ./web/dist
+RUN python -c "import app.main"
 
 RUN mkdir -p /data && chown -R careledger:careledger /data /app
 USER careledger
