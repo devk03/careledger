@@ -21,7 +21,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    restart: "no"
+    # Retry bounded crash exits; a healthy socket still needs an app-side probe.
+    restart: "on-failure:3"
     environment:
       ADENO_PARSER_SOCKET_PATH: /run/adeno-parser/parser.sock
 
