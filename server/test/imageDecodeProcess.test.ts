@@ -8,6 +8,7 @@ import { decodeImageInSubprocess } from "../src/ingest/imageDecodeProcess.js";
 
 const childScript = join(process.cwd(), "dist/ingest/imageDecodeChild.js");
 const neverExit = join(process.cwd(), "test/fixtures/neverExit.mjs");
+const exitImmediately = join(process.cwd(), "test/fixtures/exitImmediately.mjs");
 
 async function fictionalPng() {
   return sharp({ create: { width: 2, height: 3, channels: 3,
@@ -41,6 +42,13 @@ describe("one-job image decode child process", () => {
     const absent = join(await mkdtemp(join(tmpdir(), "adeno-no-child-")), "none.js");
     await expect(decodeImageInSubprocess(await fictionalPng(), "image/png",
       { scriptPath: absent, timeoutMs: 1000 }))
+      .resolves.toEqual({ verdict: "rejected", code: "MALFORMED" });
+  });
+
+  it("returns rejected instead of crashing when the child closes stdin early", async () => {
+    const largeFictionalInput = Buffer.alloc(20 * 1024 * 1024, 0x46);
+    await expect(decodeImageInSubprocess(largeFictionalInput, "image/png",
+      { scriptPath: exitImmediately, timeoutMs: 2000 }))
       .resolves.toEqual({ verdict: "rejected", code: "MALFORMED" });
   });
 });

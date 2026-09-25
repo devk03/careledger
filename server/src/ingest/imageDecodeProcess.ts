@@ -52,10 +52,16 @@ export async function decodeImageInSubprocess(
     });
     let output = Buffer.alloc(0);
     let failed = false;
-    const kill = () => { failed = true; child.kill("SIGKILL"); };
+    const kill = () => {
+      if (failed) return;
+      failed = true;
+      child.kill("SIGKILL");
+    };
     const deadline = setTimeout(kill, options.timeoutMs);
     options.signal?.addEventListener("abort", kill, { once: true });
     if (options.signal?.aborted) kill();
+    child.stdin.on("error", kill);
+    child.stdout.on("error", kill);
     child.stdout.on("data", (chunk: Buffer) => {
       if (output.length + chunk.length > MAX_CHILD_REPLY_BYTES) return kill();
       output = Buffer.concat([output, chunk]);
