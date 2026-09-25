@@ -11,7 +11,7 @@ const TAG_BYTES = 16;
 const HEADER_BYTES = 33;
 const CHUNK_HEADER_BYTES = IV_BYTES + 4;
 const MAX_CHUNKS = MAX_MANAGED_VAULT_BYTES / MANAGED_VAULT_CHUNK_BYTES;
-const MAX_WIRE_BYTES = HEADER_BYTES + MAX_MANAGED_VAULT_BYTES +
+export const MAX_MANAGED_VAULT_WIRE_BYTES = HEADER_BYTES + MAX_MANAGED_VAULT_BYTES +
   MAX_CHUNKS * (CHUNK_HEADER_BYTES + TAG_BYTES);
 
 export type ManagedVaultChunkV2 = { iv: Uint8Array; ciphertext: ArrayBuffer };
@@ -57,7 +57,7 @@ export function encodeManagedVaultBlobV2(blob: ManagedVaultBlobV2): Uint8Array {
   assertManagedVaultBlobV2(blob);
   const size = HEADER_BYTES + blob.chunks.reduce((total, chunk) =>
     total + CHUNK_HEADER_BYTES + chunk.ciphertext.byteLength, 0);
-  if (size > MAX_WIRE_BYTES) throw new ManagedVaultWireV2Error();
+  if (size > MAX_MANAGED_VAULT_WIRE_BYTES) throw new ManagedVaultWireV2Error();
   const wire = new Uint8Array(size);
   const view = new DataView(wire.buffer);
   wire.set(MAGIC);
@@ -81,7 +81,7 @@ export function encodeManagedVaultBlobV2(blob: ManagedVaultBlobV2): Uint8Array {
 /** Strict framing only; returns copies so a caller cannot mutate parsed bytes via the input. */
 export function decodeManagedVaultBlobV2(input: Uint8Array): ManagedVaultBlobV2 {
   if (!isBytes(input) || input.byteLength < HEADER_BYTES + CHUNK_HEADER_BYTES + TAG_BYTES ||
-    input.byteLength > MAX_WIRE_BYTES) throw new ManagedVaultWireV2Error();
+    input.byteLength > MAX_MANAGED_VAULT_WIRE_BYTES) throw new ManagedVaultWireV2Error();
   const wire = Uint8Array.from(input);
   if (MAGIC.some((byte, index) => wire[index] !== byte) ||
     wire[4] !== MANAGED_VAULT_WIRE_VERSION) throw new ManagedVaultWireV2Error();

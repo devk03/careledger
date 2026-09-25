@@ -15,8 +15,11 @@ day/source/draft scope, object, key epoch, purpose, revision, blob ID, and
 chunk position/size as binary AES-GCM associated data. Its distinct `ADEN`
 version 2 wire carries ciphertext without dates, names, or scope identifiers.
 The TypeScript streaming parser accepts v2 separately from v1, but only checks
-framing; it cannot prove that submitted bytes were actually encrypted. V2 is not
-wired to hosted intake or a durable grant store. Durable nonce reservation,
+framing; it cannot prove that submitted bytes were actually encrypted. An
+unmounted HTTP admission factory checks sessions and requires an intent-bound
+blob ID, but
+its required atomic grant/nonce store is still absent. V2 is not wired to
+hosted intake or a durable grant store. Durable nonce reservation,
 key-to-scope provenance, signed enrollment, and rollback resistance remain
 required before real-record use.
 

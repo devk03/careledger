@@ -66,10 +66,16 @@ they belong to, or whether an orphaned file is part of a committed backup.
 A separate v2 browser blob primitive binds encrypted chunks to opaque household,
 profile, day/source/draft scope, object, epoch, purpose, revision and chunk
 position. The shared v2 wire format has no care dates or labels and is rejected
-by the legacy v1 decoder. Fictional browser and server-framing tests exercise
-this format, but it is not connected to durable grants, nonce reservation,
-signed manifests, upload routes, backup or MCP. V1 ciphertext is never treated
-as a per-day private record.
+by the legacy v1 decoder. An unmounted Express upload boundary now requires an
+authenticated session, same-origin CSRF, an opaque upload intent that reserves
+the exact blob ID and scope, v2 framing, and a store callback whose commit must
+atomically recheck grants and nonce reservations. Its timer bounds incoming
+bytes only; future session, intent and storage operations need their own
+cooperative deadlines. Fictional HTTP tests cover the seam, but
+there is **no durable implementation** of that callback and no route in the
+running app. It is not connected to real grants, nonce reservation, signed
+manifests, backup or MCP. V1 ciphertext is never treated as a per-day private
+record.
 
 The browser-only `managed/timeline.ts` view projects already-decrypted, approved
 entries into sparse care days and a separate approved-undated queue; pending
