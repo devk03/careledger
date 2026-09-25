@@ -43,6 +43,18 @@ actually encrypted its bytes, authorize a member, enforce grants, or durably sto
 an object. A production route still needs a deadline, request-abort handling,
 transactional staged storage, device authorization, and independent review.
 
+An isolated filesystem primitive now writes one already-produced ciphertext chunk
+to a private, create-only, household-separated opaque path and verifies its hash,
+size, and read-only mode on read. It deliberately does not deduplicate by content
+across families. A successful write intentionally retains a read-only `pending-*`
+hard-link alias to the same inode. Future backups must select authorized database
+rows and final object IDs, never glob this directory; alias inventory and orphan
+reconciliation are still required. Mode `0400` does not protect against a process
+that controls the storage UID, so this is not host-level immutability.
+It is not connected to an HTTP route or database transaction; it cannot establish
+who may read a chunk, whether the bytes are genuinely encrypted, which care day
+they belong to, or whether an orphaned file is part of a committed backup.
+
 The managed service must not call server-side storage encryption "end-to-end encryption."
 Client-side encryption requires the browser to encrypt before upload and decrypt after download.
 The database and object-storage service must be unable to recover a document, filename, patient
