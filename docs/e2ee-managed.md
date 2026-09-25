@@ -16,6 +16,14 @@ ciphertext-only server routes and the browser setup, recovery, sync, consent, an
 are integrated and pass every launch blocker below. The cryptographic modules alone are not a
 managed product.
 
+An optional `createSyntheticVaultCanaryApp` is exercised only by server tests. It moves
+fictional encrypted bytes over HTTP into a bounded, in-memory two-household store with
+cookie/CSRF checks, then returns those exact bytes. It has no durable adapter, day grants,
+backup, browser UI, or runtime entrypoint; `NODE_ENV=test` is required to instantiate it.
+It demonstrates honest-client transfer and some authorization failure behavior, **not** a
+guarantee that the server can detect a malicious client sending plaintext in a fake envelope.
+It must not be used for real records or described as hosted E2EE readiness.
+
 The managed service must not call server-side storage encryption "end-to-end encryption."
 Client-side encryption requires the browser to encrypt before upload and decrypt after download.
 The database and object-storage service must be unable to recover a document, filename, patient
