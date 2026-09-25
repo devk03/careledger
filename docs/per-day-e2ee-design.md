@@ -92,9 +92,12 @@ Revocation stops **future** envelope and ciphertext access and requires key
 rotation for new material. It cannot erase keys or plaintext already downloaded
 by a former member. The UI must say this plainly.
 
-## Additive schema work requiring separate approval
+## Managed schema work requiring separate approval
 
-The next migration must define opaque day identity, append-only day revisions,
+The proposed [independent hosted schema](managed-schema-proposal.md) avoids
+the existing singleton/plaintext community and trusted-local tables. Its first
+migration still requires explicit approval and may initially run only in a
+fresh fictional database. It must define opaque day identity, append-only day revisions,
 per-device day/source envelopes, grant/revocation events, nonce uniqueness for
 every AES-GCM key—including owner wrapping, day/source content, recovery, and
 manifest keys—scoped by actual key identity and epoch across writers/revisions,
