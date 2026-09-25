@@ -1,0 +1,10 @@
+{
+  "name": "@adeno/parser-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "sharp": "0.35.4",
+    "zod": "4.6.5"
+  }
+}
