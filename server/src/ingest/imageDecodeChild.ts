@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
+import sharp from "sharp";
 
 import { MAX_UPLOAD_BYTES } from "./admission.js";
 import { decodeImageInWorker } from "./imageDecoder.js";
 
 /** One input, one fixed JSON result, then exit. No filenames or record text. */
 async function main(): Promise<void> {
+  sharp.concurrency(1);
+  sharp.cache(false);
   const [mediaType, expectedSha256] = process.argv.slice(2);
   if ((mediaType !== "image/jpeg" && mediaType !== "image/png") ||
     !expectedSha256 || !/^[0-9a-f]{64}$/.test(expectedSha256)) throw new Error();

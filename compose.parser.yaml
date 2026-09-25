@@ -15,7 +15,7 @@ services:
     mem_limit: 512m
     memswap_limit: 512m
     cpus: 1.0
-    pids_limit: 16
+    pids_limit: 64
     init: true
     security_opt:
       - no-new-privileges:true
