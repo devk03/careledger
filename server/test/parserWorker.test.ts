@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -83,4 +84,42 @@ describe("worker protocol with synthetic images only", () => {
         bytes.subarray(0, bytes.length - 1))).toHaveLength(0);
     } finally { await service.close(); }
   });
+
+  it.each(["disconnect", "timeout"] as const)(
+    "requires process termination for a %s during native decode", async (failure) => {
+      const directory = await mkdtemp(join(tmpdir(), "adeno-fictional-worker-abort-"));
+      const socketPath = join(directory, "parser.sock");
+      let decodeStarted!: () => void;
+      const started = new Promise<void>((resolve) => { decodeStarted = resolve; });
+      let finishDecode!: (value: { verdict: "rejected"; code: "MALFORMED" }) => void;
+      const decodeFinished = new Promise<{ verdict: "rejected"; code: "MALFORMED" }>(
+        (resolve) => { finishDecode = resolve; });
+      let terminatedResolve!: (code: number) => void;
+      const terminated = new Promise<number>((resolve) => { terminatedResolve = resolve; });
+      const server = await startParserWorkerServer({ socketPath,
+        timeoutMs: 200 }, {
+        decodeImage: async () => { decodeStarted(); return decodeFinished; },
+        terminateProcess: (code) => { terminatedResolve(code); return undefined as never; },
+      });
+      const bytes = await fictionalImage("png");
+      const request = createParserRequest({ mediaType: "image/png", byteSize: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex") });
+      const socket = createConnection({ path: socketPath });
+      socket.on("error", () => {});
+      try {
+        await new Promise<void>((resolve) => socket.once("connect", resolve));
+        socket.end(Buffer.concat([encodeParserRequestHeader(request), bytes]));
+        await started;
+        if (failure === "disconnect") socket.destroy();
+        // After a request half-close, a peer disappearing may not be visible
+        // until a write. The hard processing deadline must still end the job.
+        const code = await terminated;
+        expect(failure === "disconnect" ? [124, 125] : [124]).toContain(code);
+      } finally {
+        finishDecode({ verdict: "rejected", code: "MALFORMED" });
+        socket.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    },
+  );
 });

@@ -15,6 +15,12 @@ export type ParserWorkerOptions = Readonly<{
   maxConcurrentRequests?: number;
 }>;
 
+/** Dependency overrides are for synthetic tests; production uses both defaults. */
+export type ParserWorkerDependencies = Readonly<{
+  decodeImage?: typeof decodeImageInWorker;
+  terminateProcess?: (exitCode: number) => never;
+}>;
+
 async function assertPrivateSocketParent(path: string): Promise<void> {
   if (!isAbsolute(path) || process.getuid === undefined) throw new Error("UNSAFE_PARSER_SOCKET");
   const parent = await lstat(dirname(path));
@@ -35,8 +41,13 @@ function replyFrame(value: object): Buffer {
  * Worker-side protocol handler. Container/cgroup/network isolation is a
  * separate deployment gate; do not run this in the Express process.
  */
-export async function startParserWorkerServer(options: ParserWorkerOptions): Promise<Server> {
+export async function startParserWorkerServer(
+  options: ParserWorkerOptions, dependencies: ParserWorkerDependencies = {},
+): Promise<Server> {
   await assertPrivateSocketParent(options.socketPath);
+  const decodeImage = dependencies.decodeImage ?? decodeImageInWorker;
+  const terminateProcess = dependencies.terminateProcess ??
+    ((exitCode: number): never => process.exit(exitCode));
   const timeoutMs = options.timeoutMs ?? 30_000;
   const maxConcurrentRequests = options.maxConcurrentRequests ?? 1;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000 ||
@@ -58,16 +69,29 @@ export async function startParserWorkerServer(options: ParserWorkerOptions): Pro
     let payloadUsed = 0;
     let invalid = false;
     let processing = false;
+    let terminating = false;
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
       active -= 1;
     };
-    const deadline = setTimeout(() => socket.destroy(), timeoutMs);
+    const fatal = (exitCode: number) => {
+      if (terminating) return;
+      terminating = true;
+      socket.destroy();
+      // A native decoder is not reliably cancellable in-process. This worker
+      // must run as its own container process so a hard exit ends the job.
+      terminateProcess(exitCode);
+    };
+    const deadline = setTimeout(() => {
+      if (processing) fatal(124);
+      else socket.destroy();
+    }, timeoutMs);
     socket.on("close", () => {
       clearTimeout(deadline);
-      if (!processing) release();
+      if (processing) fatal(125);
+      else release();
     });
     socket.on("error", () => socket.destroy());
 
@@ -122,7 +146,7 @@ export async function startParserWorkerServer(options: ParserWorkerOptions): Pro
         } else if (boundRequest.mediaType === "application/pdf") {
           outcome = { verdict: "rejected", code: "UNSUPPORTED" };
         } else {
-          outcome = await decodeImageInWorker(boundPayload, boundRequest.mediaType);
+          outcome = await decodeImage(boundPayload, boundRequest.mediaType);
         }
         if (!socket.destroyed) socket.end(replyFrame({ ...boundRequest,
           workerVersion: PARSER_WORKER_VERSION, ...outcome }));
