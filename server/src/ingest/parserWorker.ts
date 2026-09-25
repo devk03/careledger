@@ -27,6 +27,7 @@ export type ParserWorkerDependencies = Readonly<{
 
 async function assertPrivateSocketParent(path: string): Promise<void> {
   if (!isAbsolute(path) || process.getuid === undefined) throw new Error("UNSAFE_PARSER_SOCKET");
+  if (process.getuid() === 0) throw new Error("PARSER_MUST_NOT_RUN_AS_ROOT");
   const parent = await lstat(dirname(path));
   if (!parent.isDirectory() || parent.uid !== process.getuid() ||
     (parent.mode & 0o027) !== 0) throw new Error("UNSAFE_PARSER_SOCKET");
@@ -49,6 +50,9 @@ export async function startParserWorkerServer(
   options: ParserWorkerOptions, dependencies: ParserWorkerDependencies = {},
 ): Promise<Server> {
   await assertPrivateSocketParent(options.socketPath);
+  // The socket inode is created during listen(), before its exact mode can be
+  // checked. Keep the worker's umask restrictive for its whole lifetime.
+  process.umask(0o027);
   const timeoutMs = options.timeoutMs ?? 30_000;
   const maxConcurrentRequests = options.maxConcurrentRequests ?? 1;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000 ||

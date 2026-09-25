@@ -9,7 +9,6 @@ if (!socketPath || !isAbsolute(socketPath))
 const timeoutMs = Number(process.env.ADENO_PARSER_TIMEOUT_MS ?? "30000");
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000)
   throw new Error("Invalid ADENO_PARSER_TIMEOUT_MS");
-process.umask(0o027);
 const server = await startParserWorkerServer({ socketPath, timeoutMs,
   maxConcurrentRequests: 1 });
 function shutdown(): void {
