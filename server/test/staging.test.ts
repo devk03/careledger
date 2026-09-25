@@ -70,4 +70,23 @@ describe("private original-byte staging", () => {
     await expect(stageOriginalBytes("relative-staging-root", fictionalPdf, admission))
       .rejects.toBeInstanceOf(UnsafeStagingRoot);
   });
+
+  it("does not create a quarantine directory during an upload", async () => {
+    const container = await mkdtemp(join(tmpdir(), "adeno-fictional-unprovisioned-"));
+    const admission = inspectUploadBytes(fictionalPdf, { originalName: "fictional.pdf" });
+    await expect(stageOriginalBytes(join(container, "missing-root"), fictionalPdf, admission))
+      .rejects.toBeInstanceOf(UnsafeStagingRoot);
+    expect(await readdir(container)).toEqual([]);
+  });
+
+  it("stores the validated snapshot even if the caller mutates its buffer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "adeno-fictional-mutable-"));
+    const input = Buffer.from(fictionalPdf);
+    const admission = inspectUploadBytes(input, { originalName: "fictional.pdf" });
+    const pending = stageOriginalBytes(root, input, admission);
+    input.fill(0);
+    const staged = await pending;
+    expect(await readFile(staged.path)).toEqual(fictionalPdf);
+    expect(staged.sha256).toBe(createHash("sha256").update(fictionalPdf).digest("hex"));
+  });
 });

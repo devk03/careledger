@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 
-import { inspectUploadBytes, type AdmissionMetadata } from "./admission.js";
+import { inspectUploadBytes, MAX_UPLOAD_BYTES, UploadAdmissionError,
+  type AdmissionMetadata } from "./admission.js";
 
 export class StagingIntegrityError extends Error {
   constructor() {
@@ -34,7 +35,11 @@ export async function stageOriginalBytes(
   admission: AdmissionMetadata,
 ): Promise<StagedOriginal> {
   if (!isAbsolute(root)) throw new UnsafeStagingRoot();
-  const verified = inspectUploadBytes(bytes, {
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new UploadAdmissionError("UPLOAD_TOO_LARGE");
+  // Take ownership of a bounded snapshot before the first await. A caller may
+  // otherwise mutate its Uint8Array after validation but before writeFile.
+  const snapshot = Uint8Array.from(bytes);
+  const verified = inspectUploadBytes(snapshot, {
     originalName: admission.displayName,
     claimedMediaType: admission.mediaType,
     receivedAt: new Date(admission.receivedAt),
@@ -44,17 +49,26 @@ export async function stageOriginalBytes(
     throw new StagingIntegrityError();
   }
 
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  const rootInfo = await lstat(root);
-  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || (rootInfo.mode & 0o077) !== 0) {
+  // Provision the root separately. Creating it inside an upload request would
+  // require syncing newly created parent entries before reporting durability.
+  let rootInfo: Awaited<ReturnType<typeof lstat>>;
+  let canonicalRoot: string;
+  try {
+    rootInfo = await lstat(root);
+    canonicalRoot = await realpath(root);
+  } catch {
+    throw new UnsafeStagingRoot();
+  }
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || (rootInfo.mode & 0o077) !== 0 ||
+    (process.getuid !== undefined && rootInfo.uid !== process.getuid())) {
     throw new UnsafeStagingRoot();
   }
 
   const stageId = randomUUID();
-  const path = join(root, `incoming-${stageId}`);
+  const path = join(canonicalRoot, `incoming-${stageId}`);
   const handle = await open(path, "wx", 0o600);
   try {
-    await handle.writeFile(bytes);
+    await handle.writeFile(snapshot);
     await handle.sync();
   } finally {
     await handle.close();
@@ -63,7 +77,7 @@ export async function stageOriginalBytes(
   // fsync the directory too: syncing only the file does not make its newly
   // created name durable across a host crash. An fsync failure leaves a private
   // orphan and fails the upload rather than claiming successful intake.
-  const directory = await open(root, "r");
+  const directory = await open(canonicalRoot, "r");
   try {
     await directory.sync();
   } finally {
@@ -74,7 +88,7 @@ export async function stageOriginalBytes(
     stageId,
     path,
     sha256: verified.sha256,
-    byteSize: bytes.byteLength,
+    byteSize: snapshot.byteLength,
     receivedAt: admission.receivedAt,
   };
 }
