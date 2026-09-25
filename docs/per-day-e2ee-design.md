@@ -12,6 +12,15 @@ public key must come from a separately approved, authenticated enrollment flow.
 The current record-blob format also lacks the full profile/day/epoch binding
 and durable nonce reservation required for real-record use.
 
+The prototype envelope wire is exactly 188 bytes: `ADKY`, version 1, suite 1,
+HPKE base-mode marker 0, reserved byte 0, four 16-byte opaque IDs, a big-endian
+key epoch, 32-byte recipient-key fingerprint, 32-byte encapsulated key, and
+48-byte ciphertext. Its complete 140-byte header is HPKE authenticated data;
+HPKE `info` fixes the `day-content` purpose and suite. The decoder rejects unknown
+versions and extensions, but decoding is **not** proof of who issued the envelope,
+that its grant is current, or that the host served the latest revision. The host
+can still observe opaque IDs, recipient correlation, sizes, timing, and access.
+
 ## Why the current schema and key are insufficient
 
 The current browser vault prototype encrypts with one household key. The v5
