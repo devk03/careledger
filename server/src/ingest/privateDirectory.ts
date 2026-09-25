@@ -19,7 +19,7 @@ async function privateDirectory(path: string): Promise<void> {
  * a trusted path. The child name is durable before the function returns.
  */
 export async function provisionPrivateDirectory(parent: string, childName: string): Promise<string> {
-  if (!isAbsolute(parent) || !/^[a-z][a-z0-9-]{0,63}$/.test(childName))
+  if (!isAbsolute(parent) || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(childName))
     throw new UnsafeStorageDirectory();
   try {
     await privateDirectory(parent);
