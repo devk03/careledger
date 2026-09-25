@@ -41,7 +41,7 @@ function fictionalWire(version = 2, selectedBlobId = blobId) {
 }
 
 async function fixture(options: { revokeBeforeCommit?: boolean;
-  failOnCommit?: boolean; ingressDeadlineMs?: number } = {}) {
+  failOnCommit?: boolean; holdCommit?: boolean; ingressDeadlineMs?: number } = {}) {
   const first = issueSessionToken();
   const second = issueSessionToken();
   const now = Math.floor(Date.now() / 1000);
@@ -60,6 +60,12 @@ async function fixture(options: { revokeBeforeCommit?: boolean;
   let committed = 0;
   let aborted = 0;
   let committedWireSha256: string | null = null;
+  let startCommit!: () => void;
+  let finishAbortedCommit!: () => void;
+  const commitStarted = new Promise<void>((resolve) => { startCommit = resolve; });
+  const commitSignalAborted = new Promise<void>((resolve) => {
+    finishAbortedCommit = resolve;
+  });
   const store: ManagedVaultUploadStore = {
     open: async ({ session, preflight, intentId: requestedIntent, signal }) => {
       if (session.scope.householdId !== "fictional-family-a" ||
@@ -74,7 +80,16 @@ async function fixture(options: { revokeBeforeCommit?: boolean;
             ciphertext: Buffer.from(value.ciphertext) });
           if (options.revokeBeforeCommit) rows.get(preflight.tokenSha256)!.revokedAt = now;
         },
-        commit: (value, wireSha256, commitSignal) => {
+        commit: async (value, wireSha256, commitSignal) => {
+          if (options.holdCommit) {
+            startCommit();
+            await new Promise<void>((_resolve, reject) => {
+              commitSignal.addEventListener("abort", () => {
+                finishAbortedCommit();
+                reject(new Error("fictional commit cancelled"));
+              }, { once: true });
+            });
+          }
           if (commitSignal.aborted) throw new ManagedVaultUploadSessionError();
           if (options.failOnCommit)
             throw new Error("FICTIONAL_INTERNAL_MARKER_NOT_A_REAL_RECORD");
@@ -120,7 +135,8 @@ async function fixture(options: { revokeBeforeCommit?: boolean;
   return { base, rows, stored, first: identity(first), second: identity(second),
     firstDigest: first.sha256, get opened() { return opened; },
     get committed() { return committed; }, get aborted() { return aborted; },
-    get committedWireSha256() { return committedWireSha256; } };
+    get committedWireSha256() { return committedWireSha256; },
+    commitStarted, commitSignalAborted };
 }
 
 function headers(identity: { cookie: string; csrf: string },
@@ -276,6 +292,23 @@ describe("unmounted managed ciphertext admission seam", () => {
     expect(test.committed).toBe(0);
     expect(test.stored.size).toBe(0);
     expect(test.aborted).toBe(1);
+  });
+
+  it("cancels a held commit when the client disconnects after sending the body", async () => {
+    const test = await fixture({ holdCommit: true });
+    const url = `${test.base}${intentId}/blobs/${blobId}`;
+    const request = httpRequest(url, { method: "POST", headers: {
+      ...headers(test.first), "content-length": String(fictionalWire().length),
+    } });
+    request.on("error", () => undefined);
+    request.end(fictionalWire());
+    await test.commitStarted;
+    request.destroy();
+    await Promise.race([test.commitSignalAborted,
+      new Promise<never>((_resolve, reject) => setTimeout(() =>
+        reject(new Error("disconnect did not cancel commit")), 1000))]);
+    expect(test.committed).toBe(0);
+    expect(test.stored.size).toBe(0);
   });
 
   it("does not disclose internal storage failures in responses", async () => {

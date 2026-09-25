@@ -16,13 +16,14 @@ with a runner or applied to any database.
 
 The chunk schema now records the opaque storage object ID returned by the
 existing private chunk writer. The streaming parser supplies the digest of the
-exact received wire bytes to an unmounted commit-proof helper, which re-reads
-each object and reconstructs that digest before publication. There is
-still no durable adapter that calls that helper before the commit transaction,
-converts its hex SHA-256 to the 32-byte database digest, reconciles orphaned
-objects, or selects and re-hashes database-referenced objects for backup.
+exact received wire bytes to an unmounted staging adapter. That adapter writes
+private chunks, re-reads each object through the commit-proof helper, checks
+the complete wire digest, and converts SHA-256 hex to 32-byte database values.
+There is still no durable managed ledger that atomically checks current grants,
+sessions, nonces and quota before inserting rows; no reconciler for orphaned
+objects; and no backup that selects and re-hashes database-referenced objects.
 Therefore no managed upload or read route may be enabled yet.
-Do not apply it to an existing, family, or production database. The first
+Do not apply these drafts to an existing, family, or production database. The first
 execution target, if separately approved, is a fresh database containing only
 wholly fictional families.
 

@@ -37,7 +37,8 @@ export interface ManagedVaultUploadSink {
  * request bytes; the store must compare it with its re-read object proof.
  * Open and commit need their own bounded, cooperative
  * storage deadlines; the route timer below bounds ingress only. Abort must
- * discard all uncommitted staged material.
+ * make uncommitted objects unreachable through APIs; physical orphans need a
+ * reviewed reconciliation and retention path before this route is mounted.
  * Nothing here proves that a client actually encrypted its bytes.
  */
 export interface ManagedVaultUploadStore {
@@ -100,8 +101,10 @@ export function createManagedCiphertextAdmissionRouter(input: {
     const controller = new AbortController();
     let ingressTimer: ReturnType<typeof setTimeout> | null = null;
     const onClose = () => { if (!request.complete) controller.abort(); };
+    const onResponseClose = () => { if (!response.writableEnded) controller.abort(); };
     request.once("aborted", onClose);
     request.once("close", onClose);
+    response.once("close", onResponseClose);
     try {
       const row = await input.sessions.findByTokenSha256(preflight.tokenSha256);
       if (controller.signal.aborted) throw new VaultWireStreamError();
@@ -173,6 +176,7 @@ export function createManagedCiphertextAdmissionRouter(input: {
       if (ingressTimer !== null) clearTimeout(ingressTimer);
       request.off("aborted", onClose);
       request.off("close", onClose);
+      response.off("close", onResponseClose);
     }
   });
   return router;
