@@ -36,6 +36,7 @@
 !tools/
 !tools/reviewedPublicAssets.mjs
 !tools/verifyPublicAssets.mjs
+!tools/validateReleaseSha.mjs
 app/**/__pycache__/
 app/**/*.pyc
 **/node_modules/
