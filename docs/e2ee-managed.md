@@ -26,6 +26,10 @@ One fictional integration test uses the actual browser vault encoder and decoder
 test-only HTTP boundary; it still does not exercise a deployable managed route or durable store.
 Separately, a Chromium test verifies browser-side encryption, wire round-trip, a non-exportable
 key, and rejection of a changed revision; it does not exercise hosted upload or recovery.
+An exact-length recovery-envelope wire format can carry the wrapped key without its caregiver-held
+code. A fictional two-browser test opens an encrypted record after transferring the code and
+envelope to a fresh browser context. This is not yet a downloadable recovery kit, vault backup,
+hosted sync, or multi-caregiver key-sharing flow.
 It must not be used for real records or described as hosted E2EE readiness.
 
 The managed service must not call server-side storage encryption "end-to-end encryption."
