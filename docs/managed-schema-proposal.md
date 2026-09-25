@@ -13,7 +13,11 @@ The third, still-unapplied
 draft adds append-only day snapshot revisions, session-bound adult publish
 authority and compare-and-swap heads. The fourth, still-unapplied
 [`0004_staging_leases.sql`](../server/migrations/managed/0004_staging_leases.sql)
-draft adds one pre-write lease per day upload intent. None of these migrations is registered
+draft adds one pre-write lease per day upload intent. The fifth, still-unapplied
+[`0005_non_day_intake.sql`](../server/migrations/managed/0005_non_day_intake.sql)
+draft adds separate source/draft ciphertext identity, nonce/object claims,
+pre-write leases and a signed two-blob pending-draft pair registration. It does not
+relax day-revision checks. None of these migrations is registered
 with the production startup path or applied to any database. An explicit
 fictional-only runner pins their SHA-256 checksums and creates a fresh private
 temporary database only after a separate approval flag; it has not been run.
@@ -32,7 +36,7 @@ the complete wire digest, and converts SHA-256 hex to 32-byte database values.
 An unmounted managed ledger now drafts an atomic current-grant/session/nonce
 commit and per-family lease quota, but it has not run against an applied schema;
 there is no reconciler for orphaned objects or safe retry path. The draft remains
-day-only. A ciphertext-only snapshot primitive can copy and re-hash an exact list
+day-only; `0005` has no mounted non-day ledger or intent-issuance API. A ciphertext-only snapshot primitive can copy and re-hash an exact list
 of committed object references without scanning pending files; it publishes a
 completed snapshot only after staged files and its read-only manifest are synced.
 Failures before rename leave private, unpublished in-progress directories; a
@@ -112,6 +116,20 @@ signatures **inside the same transaction**.
 | `managed_scope_revisions`, `managed_review_events` | Append-only revision number, predecessor hash, ciphertext blob/root, author signature and review state. A child submission is a review-draft revision; only an authorized adult can publish a new approved day/source revision. Stale compare-and-swap writes, forks and nonsequential revisions fail. Old revisions remain accessible only while the reader retains the relevant current grant. Client code must verify complete decrypted snapshot contents; SQL cannot infer what the ciphertext means. |
 | `managed_index_heads`, `managed_device_checkpoints` | Signed compare-and-swap head per encrypted, member-appropriate index view, with sequence, predecessor hash and ciphertext reference. A limited member must not learn hidden-day counts through a global index, cursor or error. Devices verify the chain and retain a trusted checkpoint locally. |
 | `managed_audit_events`, `managed_retention_events` | Content-free actor/action/opaque target/outcome and signed deletion/tombstone events. No filenames, care dates, document text, key material or request bodies in logs. |
+
+The additive `0005` nonce-claim table currently unifies **upload-content**
+nonces across the day and source/draft paths. Encrypted-index, recovery or
+direct key-wrapping uses are not yet connected to that registry; they must use
+separate keys or join the claim protocol before any managed client is enabled.
+The new source/draft object ID is unique within its scope, but the existing
+day-intent schema does not store an object ID, so this is not a cross-lineage
+object-ID uniqueness claim. A pending draft pair is not adult approval. Neither
+day nor non-day intents yet check a signed current-key head, so key rotation
+cannot be considered enforced until a later migration and runtime recheck close
+that gap across both paths. A draft must obtain both intents and open both
+staging leases atomically under one combined quota decision before writing
+either object. A sequential content-then-metadata lease request is not a
+supported protocol; no batch issuer/stager exists yet.
 
 The file/object store and SQLite cannot commit atomically together. Stage private
 objects first; publish database references only after validation and fsync;

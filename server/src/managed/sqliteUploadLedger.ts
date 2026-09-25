@@ -242,12 +242,10 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
 
   /** Count committed wires plus every uncommitted physical reservation. */
   private withinFamilyQuota(householdId: string, additionalBytes: number): boolean {
-    const usage = this.db.prepare<[string, string], { bytes: number }>(
-      "SELECT (SELECT COALESCE(SUM(wire_bytes), 0) " +
-      "FROM managed_committed_blobs WHERE household_id = ?) + " +
-      "(SELECT COALESCE(SUM(reserved_bytes), 0) FROM managed_staging_leases " +
-      "WHERE household_id = ? AND committed_at IS NULL) AS bytes",
-    ).get(householdId, householdId);
+    const usage = this.db.prepare<[string], { bytes: number }>(
+      "SELECT COALESCE(SUM(bytes), 0) AS bytes FROM managed_wire_occupancy " +
+      "WHERE household_id = ?",
+    ).get(householdId);
     return !!usage && Number.isSafeInteger(usage.bytes) &&
       usage.bytes <= this.maxStoredBytesPerFamily - additionalBytes;
   }
