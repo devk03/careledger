@@ -24,6 +24,8 @@ It demonstrates honest-client transfer and some authorization failure behavior, 
 guarantee that the server can detect a malicious client sending plaintext in a fake envelope.
 One fictional integration test uses the actual browser vault encoder and decoder across this
 test-only HTTP boundary; it still does not exercise a deployable managed route or durable store.
+Separately, a Chromium test verifies browser-side encryption, wire round-trip, a non-exportable
+key, and rejection of a changed revision; it does not exercise hosted upload or recovery.
 It must not be used for real records or described as hosted E2EE readiness.
 
 The managed service must not call server-side storage encryption "end-to-end encryption."
