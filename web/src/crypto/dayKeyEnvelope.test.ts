@@ -83,7 +83,7 @@ it("one granted day key cannot decrypt another care day's record", async () => {
     { ...recordScope, objectId: otherDayId })).rejects.toBeInstanceOf(VaultIntegrityError);
 });
 
-it("rejects changed headers, ephemeral key, salt, IV, and authentication tag", async () => {
+it("rejects changed suite, context, encapsulated key, and authentication tag", async () => {
   const owner = await generateDeviceEncryptionKeys();
   const { envelopes } = await createDayKeyEnvelopes(identity,
     [{ deviceId: ownerId, publicKey: owner.publicKey }]);
@@ -94,11 +94,10 @@ it("rejects changed headers, ephemeral key, salt, IV, and authentication tag", a
     return copy;
   };
   const cases = [
+    changed((value) => { value.format = "other-suite" as never; }),
     changed((value) => { value.recipientKeySha256 = "0".repeat(64); }),
     changed((value) => { value.context.opaqueDayId = "f".repeat(32); }),
-    changed((value) => { value.ephemeralSpki[20] ^= 1; }),
-    changed((value) => { value.salt[0] ^= 1; }),
-    changed((value) => { value.iv[0] ^= 1; }),
+    changed((value) => { value.encapsulatedKey[0] ^= 1; }),
     changed((value) => { new Uint8Array(value.ciphertext)[47] ^= 1; }),
   ];
   for (const tampered of cases) {
@@ -107,15 +106,13 @@ it("rejects changed headers, ephemeral key, salt, IV, and authentication tag", a
   }
 });
 
-it("makes independent wrapping keys and IVs for repeated envelopes", async () => {
+it("makes independent HPKE encapsulations for repeated envelopes", async () => {
   const owner = await generateDeviceEncryptionKeys();
   const first = (await createDayKeyEnvelopes(identity,
     [{ deviceId: ownerId, publicKey: owner.publicKey }])).envelopes[0]!;
   const second = (await createDayKeyEnvelopes(identity,
     [{ deviceId: ownerId, publicKey: owner.publicKey }])).envelopes[0]!;
-  expect(first.ephemeralSpki).not.toEqual(second.ephemeralSpki);
-  expect(first.salt).not.toEqual(second.salt);
-  expect(first.iv).not.toEqual(second.iv);
+  expect(first.encapsulatedKey).not.toEqual(second.encapsulatedKey);
   expect(new Uint8Array(first.ciphertext)).not.toEqual(new Uint8Array(second.ciphertext));
 });
 
@@ -133,9 +130,7 @@ it("uses one copied scope and envelope even if caller objects change during awai
   const originalEnvelope = envelopes[0]!;
   const mutableEnvelope = { ...originalEnvelope,
     context: { ...originalEnvelope.context },
-    ephemeralSpki: new Uint8Array(originalEnvelope.ephemeralSpki),
-    salt: new Uint8Array(originalEnvelope.salt),
-    iv: new Uint8Array(originalEnvelope.iv),
+    encapsulatedKey: new Uint8Array(originalEnvelope.encapsulatedKey),
     ciphertext: originalEnvelope.ciphertext.slice(0) };
   await expect(openDayKeyEnvelope(context(), mutableEnvelope, owner)).resolves.toBeDefined();
   const opening = openDayKeyEnvelope(context(), mutableEnvelope, owner);

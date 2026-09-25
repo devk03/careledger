@@ -1,17 +1,20 @@
+import { Aes256Gcm, CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from "@hpke/core";
+
 import { importVaultKey } from "./vault";
 
-export const DAY_KEY_ENVELOPE_FORMAT = "adeno.day-key-envelope.v1" as const;
+export const DAY_KEY_ENVELOPE_FORMAT = "hpke-x25519-hkdf-sha256-aes256gcm-v1" as const;
 const DAY_KEY_BYTES = 32;
-const SALT_BYTES = 32;
-const IV_BYTES = 12;
 const TAG_BYTES = 16;
+const ENCAPSULATED_KEY_BYTES = 32;
 const MAX_RECIPIENTS = 32;
 const OPAQUE_ID = /^[0-9a-f]{32}$/u;
 const FINGERPRINT = /^[0-9a-f]{64}$/u;
 const IDENTITY_KEYS = ["careProfileId", "householdId", "keyEpoch", "opaqueDayId"];
 const CONTEXT_KEYS = [...IDENTITY_KEYS, "recipientDeviceId"];
-const ENVELOPE_KEYS = ["ciphertext", "context", "ephemeralSpki", "format",
-  "iv", "recipientKeySha256", "salt"];
+const ENVELOPE_KEYS = ["ciphertext", "context", "encapsulatedKey", "format",
+  "recipientKeySha256"];
+const suite = new CipherSuite({ kem: new DhkemX25519HkdfSha256(),
+  kdf: new HkdfSha256(), aead: new Aes256Gcm() });
 
 export type DayKeyIdentity = {
   householdId: string;
@@ -26,9 +29,7 @@ export type DayKeyEnvelope = {
   format: typeof DAY_KEY_ENVELOPE_FORMAT;
   context: DayKeyContext;
   recipientKeySha256: string;
-  ephemeralSpki: Uint8Array;
-  salt: Uint8Array;
-  iv: Uint8Array;
+  encapsulatedKey: Uint8Array;
   ciphertext: ArrayBuffer;
 };
 
@@ -41,11 +42,13 @@ export class DayKeyEnvelopeError extends Error {
 
 /** Prototype only: device public keys still need an authenticated enrollment path. */
 export async function generateDeviceEncryptionKeys(): Promise<CryptoKeyPair> {
-  return crypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "P-256" },
+  const pair = await crypto.subtle.generateKey(
+    { name: "X25519" },
     false,
     ["deriveBits"],
   );
+  if (!("privateKey" in pair)) throw new DayKeyEnvelopeError();
+  return pair;
 }
 
 /** Browser-only prototype. Never upload raw day material or share an owner recovery root. */
@@ -100,17 +103,13 @@ export async function openDayKeyEnvelope(
     assertPublicKey(publicKey);
     assertPrivateKey(privateKey);
     if (!sameContext(expected, stable.context)) throw new DayKeyEnvelopeError();
-    const recipientSpki = new Uint8Array(await crypto.subtle.exportKey("spki", publicKey));
-    if (await sha256Hex(recipientSpki) !== stable.recipientKeySha256)
+    const recipientRaw = new Uint8Array(await suite.kem.serializePublicKey(publicKey));
+    if (await sha256Hex(recipientRaw) !== stable.recipientKeySha256)
       throw new DayKeyEnvelopeError();
-    const ephemeral = await crypto.subtle.importKey("spki", stable.ephemeralSpki,
-      { name: "ECDH", namedCurve: "P-256" }, false, []);
-    const aad = associatedData(stable);
-    const wrappingKey = await wrappingKeyFor(privateKey, ephemeral,
-      stable.salt, aad);
-    material = new Uint8Array(await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: stable.iv, additionalData: aad, tagLength: 128 },
-      wrappingKey, stable.ciphertext));
+    const recipientContext = await suite.createRecipientContext({ recipientKey: { publicKey, privateKey },
+      enc: toArrayBuffer(stable.encapsulatedKey) });
+    material = new Uint8Array(await recipientContext.open(stable.ciphertext,
+      toArrayBuffer(associatedData(stable))));
     if (material.byteLength !== DAY_KEY_BYTES) throw new DayKeyEnvelopeError();
     return await importVaultKey(material);
   } catch {
@@ -125,45 +124,29 @@ function snapshotEnvelope(envelope: DayKeyEnvelope): DayKeyEnvelope {
   return { format: DAY_KEY_ENVELOPE_FORMAT,
     context: { householdId, careProfileId, opaqueDayId, keyEpoch, recipientDeviceId },
     recipientKeySha256: envelope.recipientKeySha256,
-    ephemeralSpki: envelope.ephemeralSpki.slice(), salt: envelope.salt.slice(),
-    iv: envelope.iv.slice(), ciphertext: envelope.ciphertext.slice(0) };
+    encapsulatedKey: envelope.encapsulatedKey.slice(),
+    ciphertext: envelope.ciphertext.slice(0) };
 }
 
 async function sealDayKeyMaterial(material: Uint8Array, context: DayKeyContext,
   recipientPublicKey: CryptoKey): Promise<DayKeyEnvelope> {
-  const recipientSpki = new Uint8Array(await crypto.subtle.exportKey("spki", recipientPublicKey));
-  const ephemeral = await generateDeviceEncryptionKeys();
+  const recipientRaw = new Uint8Array(await suite.kem.serializePublicKey(recipientPublicKey));
+  const sender = await suite.createSenderContext({ recipientPublicKey });
   const envelope: DayKeyEnvelope = {
     format: DAY_KEY_ENVELOPE_FORMAT,
     context,
-    recipientKeySha256: await sha256Hex(recipientSpki),
-    ephemeralSpki: new Uint8Array(await crypto.subtle.exportKey("spki", ephemeral.publicKey)),
-    salt: crypto.getRandomValues(new Uint8Array(SALT_BYTES)),
-    iv: crypto.getRandomValues(new Uint8Array(IV_BYTES)),
+    recipientKeySha256: await sha256Hex(recipientRaw),
+    encapsulatedKey: new Uint8Array(sender.enc),
     ciphertext: new ArrayBuffer(0),
   };
-  const aad = associatedData(envelope);
-  const wrappingKey = await wrappingKeyFor(ephemeral.privateKey, recipientPublicKey,
-    envelope.salt, aad);
-  envelope.ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: envelope.iv, additionalData: aad, tagLength: 128 },
-    wrappingKey, material);
-  return envelope;
-}
-
-async function wrappingKeyFor(privateKey: CryptoKey, publicKey: CryptoKey,
-  salt: Uint8Array, info: Uint8Array): Promise<CryptoKey> {
-  const shared = new Uint8Array(await crypto.subtle.deriveBits(
-    { name: "ECDH", public: publicKey }, privateKey, 256));
+  const plaintext = toArrayBuffer(material);
   try {
-    const keyMaterial = await crypto.subtle.importKey("raw", shared, "HKDF", false,
-      ["deriveKey"]);
-    return await crypto.subtle.deriveKey(
-      { name: "HKDF", hash: "SHA-256", salt, info }, keyMaterial,
-      { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    envelope.ciphertext = await sender.seal(plaintext,
+      toArrayBuffer(associatedData(envelope)));
   } finally {
-    shared.fill(0);
+    new Uint8Array(plaintext).fill(0);
   }
+  return envelope;
 }
 
 function associatedData(envelope: DayKeyEnvelope): Uint8Array {
@@ -172,7 +155,7 @@ function associatedData(envelope: DayKeyEnvelope): Uint8Array {
     format: DAY_KEY_ENVELOPE_FORMAT, purpose: "day-content",
     householdId, careProfileId, opaqueDayId, keyEpoch, recipientDeviceId,
     recipientKeySha256: envelope.recipientKeySha256,
-    ephemeralSpki: hex(envelope.ephemeralSpki), salt: hex(envelope.salt),
+    encapsulatedKey: hex(envelope.encapsulatedKey),
   }));
 }
 
@@ -180,10 +163,8 @@ function assertEnvelope(envelope: DayKeyEnvelope): void {
   if (!envelope || envelope.format !== DAY_KEY_ENVELOPE_FORMAT ||
     !hasOnlyKeys(envelope, ENVELOPE_KEYS) ||
     !envelope.context || !FINGERPRINT.test(envelope.recipientKeySha256) ||
-    !(envelope.ephemeralSpki instanceof Uint8Array) ||
-    envelope.ephemeralSpki.byteLength < 80 || envelope.ephemeralSpki.byteLength > 128 ||
-    !(envelope.salt instanceof Uint8Array) || envelope.salt.byteLength !== SALT_BYTES ||
-    !(envelope.iv instanceof Uint8Array) || envelope.iv.byteLength !== IV_BYTES ||
+    !(envelope.encapsulatedKey instanceof Uint8Array) ||
+    envelope.encapsulatedKey.byteLength !== ENCAPSULATED_KEY_BYTES ||
     Object.prototype.toString.call(envelope.ciphertext) !== "[object ArrayBuffer]" ||
     envelope.ciphertext.byteLength !== DAY_KEY_BYTES + TAG_BYTES)
     throw new DayKeyEnvelopeError();
@@ -219,14 +200,12 @@ function assertOpaqueId(value: string): void {
 }
 
 function assertPublicKey(key: CryptoKey): void {
-  if (!key || key.type !== "public" || key.algorithm.name !== "ECDH" ||
-    (key.algorithm as EcKeyAlgorithm).namedCurve !== "P-256")
+  if (!key || key.type !== "public" || key.algorithm.name !== "X25519")
     throw new DayKeyEnvelopeError();
 }
 
 function assertPrivateKey(key: CryptoKey): void {
-  if (!key || key.type !== "private" || key.algorithm.name !== "ECDH" ||
-    (key.algorithm as EcKeyAlgorithm).namedCurve !== "P-256" ||
+  if (!key || key.type !== "private" || key.algorithm.name !== "X25519" ||
     key.extractable || !key.usages.includes("deriveBits"))
     throw new DayKeyEnvelopeError();
 }
@@ -243,4 +222,10 @@ async function sha256Hex(value: Uint8Array): Promise<string> {
 
 function hex(value: Uint8Array): string {
   return [...value].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function toArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(value.byteLength);
+  new Uint8Array(copy).set(value);
+  return copy;
 }

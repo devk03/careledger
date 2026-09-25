@@ -5,7 +5,7 @@ the requirement implied by family-controlled E2EE plus private per-day grants.
 Do not enable managed startup or use real records on the strength of this file.
 
 The isolated browser prototype `web/src/crypto/dayKeyEnvelope.ts` now generates a
-random day key and recipient-specific P-256 ECDH/HKDF/AES-GCM envelopes over
+random day key and recipient-specific X25519/HKDF-SHA256/AES-256-GCM HPKE envelopes over
 opaque IDs. It is not wired to hosted routes, persistence, grants, or the
 recovery kit. It does not authenticate who issued an envelope; the recipient's
 public key must come from a separately approved, authenticated enrollment flow.
