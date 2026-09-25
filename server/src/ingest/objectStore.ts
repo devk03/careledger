@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, link, lstat, open, realpath } from "node:fs/promises";
+import { chmod, lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 import { MAX_UPLOAD_BYTES } from "./admission.js";
@@ -92,22 +92,56 @@ export async function commitStagedObject(
   const second = await provisionPrivateDirectory(first, staged.sha256.slice(2, 4));
   const destination = join(second, staged.sha256);
   let alreadyExisted = false;
+  let output: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    // A hard link is atomic and cannot replace an existing digest path. The
-    // quarantine and object roots must reside on the same private filesystem.
-    await link(expectedStagePath, destination);
+    // A separate inode prevents an already-open quarantine writer from
+    // modifying the promoted object. Exclusive creation never overwrites an
+    // existing digest path. A crash mid-copy leaves an unreferenced, invalid
+    // object for explicit reconciliation; no DB row may precede this return.
+    output = await open(destination,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   } catch (error) {
     if (typeof error !== "object" || error === null || !("code" in error) ||
       error.code !== "EEXIST") throw new ObjectIntegrityError();
     alreadyExisted = true;
   }
-  await verifyStored(destination, staged);
-  // A prior crash may have linked an object before making it read-only. On a
-  // verified retry, finish that metadata transition as well.
-  await chmod(destination, 0o400); // Both hard links now refer to read-only bytes.
-  const file = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try { await file.sync(); }
-  finally { await file.close(); }
+  if (output !== null) {
+    let source: Awaited<ReturnType<typeof open>> | null = null;
+    try {
+      source = await open(expectedStagePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const chunk = Buffer.allocUnsafe(1024 * 1024);
+      const copiedHash = createHash("sha256");
+      let position = 0;
+      while (position < staged.byteSize) {
+        const { bytesRead } = await source.read(chunk, 0,
+          Math.min(chunk.length, staged.byteSize - position), position);
+        if (bytesRead === 0) throw new ObjectIntegrityError();
+        copiedHash.update(chunk.subarray(0, bytesRead));
+        let written = 0;
+        while (written < bytesRead) {
+          const result = await output.write(chunk, written, bytesRead - written, position + written);
+          if (result.bytesWritten === 0) throw new ObjectIntegrityError();
+          written += result.bytesWritten;
+        }
+        position += bytesRead;
+      }
+      if (copiedHash.digest("hex") !== staged.sha256) throw new ObjectIntegrityError();
+      await output.sync();
+      await output.chmod(0o400);
+      await output.sync();
+    } finally {
+      await source?.close();
+      await output.close();
+    }
+  } else {
+    await verifyStored(destination, staged);
+    // Complete a previous crash's private-but-writable mode transition only
+    // after verifying that existing bytes match the requested digest.
+    await chmod(destination, 0o400);
+    const file = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try { await file.sync(); }
+    finally { await file.close(); }
+  }
   const directory = await open(second, "r");
   try { await directory.sync(); }
   finally { await directory.close(); }

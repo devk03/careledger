@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, open, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -68,6 +68,22 @@ describe("private immutable object-store primitive", () => {
     await expect(commitStagedObject(objects, quarantine, { ...another, path: staged.path }))
       .rejects.toBeInstanceOf(ObjectIntegrityError);
     expect(await readdir(objects)).toEqual([]);
+  });
+
+  it("does not share an inode with a quarantine writer held open before promotion", async () => {
+    const { quarantine, objects } = await roots();
+    const staged = await stage(quarantine);
+    const heldWriter = await open(staged.path, "r+");
+    try {
+      const stored = await commitStagedObject(objects, quarantine, staged);
+      expect((await lstat(staged.path)).ino).not.toBe((await lstat(stored.path)).ino);
+      await heldWriter.write(Buffer.from("X"), 0, 1, 0);
+      await heldWriter.sync();
+      expect(await readFile(stored.path)).toEqual(fictionalPdf);
+      expect((await readFile(staged.path))[0]).toBe("X".charCodeAt(0));
+    } finally {
+      await heldWriter.close();
+    }
   });
 
   it("rejects unsafe roots and a symlink at the staged-file path", async () => {
