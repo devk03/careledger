@@ -3,6 +3,7 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 
 import { inspectUploadBytes, MAX_UPLOAD_BYTES, UploadAdmissionError,
+  type AdmittedMediaType,
   type AdmissionMetadata } from "./admission.js";
 
 export class StagingIntegrityError extends Error {
@@ -22,6 +23,7 @@ export type StagedOriginal = {
   path: string;
   sha256: string;
   byteSize: number;
+  mediaType: AdmittedMediaType;
   receivedAt: string;
 };
 
@@ -89,6 +91,7 @@ export async function stageOriginalBytes(
     path,
     sha256: verified.sha256,
     byteSize: snapshot.byteLength,
+    mediaType: verified.mediaType,
     receivedAt: admission.receivedAt,
   };
 }

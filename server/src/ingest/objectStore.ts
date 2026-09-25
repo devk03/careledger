@@ -4,6 +4,7 @@ import { chmod, link, lstat, open, opendir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 import { MAX_UPLOAD_BYTES } from "./admission.js";
+import { isInspectedOriginal, type InspectedOriginal } from "./inspection.js";
 import { provisionPrivateDirectory } from "./privateDirectory.js";
 import type { StagedOriginal } from "./staging.js";
 
@@ -72,16 +73,18 @@ async function verifyStored(path: string, staged: StagedOriginal): Promise<void>
 }
 
 /**
- * Filesystem primitive only. A future intake coordinator must run malware and
- * structural checks before calling this; publication here does not authorize
- * a document row, day placement, download, or preview. Failed publications
- * leave private orphans for explicit reconciliation, never silent deletion.
+ * Filesystem primitive only. Its opaque inspection result is runtime-checked;
+ * production still needs real isolated scanner/parser adapters. Publication
+ * here does not authorize a document row, day placement, download, or preview.
+ * Failed publications leave private orphans for explicit reconciliation.
  */
 export async function commitStagedObject(
   objectRoot: string,
   quarantineRoot: string,
-  staged: StagedOriginal,
+  inspection: InspectedOriginal,
 ): Promise<StoredOriginal> {
+  if (!isInspectedOriginal(inspection)) throw new ObjectIntegrityError();
+  const staged = inspection.staged;
   if (!SHA256.test(staged.sha256) || !UUID.test(staged.stageId) ||
     !Number.isSafeInteger(staged.byteSize) || staged.byteSize < 1 ||
     staged.byteSize > MAX_UPLOAD_BYTES || !isAbsolute(staged.path)) throw new ObjectIntegrityError();

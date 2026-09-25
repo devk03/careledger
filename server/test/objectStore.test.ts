@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { inspectUploadBytes } from "../src/ingest/admission.js";
+import { inspectStagedOriginal, type InspectedOriginal } from "../src/ingest/inspection.js";
 import { commitStagedObject, inventoryPendingObjects,
   ObjectIntegrityError } from "../src/ingest/objectStore.js";
 import { provisionPrivateDirectory } from "../src/ingest/privateDirectory.js";
@@ -25,11 +26,17 @@ async function stage(quarantine: string) {
   return stageOriginalBytes(quarantine, fictionalPdf, admission);
 }
 
+async function cleared(staged: Awaited<ReturnType<typeof stage>>) {
+  return inspectStagedOriginal(staged,
+    { scan: async () => ({ verdict: "clean", engine: "fictional-test-scanner" }) },
+    { inspect: async () => ({ status: "safe", pageCount: 1 }) });
+}
+
 describe("private immutable object-store primitive", () => {
   it("atomically names verified bytes by digest and deduplicates without replacement", async () => {
     const { quarantine, objects } = await roots();
     const firstStage = await stage(quarantine);
-    const first = await commitStagedObject(objects, quarantine, firstStage);
+    const first = await commitStagedObject(objects, quarantine, await cleared(firstStage));
     const expected = createHash("sha256").update(fictionalPdf).digest("hex");
     expect(first.sha256).toBe(expected);
     expect(first.path).toBe(join(objects, expected.slice(0, 2), expected.slice(2, 4), expected));
@@ -41,7 +48,7 @@ describe("private immutable object-store primitive", () => {
     // A crash between link and chmod can leave a private but writable inode;
     // a verified duplicate retry must complete the read-only transition.
     await chmod(first.path, 0o600);
-    const second = await commitStagedObject(objects, quarantine, await stage(quarantine));
+    const second = await commitStagedObject(objects, quarantine, await cleared(await stage(quarantine)));
     expect(second.path).toBe(first.path);
     expect(second.alreadyExisted).toBe(true);
     expect(await readFile(first.path)).toEqual(fictionalPdf);
@@ -57,7 +64,7 @@ describe("private immutable object-store primitive", () => {
     const second = await provisionPrivateDirectory(first, staged.sha256.slice(2, 4));
     const destination = join(second, staged.sha256);
     await writeFile(destination, Buffer.alloc(fictionalPdf.length, 0), { flag: "wx", mode: 0o600 });
-    await expect(commitStagedObject(objects, quarantine, staged))
+    await expect(commitStagedObject(objects, quarantine, await cleared(staged)))
       .rejects.toBeInstanceOf(ObjectIntegrityError);
     expect(await readFile(destination)).toEqual(Buffer.alloc(fictionalPdf.length, 0));
   });
@@ -76,7 +83,7 @@ describe("private immutable object-store primitive", () => {
     await writeFile(incomplete, incompleteBytes, { flag: "wx", mode: 0o600 });
     expect((await inventoryPendingObjects(objects)).map((item) => item.state).sort())
       .toEqual(["conflict", "unpublished"]);
-    const stored = await commitStagedObject(objects, quarantine, staged);
+    const stored = await commitStagedObject(objects, quarantine, await cleared(staged));
     expect(stored.alreadyExisted).toBe(false);
     expect(await readFile(stored.path)).toEqual(fictionalPdf);
     expect(await readFile(orphan)).toEqual(fictionalPdf);
@@ -88,8 +95,8 @@ describe("private immutable object-store primitive", () => {
   it("handles concurrent identical uploads without overwriting the digest path", async () => {
     const { quarantine, objects } = await roots();
     const stages = await Promise.all([stage(quarantine), stage(quarantine)]);
-    const results = await Promise.all(stages.map((staged) =>
-      commitStagedObject(objects, quarantine, staged)));
+    const results = await Promise.all(stages.map(async (staged) =>
+      commitStagedObject(objects, quarantine, await cleared(staged))));
     expect(results[0]?.path).toBe(results[1]?.path);
     expect(results.filter((result) => !result.alreadyExisted)).toHaveLength(1);
     expect(await readFile(results[0]!.path)).toEqual(fictionalPdf);
@@ -98,12 +105,14 @@ describe("private immutable object-store primitive", () => {
   it("rejects a mutated or forged quarantine payload before publication", async () => {
     const { quarantine, objects } = await roots();
     const staged = await stage(quarantine);
+    const inspection = await cleared(staged);
     await writeFile(staged.path, Buffer.alloc(fictionalPdf.length, 1));
-    await expect(commitStagedObject(objects, quarantine, staged))
+    await expect(commitStagedObject(objects, quarantine, inspection))
       .rejects.toBeInstanceOf(ObjectIntegrityError);
     expect(await readdir(objects)).toEqual([]);
     const another = await stage(quarantine);
-    await expect(commitStagedObject(objects, quarantine, { ...another, path: staged.path }))
+    const forged = { ...await cleared(another), staged: { ...another, path: staged.path } } as InspectedOriginal;
+    await expect(commitStagedObject(objects, quarantine, forged))
       .rejects.toBeInstanceOf(ObjectIntegrityError);
     expect(await readdir(objects)).toEqual([]);
   });
@@ -113,7 +122,7 @@ describe("private immutable object-store primitive", () => {
     const staged = await stage(quarantine);
     const heldWriter = await open(staged.path, "r+");
     try {
-      const stored = await commitStagedObject(objects, quarantine, staged);
+      const stored = await commitStagedObject(objects, quarantine, await cleared(staged));
       expect((await lstat(staged.path)).ino).not.toBe((await lstat(stored.path)).ino);
       await heldWriter.write(Buffer.from("X"), 0, 1, 0);
       await heldWriter.sync();
@@ -128,7 +137,7 @@ describe("private immutable object-store primitive", () => {
     const { quarantine, objects } = await roots();
     const staged = await stage(quarantine);
     await chmod(objects, 0o755);
-    await expect(commitStagedObject(objects, quarantine, staged))
+    await expect(commitStagedObject(objects, quarantine, await cleared(staged)))
       .rejects.toBeInstanceOf(ObjectIntegrityError);
     await chmod(objects, 0o700);
     const linked = await stage(quarantine);
@@ -137,14 +146,13 @@ describe("private immutable object-store primitive", () => {
     await writeFile(fake, fictionalPdf);
     const stagePath = join(quarantine, `incoming-${linked.stageId}`);
     // A distinct staged ID cannot be redirected by changing its path field.
-    await expect(commitStagedObject(objects, quarantine,
-      { ...linked, path: join(quarantine, "different") }))
-      .rejects.toBeInstanceOf(ObjectIntegrityError);
+    await expect(cleared({ ...linked, path: join(quarantine, "different") }))
+      .rejects.toBeInstanceOf(Error);
     const symlinkPath = join(quarantine, "incoming-00000000-0000-0000-0000-000000000000");
     await symlink(fake, symlinkPath);
-    await expect(commitStagedObject(objects, quarantine, { ...linked,
+    await expect(cleared({ ...linked,
       stageId: "00000000-0000-0000-0000-000000000000", path: symlinkPath }))
-      .rejects.toBeInstanceOf(ObjectIntegrityError);
+      .rejects.toBeInstanceOf(Error);
     expect((await lstat(stagePath)).isFile()).toBe(true);
   });
 });
