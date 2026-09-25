@@ -1,6 +1,6 @@
 # Parser sandbox smoke record
 
-Synthetic-only local check on Docker Desktop Linux/arm64, 2026-09-24. No family records or application database were mounted. The commands below create test containers and socket volumes; `stop` leaves them in place. Do not substitute a real document.
+Synthetic-only local check on Docker Desktop Linux/arm64, 2026-09-24. No family records or application database were mounted. The commands below create test containers and socket volumes; `stop` leaves them in place. Do not substitute a real document. Choose a unique project and container name if repeating this check; the example names below were used already. Immediately before `docker kill`, verify the exact target is your synthetic test worker with `docker compose ... ps`. Never point these commands at an app or family-record container.
 
 Build and start the opt-in parser preview:
 
@@ -20,6 +20,7 @@ Single-instance and crash check on that *test project only*:
 
 ```sh
 docker run --name adeno-parser-lock-contender --user 10002:10003 --network none --read-only --memory 512m --pids-limit 64 -v adeno-parser-smoke-lock_parser_socket:/run/adeno-parser --entrypoint flock adeno-parser:dev -n /run/adeno-parser/worker.lock node dist/runParserWorker.js
+docker compose -f compose.parser.yaml -p adeno-parser-smoke-lock ps
 docker kill --signal SIGKILL adeno-parser-smoke-lock-parser-worker-1
 docker compose -f compose.parser.yaml -p adeno-parser-smoke-lock start parser-worker
 docker compose -f compose.parser.yaml -p adeno-parser-smoke-lock stop
