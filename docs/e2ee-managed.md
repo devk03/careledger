@@ -32,6 +32,17 @@ envelope to a fresh browser context. This is not yet a downloadable recovery kit
 hosted sync, or multi-caregiver key-sharing flow.
 It must not be used for real records or described as hosted E2EE readiness.
 
+The unmounted `stageVaultWireStream` parser accepts the browser's full 100 MiB
+wire format across variable boundaries of source fragments up to 1 MiB, with
+total fragment-count and empty-fragment caps, without copying the whole body.
+A future HTTP adapter must split or reject larger upstream buffers and enforce
+a deadline.
+It checks framing and requires a staging sink to abort failed uploads and publish
+only after exact EOF. It does **not** authenticate AES-GCM, prove that a client
+actually encrypted its bytes, authorize a member, enforce grants, or durably store
+an object. A production route still needs a deadline, request-abort handling,
+transactional staged storage, device authorization, and independent review.
+
 The managed service must not call server-side storage encryption "end-to-end encryption."
 Client-side encryption requires the browser to encrypt before upload and decrypt after download.
 The database and object-storage service must be unable to recover a document, filename, patient
