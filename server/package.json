@@ -8,7 +8,7 @@
     "test": "npm run build && vitest run",
     "build": "tsc -p tsconfig.build.json",
     "start:local-pilot": "node dist/runLocalPilot.js",
-    "start:parser-worker": "node dist/runParserWorker.js",
+    "start:parser-worker": "flock -n /run/adeno-parser/worker.lock node dist/runParserWorker.js",
     "stress:http": "npm run build && node stress/http.mjs",
     "stress:ingest": "npm run build && node stress/ingest.mjs"
   },

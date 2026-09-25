@@ -3,7 +3,9 @@ import { isAbsolute } from "node:path";
 import { startParserWorkerServer } from "./ingest/parserWorker.js";
 import { archiveStaleParserSocket } from "./ingest/parserSocketRecovery.js";
 
-/** Dedicated parser-process entrypoint. It never opens a database or network port. */
+/** Dedicated parser-process entrypoint. Launch under the image's lifetime
+ * flock wrapper; direct concurrent starts against one socket are unsupported.
+ * This process never opens a database or network port. */
 const socketPath = process.env.ADENO_PARSER_SOCKET_PATH;
 if (!socketPath || !isAbsolute(socketPath))
   throw new Error("ADENO_PARSER_SOCKET_PATH must be an absolute Unix socket path");

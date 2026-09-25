@@ -19,8 +19,9 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY --from=builder /build/server/dist/ ./dist/
 RUN test "$(stat -c %u dist/runParserWorker.js)" -eq 0 \
     && test "$(stat -c %u node_modules/sharp/package.json)" -eq 0 \
+    && command -v flock \
     && node -e "import('sharp').then(s => { if (!s.default.versions.vips) process.exit(1) })"
 ENV NODE_ENV=production \
     ADENO_PARSER_SOCKET_PATH=/run/adeno-parser/parser.sock
 USER 10002:10003
-CMD ["node", "dist/runParserWorker.js"]
+CMD ["flock", "-n", "/run/adeno-parser/worker.lock", "node", "dist/runParserWorker.js"]
