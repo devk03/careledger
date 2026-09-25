@@ -1,8 +1,10 @@
 # Per-day encryption and access: proposed managed design
 
-Status: **design proposal, not implemented or approved for migration**. It records
-the requirement implied by family-controlled E2EE plus private per-day grants.
-Do not enable managed startup or use real records on the strength of this file.
+Status: **partial design implementation, not deployable**. The maintainer
+approved creation of independent managed migration drafts on 2026-09-25; see
+[the schema status](managed-schema-proposal.md). No migration has been applied
+to a database, and the managed runtime remains disabled. Do not enable managed
+startup or use real records on the strength of this file.
 
 The isolated browser prototype `web/src/crypto/dayKeyEnvelope.ts` now generates a
 random day key and recipient-specific X25519/HKDF-SHA256/AES-256-GCM HPKE envelopes over
@@ -104,12 +106,13 @@ Revocation stops **future** envelope and ciphertext access and requires key
 rotation for new material. It cannot erase keys or plaintext already downloaded
 by a former member. The UI must say this plainly.
 
-## Managed schema work requiring separate approval
+## Managed schema work and application boundary
 
 The proposed [independent hosted schema](managed-schema-proposal.md) avoids
-the existing singleton/plaintext community and trusted-local tables. Its first
-migration still requires explicit approval and may initially run only in a
-fresh fictional database. It must define opaque day identity, append-only day revisions,
+the existing singleton/plaintext community and trusted-local tables. Creation
+of migration drafts is approved, but applying them still requires separate
+approval and may initially run only in a fresh fictional database. It must define
+opaque day identity, append-only day revisions,
 per-device day/source envelopes, grant/revocation events, nonce uniqueness for
 every AES-GCM key—including owner wrapping, day/source content, recovery, and
 manifest keys—scoped by actual key identity and epoch across writers/revisions,
