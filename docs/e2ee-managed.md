@@ -81,9 +81,10 @@ A separate 240-byte scope-key envelope v2 now carries an opaque household,
 profile, scope and key identity, epoch, purpose, recipient device, enrolled-key
 fingerprint and deterministic commitment to the 32-byte key. Browser HPKE
 opening recomputes that commitment after decryption; v1 day-envelope parsing
-cannot accept v2. This is only a local cryptographic prototype. HPKE base mode
-does not authenticate an issuing owner or grant access. No managed v2 envelope
-table, signed issuer-action verification, recipient enrollment/grant check,
+cannot accept v2. An unapplied `0007` draft stores the fixed wire with current
+scope/key/recipient/grant/signed-action references; it has not been exercised
+against SQLite. HPKE base mode does not authenticate an issuing owner or grant
+access. No signature-verifying runtime, recipient enrollment/grant read check,
 active-head freshness proof, or recovery/distribution UI is connected.
 The commitment is SHA-256 of the fixed domain
 `adeno:managed:key-commitment:v1\0` followed by the raw 32 key bytes; it
