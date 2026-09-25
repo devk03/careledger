@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 
-import { MAX_UPLOAD_BYTES, type AdmittedMediaType } from "./admission.js";
+import { inspectUploadBytes, MAX_UPLOAD_BYTES,
+  type AdmittedMediaType } from "./admission.js";
 import type { StagedOriginal } from "./staging.js";
 
 export class InspectionRejected extends Error {
@@ -73,16 +74,35 @@ export async function inspectStagedOriginal(
   scanner: MalwareScanner,
   parser: StructuralInspector,
 ): Promise<InspectedOriginal> {
-  const bytes = await verifiedStageBytes(staged);
-  const scan = await scanner.scan(Buffer.from(bytes), staged.mediaType);
+  // Never reread caller-owned metadata across an await. The file and final
+  // clearance are checked against this one immutable admission snapshot.
+  const snapshot = Object.freeze({ ...staged });
+  const bytes = await verifiedStageBytes(snapshot);
+  const extension: Record<AdmittedMediaType, string> = {
+    "application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png",
+  };
+  if (!Object.hasOwn(extension, snapshot.mediaType)) throw new InspectionRejected("STAGE_CHANGED");
+  try {
+    const detected = inspectUploadBytes(bytes, {
+      originalName: `source${extension[snapshot.mediaType]}`,
+      claimedMediaType: snapshot.mediaType,
+      receivedAt: new Date(snapshot.receivedAt),
+    });
+    if (detected.sha256 !== snapshot.sha256 || detected.byteSize !== snapshot.byteSize ||
+      detected.mediaType !== snapshot.mediaType) throw new InspectionRejected("STAGE_CHANGED");
+  } catch {
+    throw new InspectionRejected("STAGE_CHANGED");
+  }
+  const scan = await scanner.scan(Buffer.from(bytes), snapshot.mediaType);
   if (scan.verdict !== "clean" || !scan.engine.trim())
     throw new InspectionRejected("SCAN_NOT_CLEAN");
-  const parsed = await parser.inspect(Buffer.from(bytes), staged.mediaType);
+  const parsed = await parser.inspect(Buffer.from(bytes), snapshot.mediaType);
   if (parsed.status !== "safe" || !Number.isSafeInteger(parsed.pageCount) ||
     parsed.pageCount < 1 || parsed.pageCount > 10_000)
     throw new InspectionRejected("STRUCTURE_REJECTED");
-  await verifiedStageBytes(staged);
-  const result = Object.freeze({ staged: Object.freeze({ ...staged }),
+  const finalBytes = await verifiedStageBytes(snapshot);
+  if (!finalBytes.equals(bytes)) throw new InspectionRejected("STAGE_CHANGED");
+  const result = Object.freeze({ staged: snapshot,
     scannerEngine: scan.engine, pageCount: parsed.pageCount });
   inspected.add(result);
   return result;

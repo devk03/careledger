@@ -1,4 +1,5 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -56,5 +57,33 @@ describe("explicit scan and structural-inspection gate", () => {
         { inspect: async () => outcome }))
         .rejects.toMatchObject({ code: "STRUCTURE_REJECTED" });
     }
+  });
+
+  it("does not accept bytes substituted while the scanner is awaited", async () => {
+    const original = await staged();
+    const callerOwned = { ...original };
+    const replacement = Buffer.from(fictionalPdf);
+    replacement[10] = replacement[10]! ^ 1;
+    await expect(inspectStagedOriginal(callerOwned,
+      { scan: async () => {
+        await writeFile(original.path, replacement);
+        callerOwned.sha256 = createHash("sha256").update(replacement).digest("hex");
+        return { verdict: "clean", engine: "fictional-test-scanner" };
+      } },
+      { inspect: async () => ({ status: "safe", pageCount: 1 }) }))
+      .rejects.toMatchObject({ code: "STAGE_CHANGED" });
+  });
+
+  it("checks detected bytes against the claimed media type before scanning", async () => {
+    const original = await staged();
+    let scannerCalls = 0;
+    await expect(inspectStagedOriginal({ ...original, mediaType: "image/png" },
+      { scan: async () => {
+        scannerCalls += 1;
+        return { verdict: "clean", engine: "fictional-test-scanner" };
+      } },
+      { inspect: async () => ({ status: "safe", pageCount: 1 }) }))
+      .rejects.toMatchObject({ code: "STAGE_CHANGED" });
+    expect(scannerCalls).toBe(0);
   });
 });
