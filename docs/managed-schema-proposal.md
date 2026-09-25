@@ -7,8 +7,11 @@ The second, still-unapplied
 [`0002_ciphertext_intake.sql`](../server/migrations/managed/0002_ciphertext_intake.sql)
 draft adds session-bound upload intents, key-identity nonce reservations,
 chunk metadata and immutable committed ciphertext objects. A committed object
-is not a published timeline revision; revision CAS is a separate next slice.
-Neither migration is registered with a runner or applied to any database.
+is not a published timeline revision. The third, still-unapplied
+[`0003_day_revisions.sql`](../server/migrations/managed/0003_day_revisions.sql)
+draft adds append-only day snapshot revisions, session-bound adult publish
+authority and compare-and-swap heads. None of these migrations is registered
+with a runner or applied to any database.
 Do not apply it to an existing, family, or production database. The first
 execution target, if separately approved, is a fresh database containing only
 wholly fictional families.
