@@ -55,6 +55,20 @@ It is not connected to an HTTP route or database transaction; it cannot establis
 who may read a chunk, whether the bytes are genuinely encrypted, which care day
 they belong to, or whether an orphaned file is part of a committed backup.
 
+The browser-only `managed/timeline.ts` view projects already-decrypted, approved
+entries into sparse care days and a separate approved-undated queue; pending
+submissions still need a separate review inbox. Its backward query
+filters by care day, not upload time, and never invents a source-download link.
+Continuation carries a client-local fingerprint derived from the same copied
+approved-entry snapshot returned on that page; if a later read changes, the
+reader must restart rather than silently missing a newly updated day.
+The fingerprint is not a hosted URL or server cursor and does not prevent a
+server from replaying an older intact encrypted manifest.
+This is not an authorization boundary, encrypted index, revision store, or hosted
+timeline endpoint: current grants must be enforced before entries reach it.
+The existing plaintext `@adeno/contracts` timeline and `/api/v2` history remain
+community/local-pilot interfaces and must not become managed E2EE wire types.
+
 The managed service must not call server-side storage encryption "end-to-end encryption."
 Client-side encryption requires the browser to encrypt before upload and decrypt after download.
 The database and object-storage service must be unable to recover a document, filename, patient
