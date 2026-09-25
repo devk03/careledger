@@ -6,6 +6,9 @@ import { issueCsrfToken, issueSessionToken, SESSION_COOKIE_NAME,
   type SessionRepository, type StoredSession } from "../src/auth/cookieSession.js";
 import { createSyntheticVaultCanaryApp,
   type SyntheticVaultCanaryStore } from "../src/managed/syntheticVaultCanary.js";
+import { decryptVaultBlob, encryptVaultBlob, generateVaultKeyMaterial,
+  importVaultKey } from "../../web/src/crypto/vault.js";
+import { decodeVaultBlob, encodeVaultBlob } from "../../web/src/crypto/vaultWire.js";
 
 const origin = "https://fictional-adeno.example";
 const marker = "FICTIONAL_HEALTH_MARKER_NOT_A_REAL_RECORD";
@@ -140,6 +143,28 @@ describe("synthetic ciphertext HTTP canary only", () => {
     const altered = Buffer.from(returned);
     altered[49] = altered[49]! ^ 1;
     expect(() => decrypted(altered, fixture)).toThrow();
+  });
+
+  it("accepts the real browser vault wire format and returns decryptable bytes", async () => {
+    const key = await importVaultKey(generateVaultKeyMaterial());
+    const scope = { householdId: "fictional-family-a", objectId: "opaque-object-a",
+      revision: 1 };
+    const plaintext = new TextEncoder().encode(marker);
+    const encrypted = await encryptVaultBlob(key, plaintext, scope);
+    const wire = encodeVaultBlob(encrypted);
+    const blobId = Buffer.from(encrypted.blobId).toString("hex");
+    const test = await canary();
+    const url = test.base + blobId;
+    const uploaded = await fetch(url, { method: "POST", headers: uploadHeaders(test.first),
+      body: Buffer.from(wire) });
+    expect(uploaded.status).toBe(201);
+    expect(test.stored.get(`fictional-family-a:${blobId}`)).toEqual(Buffer.from(wire));
+    const response = await fetch(url, { headers: { cookie: test.first.cookie } });
+    expect(response.status).toBe(200);
+    const downloaded = decodeVaultBlob(new Uint8Array(await response.arrayBuffer()));
+    expect(await decryptVaultBlob(key, downloaded, scope)).toEqual(plaintext);
+    await expect(decryptVaultBlob(key, downloaded, { ...scope,
+      householdId: "fictional-family-b" })).rejects.toThrow();
   });
 
   it("requires fresh cookie, origin, and CSRF; revocation takes effect next request", async () => {

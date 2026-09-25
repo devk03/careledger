@@ -22,6 +22,8 @@ cookie/CSRF checks, then returns those exact bytes. It has no durable adapter, d
 backup, browser UI, or runtime entrypoint; `NODE_ENV=test` is required to instantiate it.
 It demonstrates honest-client transfer and some authorization failure behavior, **not** a
 guarantee that the server can detect a malicious client sending plaintext in a fake envelope.
+One fictional integration test uses the actual browser vault encoder and decoder across this
+test-only HTTP boundary; it still does not exercise a deployable managed route or durable store.
 It must not be used for real records or described as hosted E2EE readiness.
 
 The managed service must not call server-side storage encryption "end-to-end encryption."

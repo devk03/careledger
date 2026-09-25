@@ -4,7 +4,7 @@ import {
   VAULT_FORMAT,
   type EncryptedVaultBlob,
   type EncryptedVaultChunk,
-} from "./vault";
+} from "./vault.js";
 
 const MAGIC = new Uint8Array([0x41, 0x44, 0x45, 0x4e]); // ADEN
 const VERSION = 1;
