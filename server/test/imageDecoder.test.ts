@@ -26,6 +26,8 @@ describe("worker-only image decoder", () => {
     const jpeg = await fictionalImage("jpeg");
     const corruptedPng = Buffer.from(png);
     corruptedPng[corruptedPng.length - 5] = corruptedPng[corruptedPng.length - 5]! ^ 1;
+    await expect(decodeImageInWorker(jpeg, "image/webp" as "image/jpeg"))
+      .resolves.toEqual({ verdict: "rejected", code: "MALFORMED" });
     for (const [bytes, type] of [
       [png, "image/jpeg"], [jpeg, "image/png"],
       [corruptedPng, "image/png"],

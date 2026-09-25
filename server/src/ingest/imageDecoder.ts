@@ -23,7 +23,8 @@ const rejected = Object.freeze({ verdict: "rejected" as const, code: "MALFORMED"
 export async function decodeImageInWorker(
   input: Uint8Array, mediaType: ImageMediaType,
 ): Promise<ImageDecodeResult> {
-  if (input.byteLength < 1 || input.byteLength > MAX_UPLOAD_BYTES) return rejected;
+  if ((mediaType !== "image/jpeg" && mediaType !== "image/png") ||
+    input.byteLength < 1 || input.byteLength > MAX_UPLOAD_BYTES) return rejected;
   const bytes = Buffer.from(input);
   try {
     const container = mediaType === "image/png"
