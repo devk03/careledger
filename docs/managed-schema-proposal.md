@@ -213,6 +213,12 @@ same challenge, enrolled signing key and live session/device are rechecked
 under `BEGIN IMMEDIATE`; one session may issue at most 16 challenges. This
 cap bounds per-session accumulation, but broader login abuse, retention and
 rate limiting still need a mounted-route and operations design.
+The candidate service now exposes only strict JSON-safe v1 challenge/proof
+objects; the browser derives the signature audience from its own origin.
+The browser tolerates 60 seconds of clock skew when deciding whether to sign;
+the server's database clock and one-use challenge state remain authoritative.
+Mounted routes must redact nonce/proof bodies from logs and errors and never
+accept a cookie digest from a request field.
 It has not run against a migrated managed database or passed replay/race tests.
 The envelope reader has been narrowed to the bound device, but remains
 unmounted. A stolen cookie after binding can still expose

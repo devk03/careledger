@@ -4,7 +4,8 @@ test("Chromium signs the fixed fictional device-binding challenge on-device", as
   await page.clock.setFixedTime(new Date(1_800_000_000_000));
   await page.goto("/design-system");
   const result = await page.evaluate(async () => {
-    const { signSessionDeviceBindingProof } = await import(
+    const { signSessionDeviceBindingProof,
+      signSessionDeviceBindingChallengeWire } = await import(
       "/src/crypto/sessionDeviceBindingProof.ts");
     const seed = new Uint8Array(32).fill(0x42);
     const pkcs8 = new Uint8Array([
@@ -32,16 +33,36 @@ test("Chromium signs the fixed fictional device-binding challenge on-device", as
     const signed = await signSessionDeviceBindingProof(input);
     const hex = (bytes: Uint8Array) => [...bytes]
       .map(byte => byte.toString(16).padStart(2, "0")).join("");
+    const challengeWire = JSON.parse(JSON.stringify({
+      format: "adeno:session-device-challenge:v1",
+      householdId: input.householdId, accountId: input.accountId,
+      sessionId: input.sessionId, deviceId: input.deviceId,
+      challengeId: input.challengeId, nonceHex: hex(nonce),
+      expiresAt: Number(input.expiresAt),
+    })) as unknown;
+    const proofWire = await signSessionDeviceBindingChallengeWire(
+      challengeWire, signingKeys);
+    const behindClockAccepted = await signSessionDeviceBindingProof({
+      ...input, expiresAt: 1_800_000_360n }).then(() => true, () => false);
+    const aheadClockAccepted = await signSessionDeviceBindingProof({
+      ...input, expiresAt: 1_799_999_941n }).then(() => true, () => false);
     let expiredDenied = false;
     try { await signSessionDeviceBindingProof({ ...input,
-      expiresAt: 1_800_000_000n }); }
+      expiresAt: 1_799_999_939n }); }
     catch { expiredDenied = true; }
+    let malformedDenied = false;
+    try { await signSessionDeviceBindingChallengeWire({
+      ...(challengeWire as object), nonceHex: "00" }, signingKeys); }
+    catch { malformedDenied = true; }
     return { nonceHash: signed.context.nonceSha256,
       audienceHash: signed.context.audienceSha256,
       origin: location.origin, signature: hex(signed.signature),
+      wireSignatureMatches: proofWire.signatureHex === hex(signed.signature),
+      wireIsJsonSafe: JSON.parse(JSON.stringify(proofWire)).nonceHex === hex(nonce),
       noncePreserved: signed.nonce.every(byte => byte === 0x91),
       privateExtractable: signingKeys.privateKey.extractable,
-      expiredDenied };
+      behindClockAccepted, aheadClockAccepted,
+      expiredDenied, malformedDenied };
   });
   expect(result).toEqual({
     nonceHash: "182a7e592cafca805e6ef488103a26ea8900787edfba367e6b5749b7104bc33c",
@@ -49,7 +70,9 @@ test("Chromium signs the fixed fictional device-binding challenge on-device", as
     origin: "http://127.0.0.1:4173",
     signature: "cf02d13bb26ef3dd8f8a718fdecb48e17cb8331aa4f5343601957e19fade8e9" +
       "e80010551c35e16e085bf11ef2f2bf1269307c93df8db5bdb899fa69858880e0b",
+    wireSignatureMatches: true, wireIsJsonSafe: true,
     noncePreserved: true,
-    privateExtractable: false, expiredDenied: true,
+    privateExtractable: false, behindClockAccepted: true,
+    aheadClockAccepted: true, expiredDenied: true, malformedDenied: true,
   });
 });

@@ -1,6 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import Database from "better-sqlite3";
+import { encodeSessionDeviceChallengeWireV1,
+  parseSessionDeviceProofWireV1,
+  type SessionDeviceChallengeWireV1 } from "@adeno/contracts";
 
 import { verifyCsrfToken } from "../auth/cookieSession.js";
 import { assertManagedSchema } from "./managedSchemaGuard.js";
@@ -49,8 +52,25 @@ export class SqliteSessionDeviceBindingCandidate {
     } catch { throw new ManagedSessionDeviceBindingDenied(); }
   }
 
-  /** Content-free challenge; no family key or medical metadata leaves here. */
-  issue(input: { tokenSha256: string; csrfToken: string; deviceId: string }): {
+  /** Content-free JSON-safe challenge; no family key or medical metadata. */
+  issueWire(input: { tokenSha256: string; csrfToken: string;
+    deviceId: string }): SessionDeviceChallengeWireV1 {
+    try { return encodeSessionDeviceChallengeWireV1(this.issueRaw(input)); }
+    catch { throw new ManagedSessionDeviceBindingDenied(); }
+  }
+
+  /** Accept only the exact, bounded JSON proof object. */
+  bindWire(input: { tokenSha256: string; csrfToken: string;
+    proof: unknown }): void {
+    try {
+      const proof = parseSessionDeviceProofWireV1(input.proof);
+      this.bindRaw({ tokenSha256: input.tokenSha256,
+        csrfToken: input.csrfToken, ...proof });
+    } catch { throw new ManagedSessionDeviceBindingDenied(); }
+  }
+
+  private issueRaw(input: { tokenSha256: string; csrfToken: string;
+    deviceId: string }): {
     householdId: string; accountId: string; sessionId: string;
     deviceId: string; challengeId: string; nonce: Uint8Array;
     expiresAt: bigint;
@@ -112,7 +132,7 @@ export class SqliteSessionDeviceBindingCandidate {
 
   /** One transaction rechecks the live account/device/session, verifies the
    * enrolled key's signature, consumes once, and inserts one immutable binding. */
-  bind(input: { tokenSha256: string; csrfToken: string;
+  private bindRaw(input: { tokenSha256: string; csrfToken: string;
     challengeId: string; nonce: Uint8Array; signature: Uint8Array }): void {
     try {
       checkSessionInput(input.tokenSha256, input.csrfToken);

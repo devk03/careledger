@@ -1,11 +1,30 @@
 import { encodeSessionDeviceBindingProofV1,
-  type SessionDeviceBindingProofContextV1 } from "@adeno/contracts";
+  encodeSessionDeviceProofWireV1,
+  parseSessionDeviceChallengeWireV1,
+  type SessionDeviceBindingProofContextV1,
+  type SessionDeviceProofWireV1 } from "@adeno/contracts";
 
 export class BrowserDeviceBindingProofError extends Error {
   constructor() {
     super("This device could not confirm its session.");
     this.name = "BrowserDeviceBindingProofError";
   }
+}
+
+/** Browser transport boundary: parse exact JSON before signing and return
+ * ordinary JSON rather than a BigInt or typed-array object. */
+export async function signSessionDeviceBindingChallengeWire(
+  wire: unknown, signingKeys: CryptoKeyPair,
+): Promise<SessionDeviceProofWireV1> {
+  try {
+    const challenge = parseSessionDeviceChallengeWireV1(wire);
+    const signed = await signSessionDeviceBindingProof({ ...challenge,
+      signingKeys });
+    return encodeSessionDeviceProofWireV1({
+      challengeId: signed.context.challengeId, nonce: signed.nonce,
+      signature: signed.signature,
+    });
+  } catch { throw new BrowserDeviceBindingProofError(); }
 }
 
 /** Signs one server-issued challenge on this device. Enrollment, human
@@ -31,6 +50,9 @@ export async function signSessionDeviceBindingProof(input: {
     const publicKey = input.signingKeys.publicKey;
     const origin = globalThis.location?.origin;
     const now = BigInt(Math.floor(Date.now() / 1000));
+    // A device clock may differ slightly from the server clock. The server
+    // still enforces the actual one-use challenge expiry when binding.
+    const clockSkew = 60n;
     if (typeof origin !== "string" || origin === "null")
       throw new BrowserDeviceBindingProofError();
     const parsedOrigin = new URL(origin);
@@ -39,7 +61,8 @@ export async function signSessionDeviceBindingProof(input: {
     if ((parsedOrigin.protocol !== "https:" &&
       !(parsedOrigin.protocol === "http:" && local)) ||
       typeof fields.expiresAt !== "bigint" ||
-      fields.expiresAt <= now || fields.expiresAt > now + 300n ||
+      fields.expiresAt <= now - clockSkew ||
+      fields.expiresAt > now + 300n + clockSkew ||
       !privateKey || privateKey.type !== "private" ||
       privateKey.algorithm.name !== "Ed25519" || privateKey.extractable ||
       !privateKey.usages.includes("sign") ||
