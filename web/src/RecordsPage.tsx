@@ -65,6 +65,7 @@ export function RecordsPage() {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [profileName, setProfileName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [serverReadableConsent, setServerReadableConsent] = useState(false);
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
   const [aiStatus, setAiStatus] = useState<AIStatus>({
@@ -170,7 +171,8 @@ export function RecordsPage() {
 
   async function uploadRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedFile || !selectedProfileId || !session?.csrf_token) return;
+    if (!selectedFile || !selectedProfileId || !session?.csrf_token ||
+      !serverReadableConsent) return;
     setWorking(true);
     setError("");
     const body = new FormData();
@@ -192,6 +194,7 @@ export function RecordsPage() {
       }
       setDocuments((current) => [result, ...current]);
       setSelectedFile(null);
+      setServerReadableConsent(false);
       const fileInput = document.querySelector<HTMLInputElement>("#record-file");
       if (fileInput) fileInput.value = "";
     } catch {
@@ -321,7 +324,14 @@ export function RecordsPage() {
                 <Select
                   id="care-profile"
                   value={selectedProfileId}
-                  onChange={(event) => setSelectedProfileId(event.target.value)}
+                  disabled={working}
+                  onChange={(event) => {
+                    setSelectedProfileId(event.target.value);
+                    setSelectedFile(null);
+                    setServerReadableConsent(false);
+                    const fileInput = document.querySelector<HTMLInputElement>("#record-file");
+                    if (fileInput) fileInput.value = "";
+                  }}
                 >
                   {profiles.map((profile) => (
                     <option key={profile.id} value={profile.id}>
@@ -346,13 +356,21 @@ export function RecordsPage() {
                   type="file"
                   aria-label="Choose a PDF or clear photo"
                   accept="application/pdf,image/jpeg,image/png"
-                  onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => {
+                    setSelectedFile(event.target.files?.[0] ?? null);
+                    setServerReadableConsent(false);
+                  }}
                 />
                 <PreviewBanner placement="upload" />
+                <label className="upload-server-consent">
+                  <Input type="checkbox" checked={serverReadableConsent}
+                    onChange={(event) => setServerReadableConsent(event.target.checked)} />
+                  <span>I understand the person running this server can read the file I add.</span>
+                </label>
                 <Button
                   className="primary-button records-submit"
                   type="submit"
-                  disabled={!selectedFile || working}
+                  disabled={!selectedFile || !serverReadableConsent || working}
                 >
                   <Plus aria-hidden="true" size={18} />
                   {working ? "Checking the record…" : "Add this record"}

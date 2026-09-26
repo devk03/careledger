@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { RecordsPage } from "./RecordsPage";
@@ -102,11 +102,21 @@ it("adds an admitted record and shows its source fingerprint", async () => {
   const input = (await screen.findByLabelText("Choose a PDF or clear photo")) as HTMLInputElement;
   const file = new File(["synthetic"], "synthetic.png", { type: "image/png" });
   fireEvent.change(input, { target: { files: [file] } });
-  fireEvent.click(screen.getByRole("button", { name: "Add this record" }));
+  const submit = screen.getByRole("button", { name: "Add this record" });
+  expect(submit).toBeDisabled();
+  expect(fetchMock.mock.calls.some(([url, options]) =>
+    url === "/api/care-profiles/profile-1/documents" && options?.method === "POST",
+  )).toBe(false);
+  fireEvent.click(screen.getByLabelText(
+    "I understand the person running this server can read the file I add.",
+  ));
+  expect(submit).toBeEnabled();
+  fireEvent.click(submit);
 
   expect(await screen.findByRole("heading", { name: "synthetic.png" })).toBeInTheDocument();
   expect(screen.getByText(`Source fingerprint ${"a".repeat(12)}…`)).toBeInTheDocument();
   expect(screen.getByText("File structure checked · malware scanner not configured")).toBeInTheDocument();
+  expect(submit).toBeDisabled();
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/care-profiles/profile-1/documents",
@@ -116,6 +126,44 @@ it("adds an admitted record and shows its source fingerprint", async () => {
       }),
     ),
   );
+});
+
+it("clears the file and acknowledgment when the care profile changes", async () => {
+  const fetchMock = vi.fn().mockImplementation((url: string) => {
+    if (url === "/api/auth/session") return Promise.resolve({ ok: true,
+      json: async () => ({ authenticated: true, csrf_token: "synthetic-csrf",
+        user: { display_name: "Synthetic organizer" } }) });
+    if (url === "/api/care-profiles") return Promise.resolve({ ok: true,
+      json: async () => [
+        { id: "profile-1", preferred_name: "Fictional A", created_at: 1 },
+        { id: "profile-2", preferred_name: "Fictional B", created_at: 1 },
+      ] });
+    if (url.endsWith("/documents")) return Promise.resolve({ ok: true,
+      json: async () => [] });
+    throw new Error(`Unexpected test URL: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<RecordsPage />);
+  const fileInput = (await screen.findByLabelText("Choose a PDF or clear photo")) as HTMLInputElement;
+  fireEvent.change(fileInput, { target: { files: [new File(["fiction"],
+    "fictional.png", { type: "image/png" })] } });
+  fireEvent.click(screen.getByLabelText(
+    "I understand the person running this server can read the file I add.",
+  ));
+  const submit = screen.getByRole("button", { name: "Add this record" });
+  expect(submit).toBeEnabled();
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText("Care profile"),
+      { target: { value: "profile-2" } });
+  });
+  expect(submit).toBeDisabled();
+  expect(screen.getByText("Choose a PDF or clear photo")).toBeInTheDocument();
+  expect(screen.getByLabelText(
+    "I understand the person running this server can read the file I add.",
+  )).not.toBeChecked();
+  expect(fetchMock.mock.calls.some(([url, options]) =>
+    String(url).endsWith("/documents") && options?.method === "POST",
+  )).toBe(false);
 });
 
 it("reveals no record workspace when there is no authenticated session", async () => {
