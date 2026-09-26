@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import Database from "better-sqlite3";
+import express from "express";
 import { encodeDeviceEnrollmentNonceMaterialV1,
   encodeDeviceEnrollmentProofV1,
   encodeDeviceEnrollmentProofWireV1,
@@ -13,11 +14,14 @@ import { encodeDeviceEnrollmentNonceMaterialV1,
   encodeSessionDeviceProofWireV1 } from "@adeno/contracts";
 import { issueCsrfToken, issueSessionToken } from
   "../dist/auth/cookieSession.js";
+import { SESSION_COOKIE_NAME } from "../dist/auth/cookieSession.js";
 import { assertManagedSchema } from "../dist/managed/managedSchemaGuard.js";
 import { SqliteSessionDeviceBindingCandidate } from
   "../dist/managed/sqliteSessionDeviceBinding.js";
 import { SqliteDeviceEnrollmentCandidate } from
   "../dist/managed/sqliteDeviceEnrollment.js";
+import { createManagedDeviceRouter } from
+  "../dist/managed/managedDeviceRouter.js";
 
 // One-time audit of the exact 2026-09-26 approved fictional database. This is
 // intentionally not a general-purpose caller-selected database test/runner.
@@ -70,7 +74,8 @@ function addSession(family, sessionId) {
     "account_auth_version,membership_auth_version,created_at,expires_at) " +
     "VALUES (?,?,?,?,?,1,1,?,?)").run(family.h, sessionId, family.a,
       Buffer.from(token.sha256, "hex"), csrfSecret, now, now + 3600);
-  return { sha256: token.sha256, csrf: issueCsrfToken(sessionId, csrfSecret) };
+  return { sha256: token.sha256, plaintext: token.plaintext,
+    csrf: issueCsrfToken(sessionId, csrfSecret) };
 }
 
 function addDevice(family, deviceId, enrollmentId, sessionId) {
@@ -112,6 +117,7 @@ function proof(challenge, privateKey, audience = "https://fictional.example") {
     signature: sign(null, Buffer.from(payload), privateKey) });
 }
 
+let httpServer;
 try {
   db.exec("BEGIN IMMEDIATE");
   for (const family of families) {
@@ -338,6 +344,72 @@ try {
     csrfToken: capSession.csrf, deviceId: alpha.d };
   for (let i = 0; i < 16; i++) candidate.issueWire(capInput);
   expectDenied(() => candidate.issueWire(capInput));
+  const httpSession = addSession(beta, id("0"));
+  const alphaHttpSession = addSession(alpha, id("1"));
+  const app = express();
+  let httpRouter;
+  app.use("/api/managed/device", (request, response, next) =>
+    httpRouter(request, response, next));
+  httpServer = await new Promise((resolve) => {
+    const started = app.listen(0, "127.0.0.1", () => resolve(started));
+  });
+  const httpAddress = httpServer.address();
+  assert.ok(httpAddress && typeof httpAddress !== "string");
+  const httpOrigin = `http://127.0.0.1:${httpAddress.port}`;
+  httpRouter = createManagedDeviceRouter({ expectedOrigin: httpOrigin,
+    enrollment: new SqliteDeviceEnrollmentCandidate(db, httpOrigin),
+    binding: new SqliteSessionDeviceBindingCandidate(db, httpOrigin),
+    rateLimit: () => true });
+  const httpPost = (action, body, session = httpSession, origin = httpOrigin,
+    extraHeaders = {}) =>
+    fetch(`${httpOrigin}/api/managed/device/${action}`, { method: "POST",
+      headers: { "content-type": "application/json", origin,
+        "sec-fetch-site": "same-origin",
+        cookie: `${SESSION_COOKIE_NAME}=${session.plaintext}`,
+        "x-csrf-token": session.csrf, ...extraHeaders },
+      body: JSON.stringify(body) });
+  const crossOrigin = await httpPost("enrollment-challenge", {
+    encryptionPublicKeyHex, signingPublicKeyHex,
+  }, httpSession, "https://attacker.example");
+  assert.equal(crossOrigin.status, 403);
+  const wrongCsrf = await httpPost("enrollment-challenge", {
+    encryptionPublicKeyHex, signingPublicKeyHex,
+  }, httpSession, httpOrigin, { "x-csrf-token": "invalid" });
+  assert.equal(wrongCsrf.status, 403);
+  const httpChallengeResponse = await httpPost("enrollment-challenge", {
+    encryptionPublicKeyHex, signingPublicKeyHex,
+  });
+  assert.equal(httpChallengeResponse.status, 201);
+  assert.equal(httpChallengeResponse.headers.get("cache-control"), "no-store");
+  assert.equal(httpChallengeResponse.headers.get("access-control-allow-origin"), null);
+  const httpChallenge = await httpChallengeResponse.json();
+  const httpEnrollmentProof = makeEnrollmentProof(proposedSigning.privateKey,
+    encryptionPublicKeyHex, httpOrigin, httpChallenge);
+  assert.equal((await httpPost("enrollment-proof", {
+    proof: httpEnrollmentProof,
+  }, alphaHttpSession)).status, 403);
+  const httpPendingResponse = await httpPost("enrollment-proof", {
+    proof: httpEnrollmentProof,
+  });
+  assert.equal(httpPendingResponse.status, 201);
+  const httpPending = await httpPendingResponse.json();
+  assert.equal(httpPending.state, "pending");
+  assert.equal((await httpPost("binding-challenge", {
+    deviceId: httpPending.deviceId })).status, 403);
+  const httpBindingResponse = await httpPost("binding-challenge", {
+    deviceId: beta.d });
+  assert.equal(httpBindingResponse.status, 201);
+  const httpBindingChallenge = await httpBindingResponse.json();
+  const httpBindingProof = proof(httpBindingChallenge, beta.key, httpOrigin);
+  assert.equal((await httpPost("binding-proof", {
+    proof: httpBindingProof,
+  }, alphaHttpSession)).status, 403);
+  assert.equal((await httpPost("binding-proof", {
+    proof: httpBindingProof })).status, 204);
+  assert.equal((await httpPost("binding-proof", {
+    proof: httpBindingProof })).status, 403);
+  await new Promise((resolve) => httpServer.close(resolve));
+  httpServer = undefined;
   const accountDisabledChallenge = enrollment.issueWire(enrollmentInput);
   db.prepare("UPDATE managed_accounts SET state='disabled', auth_version=2 " +
     "WHERE id=?").run(alpha.a);
@@ -362,8 +434,9 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: two fictional families; pending enrollment proof and denial; binding key/audience/nonce/CSRF/cross-family/replay/revocation/cap; day-intent bound-device guard");
+  console.log("PASS: two fictional families; pending enrollment and binding over HTTP/SQLite; key/audience/nonce/CSRF/cross-family/replay/revocation/cap denial; day-intent bound-device guard");
 } finally {
+  if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.
   db.exec("ROLLBACK");
   db.close();

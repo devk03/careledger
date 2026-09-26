@@ -216,6 +216,14 @@ and that the proposed Ed25519 signing key signs both public keys and the
 configured origin, then creates a **pending** device in one transaction.
 It does not activate the device. A reauthenticated human/family approval path,
 durable private-key storage, recovery and mounted route controls remain open.
+An unmounted managed-only HTTP router now composes the enrollment and
+session-device binding services behind cookie-derived token hashes, a fixed
+origin and Fetch Metadata check, CSRF, bounded JSON, generic failures and a
+required rate-limit callback. A fictional local HTTP exercise reaches the
+actual SQLite services, but no managed production composition or distributed
+limiter exists. Mount it before any other request-body parser; it rejects a
+pre-parsed body to preserve its 2 KB limit. The trusted-local/community app
+remains separate.
 SQL cannot validate the signature: the unmounted candidate service now drafts
 verification of the enrolled key, session, device, nonce and configured
 deployment audience, followed by consume-and-bind in one write transaction.
