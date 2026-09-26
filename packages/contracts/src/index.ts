@@ -5,6 +5,7 @@ export * from "./scopeEnvelopeActionV1.js";
 export * from "./scopeEnvelopeBackfillActionV1.js";
 export * from "./managedVaultWireV2.js";
 export * from "./indexHeadWire.js";
+export * from "./sessionDeviceBindingProofV1.js";
 export type ISODate = string;
 
 export type SourceReference = {
