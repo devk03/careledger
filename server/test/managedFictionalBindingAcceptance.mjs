@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
-import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { createHash, createPublicKey, diffieHellman,
+  generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 import Database from "better-sqlite3";
-import { encodeSessionDeviceBindingProofV1,
+import { encodeDeviceEnrollmentNonceMaterialV1,
+  encodeDeviceEnrollmentProofV1,
+  encodeDeviceEnrollmentProofWireV1,
+  encodeSessionDeviceBindingProofV1,
   encodeSessionDeviceProofWireV1 } from "@adeno/contracts";
 import { issueCsrfToken, issueSessionToken } from
   "../dist/auth/cookieSession.js";
 import { assertManagedSchema } from "../dist/managed/managedSchemaGuard.js";
 import { SqliteSessionDeviceBindingCandidate } from
   "../dist/managed/sqliteSessionDeviceBinding.js";
+import { SqliteDeviceEnrollmentCandidate } from
+  "../dist/managed/sqliteDeviceEnrollment.js";
 
 // One-time audit of the exact 2026-09-26 approved fictional database. This is
 // intentionally not a general-purpose caller-selected database test/runner.
@@ -49,6 +55,11 @@ const families = [
 function expectDenied(fn) {
   assert.throws(fn, (error) => error?.name ===
     "ManagedSessionDeviceBindingDenied");
+}
+
+function expectEnrollmentDenied(fn) {
+  assert.throws(fn, (error) => error?.name ===
+    "ManagedDeviceEnrollmentDenied");
 }
 
 function addSession(family, sessionId) {
@@ -119,6 +130,142 @@ try {
   const candidate = new SqliteSessionDeviceBindingCandidate(db,
     "https://fictional.example");
   const [alpha, beta] = families;
+  const enrollmentSession = addSession(alpha, id("0"));
+  const proposedSigning = generateKeyPairSync("ed25519");
+  const proposedEncryption = generateKeyPairSync("x25519");
+  const enrollment = new SqliteDeviceEnrollmentCandidate(db,
+    "https://fictional.example");
+  const signingPublicKeyHex = proposedSigning.publicKey
+    .export({ format: "der", type: "spki" }).subarray(-32).toString("hex");
+  const encryptionPublicKeyHex = proposedEncryption.publicKey
+    .export({ format: "der", type: "spki" }).subarray(-32).toString("hex");
+  const enrollmentInput = { tokenSha256: enrollmentSession.sha256,
+    csrfToken: enrollmentSession.csrf,
+    encryptionPublicKeyHex, signingPublicKeyHex };
+  expectEnrollmentDenied(() => enrollment.issueWire({ ...enrollmentInput,
+    csrfToken: "bad" }));
+  expectEnrollmentDenied(() => enrollment.issueWire({ ...enrollmentInput,
+    encryptionPublicKeyHex: "00".repeat(32) }));
+  const enrollmentChallenge = enrollment.issueWire(enrollmentInput);
+  assert.equal(Object.hasOwn(enrollmentChallenge, "nonceHex"), false);
+  const makeEnrollmentProof = (key = proposedSigning.privateKey,
+    changedEncryptionKey = encryptionPublicKeyHex,
+    audience = "https://fictional.example",
+    selectedChallenge = enrollmentChallenge) => {
+    const ephemeralPublicKey = createPublicKey({ key: Buffer.concat([
+      Buffer.from("302a300506032b656e032100", "hex"),
+      Buffer.from(selectedChallenge.ephemeralPublicKeyHex, "hex"),
+    ]), format: "der", type: "spki" });
+    const sharedSecret = diffieHellman({
+      privateKey: proposedEncryption.privateKey,
+      publicKey: ephemeralPublicKey,
+    });
+    const audienceSha256 = digest(Buffer.from(audience)).toString("hex");
+    const material = encodeDeviceEnrollmentNonceMaterialV1({ sharedSecret,
+      challengeId: selectedChallenge.challengeId, audienceSha256 });
+    const nonce = digest(material);
+    const payload = encodeDeviceEnrollmentProofV1({
+      householdId: selectedChallenge.householdId,
+      accountId: selectedChallenge.accountId,
+      sessionId: selectedChallenge.sessionId,
+      challengeId: selectedChallenge.challengeId,
+      nonceSha256: digest(nonce).toString("hex"),
+      audienceSha256,
+      encryptionPublicKeyHex: changedEncryptionKey,
+      signingPublicKeyHex, expiresAt: BigInt(selectedChallenge.expiresAt),
+    });
+    return encodeDeviceEnrollmentProofWireV1({
+      challengeId: selectedChallenge.challengeId, nonce,
+      signature: sign(null, Buffer.from(payload), key),
+    });
+  };
+  const goodEnrollmentProof = makeEnrollmentProof();
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf,
+    proof: goodEnrollmentProof,
+  }));
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: makeEnrollmentProof(proposedSigning.privateKey, "11".repeat(32)),
+  }));
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: makeEnrollmentProof(generateKeyPairSync("ed25519").privateKey),
+  }));
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: makeEnrollmentProof(proposedSigning.privateKey,
+      encryptionPublicKeyHex, "https://wrong.example"),
+  }));
+  const thirdPartyEncryptionPublicKeyHex = generateKeyPairSync("x25519")
+    .publicKey.export({ format: "der", type: "spki" })
+    .subarray(-32).toString("hex");
+  const thirdPartyChallenge = enrollment.issueWire({ ...enrollmentInput,
+    encryptionPublicKeyHex: thirdPartyEncryptionPublicKeyHex });
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: makeEnrollmentProof(proposedSigning.privateKey,
+      thirdPartyEncryptionPublicKeyHex, "https://fictional.example",
+      thirdPartyChallenge),
+  }));
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: { ...goodEnrollmentProof, nonceHex: "00".repeat(32) },
+  }));
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: "bad",
+    proof: goodEnrollmentProof,
+  }));
+  assert.equal(db.prepare("SELECT consumed_at FROM managed_enrollment_challenges " +
+    "WHERE household_id=? AND id=?")
+    .get(alpha.h, enrollmentChallenge.challengeId).consumed_at, null);
+  const pending = enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: goodEnrollmentProof,
+  });
+  assert.deepEqual(pending, { deviceId: enrollmentChallenge.challengeId,
+    state: "pending" });
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: goodEnrollmentProof,
+  }));
+  assert.equal(db.prepare("SELECT state FROM managed_devices " +
+    "WHERE household_id=? AND id=?")
+    .get(alpha.h, pending.deviceId).state, "pending");
+  const duplicateKeyChallenge = enrollment.issueWire(enrollmentInput);
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256, csrfToken: enrollmentSession.csrf,
+    proof: makeEnrollmentProof(proposedSigning.privateKey,
+      encryptionPublicKeyHex, "https://fictional.example",
+      duplicateKeyChallenge),
+  }));
+  assert.equal(db.prepare("SELECT consumed_at FROM managed_enrollment_challenges " +
+    "WHERE household_id=? AND id=?")
+    .get(alpha.h, duplicateKeyChallenge.challengeId).consumed_at, null);
+  expectDenied(() => candidate.issueWire({
+    tokenSha256: enrollmentSession.sha256,
+    csrfToken: enrollmentSession.csrf, deviceId: pending.deviceId,
+  }));
+  const revokedEnrollmentSession = addSession(alpha, id("f"));
+  const revokedEnrollmentChallenge = enrollment.issueWire({
+    ...enrollmentInput, tokenSha256: revokedEnrollmentSession.sha256,
+    csrfToken: revokedEnrollmentSession.csrf,
+  });
+  db.prepare("UPDATE managed_sessions SET revoked_at=? " +
+    "WHERE household_id=? AND id=?").run(now, alpha.h, id("f"));
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: revokedEnrollmentSession.sha256,
+    csrfToken: revokedEnrollmentSession.csrf,
+    proof: makeEnrollmentProof(proposedSigning.privateKey,
+      encryptionPublicKeyHex, "https://fictional.example",
+      revokedEnrollmentChallenge),
+  }));
+  const enrollmentCapSession = addSession(alpha, id("a"));
+  const capEnrollmentInput = { ...enrollmentInput,
+    tokenSha256: enrollmentCapSession.sha256,
+    csrfToken: enrollmentCapSession.csrf };
+  for (let i = 0; i < 16; i++) enrollment.issueWire(capEnrollmentInput);
+  expectEnrollmentDenied(() => enrollment.issueWire(capEnrollmentInput));
   const secondDevice = id("b");
   const secondKey = addDevice(alpha, secondDevice, id("c"), alpha.s);
   const input = { tokenSha256: alpha.session.sha256,
@@ -191,9 +338,31 @@ try {
     csrfToken: capSession.csrf, deviceId: alpha.d };
   for (let i = 0; i < 16; i++) candidate.issueWire(capInput);
   expectDenied(() => candidate.issueWire(capInput));
+  const accountDisabledChallenge = enrollment.issueWire(enrollmentInput);
+  db.prepare("UPDATE managed_accounts SET state='disabled', auth_version=2 " +
+    "WHERE id=?").run(alpha.a);
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: enrollmentSession.sha256,
+    csrfToken: enrollmentSession.csrf,
+    proof: makeEnrollmentProof(proposedSigning.privateKey,
+      encryptionPublicKeyHex, "https://fictional.example",
+      accountDisabledChallenge),
+  }));
+  const betaEnrollmentInput = { ...enrollmentInput,
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf };
+  const membershipDisabledChallenge = enrollment.issueWire(betaEnrollmentInput);
+  db.prepare("UPDATE managed_memberships SET state='disabled', " +
+    "auth_version=2, disabled_at=? WHERE household_id=? AND account_id=?")
+    .run(now, beta.h, beta.a);
+  expectEnrollmentDenied(() => enrollment.proveWire({
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf,
+    proof: makeEnrollmentProof(proposedSigning.privateKey,
+      encryptionPublicKeyHex, "https://fictional.example",
+      membershipDisabledChallenge),
+  }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: two fictional families; key/audience/nonce/CSRF/cross-family/replay/revocation/cap; day-intent bound-device guard");
+  console.log("PASS: two fictional families; pending enrollment proof and denial; binding key/audience/nonce/CSRF/cross-family/replay/revocation/cap; day-intent bound-device guard");
 } finally {
   // Preserve the approved empty database; never delete it or any records.
   db.exec("ROLLBACK");

@@ -209,6 +209,13 @@ pull-request merge.
 Draft `0009` adds a one-use, short-lived Ed25519 challenge and immutable
 one-device-per-session binding. Its composite foreign keys prevent a session
 from being bound to a device owned by another account in the same household.
+An unmounted enrollment candidate now precedes this binding: it issues a
+session-bound X25519 ephemeral challenge, stores only a hash of a derived
+nonce, verifies that the proposed encryption private key can derive that nonce
+and that the proposed Ed25519 signing key signs both public keys and the
+configured origin, then creates a **pending** device in one transaction.
+It does not activate the device. A reauthenticated human/family approval path,
+durable private-key storage, recovery and mounted route controls remain open.
 SQL cannot validate the signature: the unmounted candidate service now drafts
 verification of the enrolled key, session, device, nonce and configured
 deployment audience, followed by consume-and-bind in one write transaction.
