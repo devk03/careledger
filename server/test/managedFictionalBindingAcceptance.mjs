@@ -22,6 +22,8 @@ import { SqliteDeviceEnrollmentCandidate } from
   "../dist/managed/sqliteDeviceEnrollment.js";
 import { createManagedDeviceRouter } from
   "../dist/managed/managedDeviceRouter.js";
+import { SqliteManagedIdentityCandidate } from
+  "../dist/managed/sqliteManagedIdentity.js";
 
 // One-time audit of the exact 2026-09-26 approved fictional database. This is
 // intentionally not a general-purpose caller-selected database test/runner.
@@ -66,14 +68,16 @@ function expectEnrollmentDenied(fn) {
     "ManagedDeviceEnrollmentDenied");
 }
 
-function addSession(family, sessionId) {
+function addSession(family, sessionId, accountVersion = 1,
+  membershipVersion = 1) {
   const token = issueSessionToken();
   const csrfSecret = randomBytes(32);
   db.prepare("INSERT INTO managed_sessions " +
     "(household_id,id,account_id,token_sha256,csrf_secret," +
     "account_auth_version,membership_auth_version,created_at,expires_at) " +
-    "VALUES (?,?,?,?,?,1,1,?,?)").run(family.h, sessionId, family.a,
-      Buffer.from(token.sha256, "hex"), csrfSecret, now, now + 3600);
+    "VALUES (?,?,?,?,?,?,?,?,?)").run(family.h, sessionId, family.a,
+      Buffer.from(token.sha256, "hex"), csrfSecret, accountVersion,
+      membershipVersion, now, now + 3600);
   return { sha256: token.sha256, plaintext: token.plaintext,
     csrf: issueCsrfToken(sessionId, csrfSecret) };
 }
@@ -133,6 +137,124 @@ try {
     family.session = addSession(family, family.s);
     family.key = addDevice(family, family.d, family.e, family.s);
   }
+  const identity = new SqliteManagedIdentityCandidate(db);
+  const registrationEmail = "fictional-owner@example.invalid";
+  const registrationPassword = "invented-passphrase-for-test-only";
+  assert.deepEqual(await identity.registerPendingOwner({
+    email: registrationEmail, password: registrationPassword,
+  }), { accepted: true });
+  const registered = db.prepare("SELECT a.id AS accountId, " +
+    "m.household_id AS householdId, a.state AS accountState, " +
+    "m.state AS memberState, f.state AS familyState " +
+    "FROM managed_accounts a " +
+    "JOIN managed_memberships m ON m.account_id=a.id " +
+    "JOIN managed_families f ON f.id=m.household_id " +
+    "WHERE a.login_email=?").get(registrationEmail);
+  assert.equal(registered.accountState, "pending");
+  assert.equal(registered.memberState, "pending");
+  assert.equal(registered.familyState, "frozen");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_sessions " +
+    "WHERE account_id=?").get(registered.accountId).n, 0);
+  await assert.rejects(identity.login({ email: registrationEmail,
+    password: registrationPassword, householdId: registered.householdId }),
+  (error) => error?.name === "ManagedIdentityDenied");
+  assert.deepEqual(await identity.registerPendingOwner({
+    email: registrationEmail, password: registrationPassword,
+  }), { accepted: true });
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_accounts " +
+    "WHERE login_email=?").get(registrationEmail).n, 1);
+  assert.deepEqual(await identity.registerPendingOwner({
+    email: "fictional-second@example.invalid",
+    password: registrationPassword,
+  }), { accepted: true });
+  const secondRegistered = db.prepare("SELECT m.household_id AS householdId, " +
+    "a.state AS accountState, m.state AS memberState, f.state AS familyState " +
+    "FROM managed_accounts a JOIN managed_memberships m ON m.account_id=a.id " +
+    "JOIN managed_families f ON f.id=m.household_id WHERE a.login_email=?")
+    .get("fictional-second@example.invalid");
+  assert.notEqual(secondRegistered.householdId, registered.householdId);
+  assert.deepEqual([secondRegistered.accountState,
+    secondRegistered.memberState, secondRegistered.familyState],
+  ["pending", "pending", "frozen"]);
+  const passwordBurst = await Promise.allSettled(Array.from({ length: 5 },
+    (_, index) => identity.registerPendingOwner({
+      email: `fictional-burst-${index}@example.invalid`,
+      password: registrationPassword,
+    })));
+  assert.equal(passwordBurst.filter((result) => result.status === "rejected")
+    .length, 1);
+  // Fictional test-only email proof setup. No production verification flow
+  // exists; this direct SQL state change must never be mounted as an API.
+  db.prepare("UPDATE managed_accounts SET state='active', auth_version=2 " +
+    "WHERE id=?").run(registered.accountId);
+  db.prepare("UPDATE managed_memberships SET state='active', auth_version=2 " +
+    "WHERE household_id=? AND account_id=?")
+    .run(registered.householdId, registered.accountId);
+  db.prepare("UPDATE managed_families SET state='active' WHERE id=?")
+    .run(registered.householdId);
+  const unverifiedFamily = { h: registered.householdId,
+    a: registered.accountId };
+  const unverifiedSession = addSession(unverifiedFamily, id("e"), 2, 2);
+  addDevice(unverifiedFamily, id("f"), id("d"), id("e"));
+  const unverifiedEnrollment = new SqliteDeviceEnrollmentCandidate(db,
+    "https://fictional.example");
+  expectEnrollmentDenied(() => unverifiedEnrollment.issueWire({
+    tokenSha256: unverifiedSession.sha256,
+    csrfToken: unverifiedSession.csrf,
+    encryptionPublicKeyHex: generateKeyPairSync("x25519").publicKey
+      .export({ format: "der", type: "spki" }).subarray(-32).toString("hex"),
+    signingPublicKeyHex: generateKeyPairSync("ed25519").publicKey
+      .export({ format: "der", type: "spki" }).subarray(-32).toString("hex"),
+  }));
+  expectDenied(() => new SqliteSessionDeviceBindingCandidate(db,
+    "https://fictional.example").issueWire({
+    tokenSha256: unverifiedSession.sha256,
+    csrfToken: unverifiedSession.csrf, deviceId: id("f"),
+  }));
+  await assert.rejects(identity.login({ email: registrationEmail,
+    password: registrationPassword, householdId: registered.householdId }),
+  (error) => error?.name === "ManagedIdentityDenied");
+  db.prepare("UPDATE managed_accounts SET email_verified_at=?, auth_version=3 " +
+    "WHERE id=?").run(now, registered.accountId);
+  await assert.rejects(identity.login({ email: registrationEmail,
+    password: "wrong-password-for-fiction", householdId: registered.householdId }),
+  (error) => error?.name === "ManagedIdentityDenied");
+  await assert.rejects(identity.login({ email: registrationEmail,
+    password: registrationPassword, householdId: families[0].h }),
+  (error) => error?.name === "ManagedIdentityDenied");
+  const signedIn = await identity.login({ email: registrationEmail,
+    password: registrationPassword, householdId: registered.householdId });
+  assert.equal(JSON.stringify(signedIn).includes(signedIn.sessionToken), false);
+  const tokenSha256 = digest(Buffer.from(signedIn.sessionToken)).toString("hex");
+  assert.equal(identity.readSession(tokenSha256)?.accountId,
+    registered.accountId);
+  assert.equal(identity.readSession(tokenSha256)?.role, "owner");
+  assert.throws(() => identity.logout({ ok: true, tokenSha256,
+    csrfToken: "bad" }),
+    (error) => error?.name === "ManagedIdentityDenied");
+  assert.ok(identity.readSession(tokenSha256));
+  identity.logout({ ok: true, tokenSha256,
+    csrfToken: signedIn.csrfToken });
+  assert.equal(identity.readSession(tokenSha256), null);
+  const staleLogin = await identity.login({ email: registrationEmail,
+    password: registrationPassword, householdId: registered.householdId });
+  db.prepare("UPDATE managed_accounts SET auth_version=4 WHERE id=?")
+    .run(registered.accountId);
+  assert.equal(identity.readSession(digest(Buffer.from(staleLogin.sessionToken))
+    .toString("hex")), null);
+  const membershipStaleLogin = await identity.login({ email: registrationEmail,
+    password: registrationPassword, householdId: registered.householdId });
+  db.prepare("UPDATE managed_memberships SET auth_version=3 " +
+    "WHERE household_id=? AND account_id=?")
+    .run(registered.householdId, registered.accountId);
+  assert.equal(identity.readSession(digest(Buffer.from(
+    membershipStaleLogin.sessionToken)).toString("hex")), null);
+  const frozenFamilyLogin = await identity.login({ email: registrationEmail,
+    password: registrationPassword, householdId: registered.householdId });
+  db.prepare("UPDATE managed_families SET state='frozen' WHERE id=?")
+    .run(registered.householdId);
+  assert.equal(identity.readSession(digest(Buffer.from(
+    frozenFamilyLogin.sessionToken)).toString("hex")), null);
   const candidate = new SqliteSessionDeviceBindingCandidate(db,
     "https://fictional.example");
   const [alpha, beta] = families;
@@ -434,7 +556,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: two fictional families; pending enrollment and binding over HTTP/SQLite; key/audience/nonce/CSRF/cross-family/replay/revocation/cap denial; day-intent bound-device guard");
+  console.log("PASS: fictional pending signup, verified-only login and session revocation; two-family enrollment/binding over HTTP/SQLite; cross-family/replay/revocation/cap denial; day-intent bound-device guard");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.

@@ -72,7 +72,8 @@ export function issueScopeEnvelopeV2(db: Database.Database, input: {
         "AND s.revoked_at IS NULL AND s.expires_at > unixepoch('now') " +
         "AND s.account_auth_version = a.auth_version " +
         "AND s.membership_auth_version = m.auth_version " +
-        "AND a.state = 'active' AND m.state = 'active' AND m.role = 'owner' " +
+        "AND a.state = 'active' AND a.email_verified_at IS NOT NULL " +
+        "AND m.state = 'active' AND m.role = 'owner' " +
         "AND f.state = 'active' AND d.state = 'active'",
       ).get(tokenSha256, row.sessionId, row.issuerDeviceId);
       if (!issuer || issuer.householdId !== row.householdId ||
@@ -111,6 +112,7 @@ export function issueScopeEnvelopeV2(db: Database.Database, input: {
         "AND recipient.state = 'active' " +
         "AND recipient_member.state = 'active' " +
         "AND recipient_account.state = 'active' " +
+        "AND recipient_account.email_verified_at IS NOT NULL " +
         "AND (g.capability_mask & 1) = 1 AND g.head_sha256 IS NOT NULL",
       ).get(row.householdId, row.careProfileId, row.opaqueScopeId,
         row.keyId, row.keyEpoch, row.purpose, row.recipientDeviceId);

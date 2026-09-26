@@ -166,7 +166,8 @@ export class SqliteDeviceEnrollmentCandidate {
       "AND s.expires_at>unixepoch('now') " +
       "AND s.account_auth_version=a.auth_version " +
       "AND s.membership_auth_version=m.auth_version " +
-      "AND a.state='active' AND m.state='active' AND f.state='active'",
+      "AND a.state='active' AND a.email_verified_at IS NOT NULL " +
+      "AND m.state='active' AND f.state='active'",
     ).get(token);
   }
 
@@ -193,7 +194,8 @@ export class SqliteDeviceEnrollmentCandidate {
       "AND s.revoked_at IS NULL AND s.expires_at>unixepoch('now') " +
       "AND s.account_auth_version=a.auth_version " +
       "AND s.membership_auth_version=m.auth_version " +
-      "AND a.state='active' AND m.state='active' AND f.state='active'",
+      "AND a.state='active' AND a.email_verified_at IS NOT NULL " +
+      "AND m.state='active' AND f.state='active'",
     ).get(token, challengeId);
   }
 

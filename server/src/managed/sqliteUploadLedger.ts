@@ -281,7 +281,8 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       "AND s.expires_at > unixepoch('now') " +
       "AND s.account_auth_version = a.auth_version " +
       "AND s.membership_auth_version = m.auth_version " +
-      "AND a.state = 'active' AND m.state = 'active' " +
+      "AND a.state = 'active' AND a.email_verified_at IS NOT NULL " +
+      "AND m.state = 'active' " +
       "AND f.state = 'active' AND bound_device.state = 'active'",
     ).get(Buffer.from(tokenSha256, "hex"));
     if (!row || !Buffer.isBuffer(row.csrfSecret) || row.csrfSecret.length !== 32)

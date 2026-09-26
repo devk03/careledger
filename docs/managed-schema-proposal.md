@@ -224,6 +224,20 @@ actual SQLite services, but no managed production composition or distributed
 limiter exists. Mount it before any other request-body parser; it rejects a
 pre-parsed body to preserve its 2 KB limit. The trusted-local/community app
 remains separate.
+An unmounted managed-v10 identity candidate creates an opaque **frozen** family
+and **pending** owner account/membership without issuing a cookie. Its Argon2id
+login issues a versioned session only for an already verified active account
+and membership in the selected family; reads and logout recheck live state.
+The fictional test simulates email verification and family activation by
+direct SQL solely inside
+the rollback-only test transaction. There is no public email-token sender,
+one-use verification table, account recovery, managed auth route or deployed
+limiter. A new additive migration and separate application approval are needed
+for a complete public verification/recovery flow.
+Runtime managed current-session queries now require verified email, but v10 SQL
+still permits an active account with `email_verified_at` unset. That database
+guard and pending-signup expiry/cleanup belong in the next reviewed migration;
+neither is implied by the candidate service.
 SQL cannot validate the signature: the unmounted candidate service now drafts
 verification of the enrolled key, session, device, nonce and configured
 deployment audience, followed by consume-and-bind in one write transaction.

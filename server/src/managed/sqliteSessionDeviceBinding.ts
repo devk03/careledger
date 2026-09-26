@@ -96,7 +96,8 @@ export class SqliteSessionDeviceBindingCandidate {
           "AND s.revoked_at IS NULL AND s.expires_at > unixepoch('now') " +
           "AND s.account_auth_version = a.auth_version " +
           "AND s.membership_auth_version = m.auth_version " +
-          "AND a.state = 'active' AND m.state = 'active' " +
+          "AND a.state = 'active' AND a.email_verified_at IS NOT NULL " +
+          "AND m.state = 'active' " +
           "AND f.state = 'active' AND d.state = 'active' " +
           "AND NOT EXISTS (SELECT 1 FROM managed_session_device_bindings b " +
           "WHERE b.household_id = s.household_id AND b.session_id = s.id)",
@@ -202,7 +203,8 @@ export class SqliteSessionDeviceBindingCandidate {
       "AND s.revoked_at IS NULL AND s.expires_at > unixepoch('now') " +
       "AND s.account_auth_version = a.auth_version " +
       "AND s.membership_auth_version = m.auth_version " +
-      "AND a.state = 'active' AND m.state = 'active' " +
+      "AND a.state = 'active' AND a.email_verified_at IS NOT NULL " +
+      "AND m.state = 'active' " +
       "AND f.state = 'active' AND d.state = 'active' " +
       "AND NOT EXISTS (SELECT 1 FROM managed_session_device_bindings b " +
       "WHERE b.household_id = s.household_id AND b.session_id = s.id)",
