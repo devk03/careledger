@@ -93,3 +93,24 @@ it("denies another signing key, a changed signature and malformed proof bytes", 
     signature: new Uint8Array(64),
   })).toThrow(SessionDeviceBindingDenied);
 });
+
+it("verifies the fixed Chromium signature for a fictional localhost challenge", () => {
+  const context: SessionDeviceBindingProofContextV1 = {
+    householdId: id("a1"), accountId: id("b2"), sessionId: id("c3"),
+    deviceId: id("d4"), challengeId: id("e5"),
+    nonceSha256: "182a7e592cafca805e6ef488103a26ea8900787edfba367e6b5749b7104bc33c",
+    audienceSha256: "78b686af8a22ab32b094ebca6040e2b76e61d273bc3b3dcffc1de8c604712be9",
+    expiresAt: 1_800_000_300n,
+  };
+  const publicKey = Buffer.from(
+    "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12", "hex");
+  const signature = Buffer.from(
+    "cf02d13bb26ef3dd8f8a718fdecb48e17cb8331aa4f5343601957e19fade8e9" +
+    "e80010551c35e16e085bf11ef2f2bf1269307c93df8db5bdb899fa69858880e0b", "hex");
+  expect(() => verifySessionDeviceBindingProof({ context,
+    enrolledSigningPublicKey: publicKey, signature })).not.toThrow();
+  expect(() => verifySessionDeviceBindingProof({
+    context: { ...context, audienceSha256: digest("01") },
+    enrolledSigningPublicKey: publicKey, signature,
+  })).toThrow(SessionDeviceBindingDenied);
+});
