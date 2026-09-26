@@ -291,8 +291,11 @@ depth alongside the unmounted TypeScript writer and ledger checks, not proof
 that any row is valid ciphertext or that every managed path is session-bound.
 Non-day/draft, active-key, day-revision and grant paths remain to be reviewed.
 Like `0009`, `0010` has only been applied to the approved disposable fictional
-local database; its day-intent bound-writer guard was exercised there. The
-other insert guards and positive authorized write flows remain untested.
+local database. Its day-intent bound-writer guard and an ordinary v2 envelope
+positive/negative writer/read path were exercised there under rollback. A
+genuinely signed structural envelope action passed; a recipient's actual HPKE
+decryption was not shown. Historical backfill, lease/blob guards, concurrent
+races and complete authorized write flows remain untested.
 This lineage is new-only: the runner creates a fresh empty managed database and
 does not migrate a database that already contains pre-binding v2 envelopes.
 Such a database must be rejected, not silently made unreadable or backfilled

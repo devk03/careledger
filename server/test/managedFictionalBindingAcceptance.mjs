@@ -11,7 +11,10 @@ import { encodeDeviceEnrollmentNonceMaterialV1,
   encodeDeviceEnrollmentProofV1,
   encodeDeviceEnrollmentProofWireV1,
   encodeSessionDeviceBindingProofV1,
-  encodeSessionDeviceProofWireV1 } from "@adeno/contracts";
+  encodeSessionDeviceProofWireV1,
+  encodeScopeEnvelopeActionPayloadV1,
+  encodeScopeKeyEnvelopeV2,
+  SCOPE_ENVELOPE_ACTION_HASH_DOMAIN_V1 } from "@adeno/contracts";
 import { issueCsrfToken, issueSessionToken } from
   "../dist/auth/cookieSession.js";
 import { SESSION_COOKIE_NAME } from "../dist/auth/cookieSession.js";
@@ -26,6 +29,10 @@ import { createManagedAuthRouter } from
   "../dist/managed/managedAuthRouter.js";
 import { SqliteManagedIdentityCandidate } from
   "../dist/managed/sqliteManagedIdentity.js";
+import { issueScopeEnvelopeV2 } from
+  "../dist/managed/sqliteScopeEnvelopeWriter.js";
+import { readAccountScopedScopeEnvelopeCandidateV2 } from
+  "../dist/managed/sqliteScopeEnvelopeReader.js";
 
 // One-time audit of the exact 2026-09-26 approved fictional database. This is
 // intentionally not a general-purpose caller-selected database test/runner.
@@ -53,6 +60,7 @@ assert.equal(db.prepare("SELECT count(*) AS n FROM managed_families").get().n, 0
 const now = Math.floor(Date.now() / 1000);
 const id = (byte) => byte.repeat(32);
 const digest = (data) => createHash("sha256").update(data).digest();
+const sha256Hex = (data) => digest(data).toString("hex");
 const families = [
   { h: id("1"), a: id("2"), s: id("3"), d: id("4"), e: id("5"),
     email: "fictional-alpha@example.invalid" },
@@ -506,7 +514,7 @@ try {
       "(household_id,profile_id,scope_id,subject_device_id,sequence," +
       "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
       "issuer_counter,created_at) " +
-      "VALUES (?,?,?,?,1,NULL,?,2,?,?,?)")
+      "VALUES (?,?,?,?,1,NULL,?,3,?,?,?)")
       .run(alpha.h, profileId, scopeId, deviceId, grant.payloadSha256,
         alpha.d, grant.counter, fixtureNow);
   }
@@ -528,6 +536,144 @@ try {
     "WHERE household_id=? AND profile_id=? AND scope_id=?")
     .get(alpha.h, profileId, scopeId).n, 1);
 
+  // This is a service/SQL-boundary test: the older key/grant actions above
+  // are structural fictional fixtures, but every envelope action below is
+  // freshly signed by the enrolled Ed25519 key and verified in the writer's
+  // own BEGIN IMMEDIATE transaction. HPKE ciphertext remains opaque to SQL.
+  const envelopeCounts = () => ({
+    actions: db.prepare("SELECT count(*) AS n FROM managed_signed_actions " +
+      "WHERE household_id=?").get(alpha.h).n,
+    envelopes: db.prepare("SELECT count(*) AS n FROM managed_scope_envelopes_v2 " +
+      "WHERE household_id=?").get(alpha.h).n,
+  });
+  const envelopeCandidate = (issuerDeviceId, issuerPrivateKey,
+    recipientDeviceId, sessionId = alpha.s) => {
+    const issuerPublic = db.prepare("SELECT signing_public_key AS key " +
+      "FROM managed_devices WHERE household_id=? AND id=?")
+      .get(alpha.h, issuerDeviceId).key;
+    const recipientPublic = db.prepare("SELECT encryption_public_key AS key " +
+      "FROM managed_devices WHERE household_id=? AND id=?")
+      .get(alpha.h, recipientDeviceId).key;
+    const activeHead = db.prepare("SELECT head_sha256 AS head " +
+      "FROM managed_current_scope_keys WHERE household_id=? " +
+      "AND profile_id=? AND scope_id=?")
+      .get(alpha.h, profileId, scopeId).head;
+    const grantHead = db.prepare("SELECT head_sha256 AS head " +
+      "FROM managed_grant_heads WHERE household_id=? AND profile_id=? " +
+      "AND scope_id=? AND subject_device_id=?")
+      .get(alpha.h, profileId, scopeId, recipientDeviceId).head;
+    const prior = db.prepare("SELECT counter, action_sha256 AS actionSha256 " +
+      "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
+      "ORDER BY counter DESC LIMIT 1").get(alpha.h, issuerDeviceId);
+    const counter = BigInt((prior?.counter ?? 0) + 1);
+    const previousActionSha256 = prior?.actionSha256.toString("hex") ?? null;
+    const createdAt = BigInt(Math.floor(Date.now() / 1000));
+    const recipientKeySha256 = sha256Hex(recipientPublic);
+    const wire = encodeScopeKeyEnvelopeV2({
+      format: "hpke-x25519-hkdf-sha256-aes256gcm-scope-v2",
+      context: { householdId: alpha.h, careProfileId: profileId,
+        opaqueScopeId: scopeId, keyId, keyEpoch: 1, purpose: "day",
+        recipientDeviceId },
+      keyCommitmentSha256: keyCommitment.toString("hex"),
+      recipientKeySha256, encapsulatedKey: new Uint8Array(32).fill(4),
+      ciphertext: new Uint8Array(48).fill(5).buffer,
+    });
+    const row = { householdId: alpha.h, careProfileId: profileId,
+      opaqueScopeId: scopeId, keyId, keyEpoch: 1, purpose: "day",
+      recipientDeviceId, keyCommitmentSha256: keyCommitment.toString("hex"),
+      recipientKeySha256, wireVersion: 2, wire, wireSha256: sha256Hex(wire),
+      activeKeyHeadSha256: activeHead.toString("hex"),
+      grantHeadSha256: grantHead.toString("hex"),
+      signedPayloadSha256: "", issuerDeviceId, issuerCounter: counter,
+      sessionId, createdAt };
+    const payload = encodeScopeEnvelopeActionPayloadV1({
+      householdId: row.householdId, careProfileId: row.careProfileId,
+      opaqueScopeId: row.opaqueScopeId, keyId: row.keyId,
+      keyEpoch: row.keyEpoch, purpose: row.purpose,
+      recipientDeviceId: row.recipientDeviceId,
+      keyCommitmentSha256: row.keyCommitmentSha256,
+      recipientKeySha256: row.recipientKeySha256,
+      wireSha256: row.wireSha256,
+      activeKeyHeadSha256: row.activeKeyHeadSha256,
+      grantHeadSha256: row.grantHeadSha256,
+      issuerDeviceId, issuerCounter: counter, sessionId, createdAt,
+      previousActionSha256, issuerSigningKeySha256: sha256Hex(issuerPublic),
+    });
+    const signature = sign(null, Buffer.from(payload), issuerPrivateKey);
+    row.signedPayloadSha256 = sha256Hex(payload);
+    const action = { householdId: alpha.h, deviceId: issuerDeviceId,
+      counter, actionKind: "envelope", payloadSha256: row.signedPayloadSha256,
+      previousActionSha256,
+      actionSha256: sha256Hex(Buffer.concat([
+        Buffer.from(SCOPE_ENVELOPE_ACTION_HASH_DOMAIN_V1),
+        Buffer.from(payload), signature,
+      ])), signature, createdAt };
+    return { row, action };
+  };
+  const issueEnvelope = (value, session = alpha.session) =>
+    issueScopeEnvelopeV2(db, { tokenSha256: session.sha256,
+      csrfToken: session.csrf, ...value });
+  const expectEnvelopeDeniedAtomically = (value, session = alpha.session) => {
+    const before = envelopeCounts();
+    assert.throws(() => issueEnvelope(value, session),
+      (error) => error?.name === "ManagedScopeEnvelopeIssueDenied");
+    assert.deepEqual(envelopeCounts(), before);
+  };
+  const beforeEnvelope = envelopeCounts();
+  issueEnvelope(envelopeCandidate(alpha.d, alpha.key, alpha.d));
+  assert.deepEqual(envelopeCounts(), { actions: beforeEnvelope.actions + 1,
+    envelopes: beforeEnvelope.envelopes + 1 });
+  const readEnvelope = () => readAccountScopedScopeEnvelopeCandidateV2(db, {
+    tokenSha256: alpha.session.sha256, careProfileId: profileId,
+    opaqueScopeId: scopeId, keyId, keyEpoch: 1 });
+  assert.equal(readEnvelope().kind, "ordinary");
+  assert.equal(readEnvelope().row.recipientDeviceId, alpha.d);
+  assert.throws(() => readAccountScopedScopeEnvelopeCandidateV2(db, {
+    tokenSha256: beta.session.sha256, careProfileId: profileId,
+    opaqueScopeId: scopeId, keyId, keyEpoch: 1 }),
+  (error) => error?.name === "ManagedScopeEnvelopeReadDenied");
+  expectEnvelopeDeniedAtomically(envelopeCandidate(secondDevice, secondKey,
+    alpha.d));
+  expectEnvelopeDeniedAtomically(envelopeCandidate(alpha.d, alpha.key,
+    secondDevice), beta.session);
+  const tamperedWire = envelopeCandidate(alpha.d, alpha.key, secondDevice);
+  tamperedWire.row.wire = Uint8Array.from(tamperedWire.row.wire);
+  tamperedWire.row.wire[239] ^= 1;
+  expectEnvelopeDeniedAtomically(tamperedWire);
+  const badSignature = envelopeCandidate(alpha.d, alpha.key, secondDevice);
+  badSignature.action.signature = Buffer.from(badSignature.action.signature);
+  badSignature.action.signature[0] ^= 1;
+  const badPayload = encodeScopeEnvelopeActionPayloadV1({
+    householdId: badSignature.row.householdId,
+    careProfileId: badSignature.row.careProfileId,
+    opaqueScopeId: badSignature.row.opaqueScopeId,
+    keyId: badSignature.row.keyId, keyEpoch: badSignature.row.keyEpoch,
+    purpose: badSignature.row.purpose,
+    recipientDeviceId: badSignature.row.recipientDeviceId,
+    keyCommitmentSha256: badSignature.row.keyCommitmentSha256,
+    recipientKeySha256: badSignature.row.recipientKeySha256,
+    wireSha256: badSignature.row.wireSha256,
+    activeKeyHeadSha256: badSignature.row.activeKeyHeadSha256,
+    grantHeadSha256: badSignature.row.grantHeadSha256,
+    issuerDeviceId: badSignature.row.issuerDeviceId,
+    issuerCounter: badSignature.row.issuerCounter,
+    sessionId: badSignature.row.sessionId,
+    createdAt: badSignature.row.createdAt,
+    previousActionSha256: badSignature.action.previousActionSha256,
+    issuerSigningKeySha256: sha256Hex(db.prepare(
+      "SELECT signing_public_key AS key FROM managed_devices " +
+      "WHERE household_id=? AND id=?").get(alpha.h, alpha.d).key),
+  });
+  badSignature.action.actionSha256 = sha256Hex(Buffer.concat([
+    Buffer.from(SCOPE_ENVELOPE_ACTION_HASH_DOMAIN_V1),
+    Buffer.from(badPayload), badSignature.action.signature,
+  ]));
+  expectEnvelopeDeniedAtomically(badSignature);
+  // A duplicate recipient/key is rejected after the writer has inserted its
+  // new signed action; BEGIN IMMEDIATE must roll that insertion back too.
+  expectEnvelopeDeniedAtomically(envelopeCandidate(alpha.d, alpha.key,
+    alpha.d));
+
   const betaInput = { tokenSha256: beta.session.sha256,
     csrfToken: beta.session.csrf, deviceId: beta.d };
   const betaChallenge = candidate.issueWire(betaInput);
@@ -538,12 +684,26 @@ try {
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_session_device_bindings")
     .get().n, 2);
 
+  const revokedIssuerSession = addSession(alpha, id("2"));
+  const revokedIssuerChallenge = candidate.issueWire({
+    tokenSha256: revokedIssuerSession.sha256,
+    csrfToken: revokedIssuerSession.csrf, deviceId: alpha.d });
+  candidate.bindWire({ tokenSha256: revokedIssuerSession.sha256,
+    csrfToken: revokedIssuerSession.csrf,
+    proof: proof(revokedIssuerChallenge, alpha.key) });
+  db.prepare("UPDATE managed_sessions SET revoked_at=? " +
+    "WHERE household_id=? AND id=?").run(now, alpha.h, id("2"));
+  expectEnvelopeDeniedAtomically(envelopeCandidate(alpha.d, alpha.key,
+    secondDevice, id("2")), revokedIssuerSession);
+
   const freshSession = addSession(alpha, id("d"));
   const freshInput = { tokenSha256: freshSession.sha256,
     csrfToken: freshSession.csrf, deviceId: secondDevice };
   const revokedChallenge = candidate.issueWire(freshInput);
   db.prepare("UPDATE managed_devices SET state='revoked', revoked_at=? " +
     "WHERE household_id=? AND id=?").run(now, alpha.h, secondDevice);
+  expectEnvelopeDeniedAtomically(envelopeCandidate(alpha.d, alpha.key,
+    secondDevice));
   expectDenied(() => candidate.bindWire({ tokenSha256: freshSession.sha256,
     csrfToken: freshSession.csrf, proof: proof(revokedChallenge, secondKey) }));
 
@@ -704,6 +864,34 @@ try {
     proof: httpBindingProof })).status, 403);
   await new Promise((resolve) => httpServer.close(resolve));
   httpServer = undefined;
+  // A previously issued ciphertext envelope must become unreadable on the
+  // next request after its current read grant is removed. This does not erase
+  // key material already downloaded by a recipient.
+  const priorGrantAction = db.prepare("SELECT counter, action_sha256 AS hash " +
+    "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
+    "ORDER BY counter DESC LIMIT 1").get(alpha.h, alpha.d);
+  const priorGrantHead = db.prepare("SELECT sequence, head_sha256 AS hash " +
+    "FROM managed_grant_heads WHERE household_id=? AND profile_id=? " +
+    "AND scope_id=? AND subject_device_id=?")
+    .get(alpha.h, profileId, scopeId, alpha.d);
+  const revokeGrantAt = Math.floor(Date.now() / 1000);
+  const revokeGrantPayload = randomBytes(32);
+  db.prepare("INSERT INTO managed_signed_actions " +
+    "(household_id,device_id,counter,action_kind,payload_sha256," +
+    "previous_action_sha256,action_sha256,signature,created_at) " +
+    "VALUES (?,?,?,'grant',?,?,?,?,?)")
+    .run(alpha.h, alpha.d, priorGrantAction.counter + 1,
+      revokeGrantPayload, priorGrantAction.hash, randomBytes(32),
+      randomBytes(64), revokeGrantAt);
+  db.prepare("INSERT INTO managed_grant_events " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,?,?,?,0,?,?,?)")
+    .run(alpha.h, profileId, scopeId, alpha.d,
+      priorGrantHead.sequence + 1, priorGrantHead.hash, revokeGrantPayload,
+      alpha.d, priorGrantAction.counter + 1, revokeGrantAt);
+  assert.throws(readEnvelope,
+    (error) => error?.name === "ManagedScopeEnvelopeReadDenied");
   const accountDisabledChallenge = enrollment.issueWire(enrollmentInput);
   db.prepare("UPDATE managed_accounts SET state='disabled', auth_version=2 " +
     "WHERE id=?").run(alpha.a);
@@ -728,7 +916,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup; verified-only login/session/logout and two-family device enrollment/binding over HTTP/SQLite; cross-family/replay/revocation/cap denial; authorized day intent accepts bound device A and rejects equally granted device B");
+  console.log("PASS: fictional pending signup, verified auth, two-family device binding, bound day intent, and signed envelope writer/reader; cross-family, replay, atomic rollback and grant/device/session revocation denial");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.
