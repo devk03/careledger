@@ -22,6 +22,8 @@ import { SqliteDeviceEnrollmentCandidate } from
   "../dist/managed/sqliteDeviceEnrollment.js";
 import { createManagedDeviceRouter } from
   "../dist/managed/managedDeviceRouter.js";
+import { createManagedAuthRouter } from
+  "../dist/managed/managedAuthRouter.js";
 import { SqliteManagedIdentityCandidate } from
   "../dist/managed/sqliteManagedIdentity.js";
 
@@ -468,8 +470,27 @@ try {
   expectDenied(() => candidate.issueWire(capInput));
   const httpSession = addSession(beta, id("0"));
   const alphaHttpSession = addSession(alpha, id("1"));
+  const httpEmail = "fictional-http-owner@example.invalid";
+  await identity.registerPendingOwner({ email: httpEmail,
+    password: registrationPassword });
+  const httpOwner = db.prepare("SELECT a.id AS accountId, " +
+    "m.household_id AS householdId FROM managed_accounts a " +
+    "JOIN managed_memberships m ON m.account_id=a.id " +
+    "WHERE a.login_email=?").get(httpEmail);
+  // Test-only direct SQL simulates an external verified-email ceremony.
+  db.prepare("UPDATE managed_accounts SET state='active', " +
+    "email_verified_at=?, auth_version=2 WHERE id=?")
+    .run(now, httpOwner.accountId);
+  db.prepare("UPDATE managed_memberships SET state='active', " +
+    "auth_version=2 WHERE household_id=? AND account_id=?")
+    .run(httpOwner.householdId, httpOwner.accountId);
+  db.prepare("UPDATE managed_families SET state='active' WHERE id=?")
+    .run(httpOwner.householdId);
   const app = express();
   let httpRouter;
+  let authRouter;
+  app.use("/api/managed/auth", (request, response, next) =>
+    authRouter(request, response, next));
   app.use("/api/managed/device", (request, response, next) =>
     httpRouter(request, response, next));
   httpServer = await new Promise((resolve) => {
@@ -478,6 +499,9 @@ try {
   const httpAddress = httpServer.address();
   assert.ok(httpAddress && typeof httpAddress !== "string");
   const httpOrigin = `http://127.0.0.1:${httpAddress.port}`;
+  authRouter = createManagedAuthRouter({ expectedOrigin: httpOrigin,
+    identity, credentialBucketKey: Buffer.alloc(32, 7),
+    rateLimit: () => true });
   httpRouter = createManagedDeviceRouter({ expectedOrigin: httpOrigin,
     enrollment: new SqliteDeviceEnrollmentCandidate(db, httpOrigin),
     binding: new SqliteSessionDeviceBindingCandidate(db, httpOrigin),
@@ -490,6 +514,43 @@ try {
         cookie: `${SESSION_COOKIE_NAME}=${session.plaintext}`,
         "x-csrf-token": session.csrf, ...extraHeaders },
       body: JSON.stringify(body) });
+  const httpLogin = await fetch(`${httpOrigin}/api/managed/auth/login`, {
+    method: "POST", headers: { "content-type": "application/json",
+      origin: httpOrigin, "sec-fetch-site": "same-origin" },
+    body: JSON.stringify({ email: httpEmail, password: registrationPassword,
+      householdId: httpOwner.householdId }),
+  });
+  assert.equal(httpLogin.status, 200);
+  const httpLoginCookie = httpLogin.headers.get("set-cookie").split(";")[0];
+  assert.ok(httpLoginCookie.startsWith(`${SESSION_COOKIE_NAME}=`));
+  const httpLoginView = await httpLogin.json();
+  assert.equal(httpLoginView.accountId, httpOwner.accountId);
+  assert.equal(JSON.stringify(httpLoginView).includes(httpLoginCookie.slice(
+    SESSION_COOKIE_NAME.length + 1)), false);
+  const httpSessionView = await fetch(`${httpOrigin}/api/managed/auth/session`, {
+    headers: { cookie: httpLoginCookie, "sec-fetch-site": "same-origin" },
+  });
+  assert.equal(httpSessionView.status, 200);
+  assert.equal((await httpSessionView.json()).accountId, httpOwner.accountId);
+  assert.equal((await fetch(`${httpOrigin}/api/managed/auth/logout`, {
+    method: "POST", headers: { origin: httpOrigin,
+      "sec-fetch-site": "same-origin", cookie: httpLoginCookie,
+      "x-csrf-token": "wrong-fictional-csrf" },
+  })).status, 403);
+  assert.equal((await fetch(`${httpOrigin}/api/managed/auth/session`, {
+    headers: { cookie: httpLoginCookie,
+      "sec-fetch-site": "same-origin" },
+  })).status, 200);
+  const httpLogout = await fetch(`${httpOrigin}/api/managed/auth/logout`, {
+    method: "POST", headers: { origin: httpOrigin,
+      "sec-fetch-site": "same-origin", cookie: httpLoginCookie,
+      "x-csrf-token": httpLoginView.csrfToken },
+  });
+  assert.equal(httpLogout.status, 204);
+  assert.equal((await fetch(`${httpOrigin}/api/managed/auth/session`, {
+    headers: { cookie: httpLoginCookie,
+      "sec-fetch-site": "same-origin" },
+  })).status, 401);
   const crossOrigin = await httpPost("enrollment-challenge", {
     encryptionPublicKeyHex, signingPublicKeyHex,
   }, httpSession, "https://attacker.example");
@@ -556,7 +617,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup, verified-only login and session revocation; two-family enrollment/binding over HTTP/SQLite; cross-family/replay/revocation/cap denial; day-intent bound-device guard");
+  console.log("PASS: fictional pending signup; verified-only login/session/logout and two-family device enrollment/binding over HTTP/SQLite; cross-family/replay/revocation/cap denial; day-intent bound-device guard");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.

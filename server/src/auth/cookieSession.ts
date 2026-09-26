@@ -61,6 +61,12 @@ export function sessionTokenSha256(plaintextToken: string): string {
   return createHash("sha256").update(plaintextToken, "utf8").digest("hex");
 }
 
+/** Parse one strict cookie and expose only its digest to managed readers. */
+export function cookieSessionTokenSha256(request: HeaderRequest): string | null {
+  const plaintext = sessionCookie(request);
+  return plaintext === null ? null : sessionTokenSha256(plaintext);
+}
+
 /** Compatible with the existing Python cookie-token format. */
 export function issueSessionToken(): { plaintext: string; sha256: string } {
   const plaintext = randomBytes(32).toString("base64url");

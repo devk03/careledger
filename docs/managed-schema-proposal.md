@@ -238,6 +238,23 @@ Runtime managed current-session queries now require verified email, but v10 SQL
 still permits an active account with `email_verified_at` unset. That database
 guard and pending-signup expiry/cleanup belong in the next reviewed migration;
 neither is implied by the candidate service.
+The separate unmounted auth router exposes only login, session status and
+logout for already verified accounts. It requires a configured Origin,
+bounded JSON, cookie-derived session identity, pre-Argon2 IP and HMAC-derived
+credential limiter decisions, and CSRF for logout. The HMAC key is only an
+injected interface in fictional tests; provisioning a production secret and
+shared limiter still needs approval. Authenticated session recovery and logout
+remain available during limiter exhaustion so a reloaded browser can obtain
+its CSRF token and revoke its cookie. The session lookup is deliberately not
+rate-limited here; trusted ingress must bound abusive unauthenticated traffic.
+The login IP bucket currently sees the socket peer, which may be a shared
+reverse proxy; deployment must define a trusted client-address policy before
+mounting. The login token goes only into a Secure HttpOnly cookie, never the
+JSON response. Fictional HTTP+SQLite tests pass, but there is no public signup
+or email-activation route. Loopback HTTP tests do not prove production browser
+cookie behavior over the eventual HTTPS deployment.
+The trusted-local pilot uses the same cookie name; never mount both auth
+stacks on one origin without an explicit session-separation design.
 SQL cannot validate the signature: the unmounted candidate service now drafts
 verification of the enrolled key, session, device, nonce and configured
 deployment audience, followed by consume-and-bind in one write transaction.

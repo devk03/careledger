@@ -3,6 +3,7 @@ import type { Request } from "express";
 import { describe, expect, it } from "vitest";
 
 import {
+  cookieSessionTokenSha256,
   cookieAuthenticator,
   issueCsrfToken,
   issueSessionToken,
@@ -63,6 +64,10 @@ describe("TypeScript cookie-session boundary", () => {
       `${SESSION_COOKIE_NAME}=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Strict`,
     );
     expect(sessionSetCookie(token)).not.toContain("Domain=");
+    expect(cookieSessionTokenSha256(request({ cookie })))
+      .toBe(sessionTokenSha256(token));
+    expect(cookieSessionTokenSha256(request({ cookie: `${cookie}; ${cookie}` })))
+      .toBeNull();
   });
 
   it("derives identity only from the stored active session and rechecks revocation", async () => {

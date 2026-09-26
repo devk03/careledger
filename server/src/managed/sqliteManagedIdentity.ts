@@ -55,7 +55,7 @@ export class SqliteManagedIdentityCandidate {
   async registerPendingOwner(input: { email: string; password: string }):
     Promise<{ accepted: true }> {
     try {
-      const email = normalizeEmail(input.email);
+      const email = normalizeManagedEmail(input.email);
       if (!validPassword(input.password)) throw new ManagedIdentityDenied();
       // Hash on both existing and new-email paths to reduce enumeration timing.
       const passwordHash = await this.passwordOperation(() =>
@@ -88,7 +88,7 @@ export class SqliteManagedIdentityCandidate {
   async login(input: { email: string; password: string;
     householdId: string }): Promise<ManagedIssuedLogin> {
     try {
-      const email = normalizeEmail(input.email);
+      const email = normalizeManagedEmail(input.email);
       if (!validPassword(input.password) || !ID.test(input.householdId))
         throw new ManagedIdentityDenied();
       assertManagedSchema(this.db);
@@ -219,7 +219,8 @@ export class SqliteManagedIdentityCandidate {
   }
 }
 
-function normalizeEmail(value: string): string {
+/** Canonical account key. Email delivery must use the same normalization. */
+export function normalizeManagedEmail(value: string): string {
   if (typeof value !== "string" || value.length > 254) throw new ManagedIdentityDenied();
   const email = value.trim().normalize("NFC");
   const at = email.lastIndexOf("@");
