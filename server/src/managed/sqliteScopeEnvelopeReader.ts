@@ -289,13 +289,23 @@ function signedAction(db: Database.Database, row: BaseEnvelopeDbRow): {
   issuerPublicKey: Buffer;
   previous: string | null;
 } {
-  const stored = db.prepare<[string, string, number], ActionDbRow>(
+  const stored = db.prepare<[string, string, number, string], ActionDbRow>(
     "SELECT a.*, issuer.signing_public_key AS issuer_public_key " +
     "FROM managed_signed_actions a " +
+    "JOIN managed_sessions issuer_session " +
+    "ON issuer_session.household_id = a.household_id " +
+    "JOIN managed_session_device_bindings binding " +
+    "ON binding.household_id = issuer_session.household_id " +
+    "AND binding.account_id = issuer_session.account_id " +
+    "AND binding.session_id = issuer_session.id " +
+    "AND binding.device_id = a.device_id " +
     "JOIN managed_devices issuer ON issuer.household_id = a.household_id " +
-    "AND issuer.id = a.device_id " +
-    "WHERE a.household_id = ? AND a.device_id = ? AND a.counter = ?",
-  ).get(row.household_id, row.issuer_device_id, row.issuer_counter);
+    "AND issuer.account_id = issuer_session.account_id " +
+    "AND issuer.id = binding.device_id " +
+    "WHERE a.household_id = ? AND a.device_id = ? AND a.counter = ? " +
+    "AND issuer_session.id = ?",
+  ).get(row.household_id, row.issuer_device_id, row.issuer_counter,
+    row.session_id);
   if (!stored) throw new ManagedScopeEnvelopeReadDenied();
   const counter = safeBigint(stored.counter);
   const prior = counter === 1n ? null : db.prepare<[

@@ -11,7 +11,8 @@ const BYTE_TAG = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag)?.get;
 
 type IssuerRow = { householdId: string; sessionId: string;
-  csrfSecret: Buffer; signingPublicKey: Buffer };
+  authenticatedDeviceId: string; csrfSecret: Buffer;
+  signingPublicKey: Buffer };
 type ScopeRow = { recipientPublicKey: Buffer; keyCommitment: Buffer;
   activeKeyHead: Buffer; grantHead: Buffer };
 type PriorRow = { counter: number; actionSha256: Buffer };
@@ -24,7 +25,7 @@ export class ManagedScopeEnvelopeIssueDenied extends Error {
 }
 
 /**
- * Unmounted managed-v8 writer. Pass only an already opened private managed SQLite
+ * Unmounted managed-v10 writer. Pass only an already opened private managed SQLite
  * connection. This does not open/create databases, run migrations, expose a
  * route, prove recipient HPKE decryptability, or authorize later reads.
  * A mounted caller must authenticate the request and bound its size before
@@ -55,14 +56,18 @@ export function issueScopeEnvelopeV2(db: Database.Database, input: {
       assertManagedSchema(db);
       const issuer = db.prepare<[Buffer, string, string], IssuerRow>(
         "SELECT s.household_id AS householdId, s.id AS sessionId, " +
+        "binding.device_id AS authenticatedDeviceId, " +
         "s.csrf_secret AS csrfSecret, d.signing_public_key AS signingPublicKey " +
         "FROM managed_sessions s " +
         "JOIN managed_accounts a ON a.id = s.account_id " +
         "JOIN managed_memberships m ON m.household_id = s.household_id " +
         "AND m.account_id = s.account_id " +
         "JOIN managed_families f ON f.id = s.household_id " +
+        "JOIN managed_session_device_bindings binding " +
+        "ON binding.household_id = s.household_id " +
+        "AND binding.account_id = s.account_id AND binding.session_id = s.id " +
         "JOIN managed_devices d ON d.household_id = s.household_id " +
-        "AND d.account_id = s.account_id " +
+        "AND d.account_id = s.account_id AND d.id = binding.device_id " +
         "WHERE s.token_sha256 = ? AND s.id = ? AND d.id = ? " +
         "AND s.revoked_at IS NULL AND s.expires_at > unixepoch('now') " +
         "AND s.account_auth_version = a.auth_version " +
@@ -138,7 +143,7 @@ export function issueScopeEnvelopeV2(db: Database.Database, input: {
         currentGrantHeadSha256: scope.grantHead.toString("hex"),
         expectedPreviousActionSha256: expectedPrevious,
         authenticatedSessionId: issuer.sessionId,
-        authenticatedIssuerDeviceId: row.issuerDeviceId });
+        authenticatedIssuerDeviceId: issuer.authenticatedDeviceId });
       db.prepare(
         "INSERT INTO managed_signed_actions " +
         "(household_id, device_id, counter, action_kind, payload_sha256, " +

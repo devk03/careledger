@@ -27,6 +27,7 @@ type SessionRow = {
   householdId: string;
   accountId: string;
   sessionId: string;
+  boundDeviceId: string;
   csrfSecret: Buffer;
 };
 type IntentRow = {
@@ -208,7 +209,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       if (!verifyCsrfToken(input.csrfToken, session.sessionId, session.csrfSecret))
         throw new ManagedUploadReceiptCsrfError();
       if (!HEX_32.test(input.intentId) || !HEX_32.test(input.blobId)) return null;
-      const row = this.db.prepare<[string, string, string, string],
+      const row = this.db.prepare<[string, string, string, string, string],
         { wireSha256: Buffer | null; wireBytes: number | null }>(
         "SELECT b.wire_sha256 AS wireSha256, b.wire_bytes AS wireBytes " +
         "FROM managed_upload_intents i " +
@@ -224,10 +225,12 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
         "LEFT JOIN managed_committed_blobs b ON b.household_id = i.household_id " +
         "AND b.intent_id = i.id AND b.blob_id = i.blob_id " +
         "WHERE i.household_id = ? AND i.id = ? AND i.blob_id = ? " +
+        "AND i.writer_device_id = ? " +
         "AND d.account_id = ? AND d.state = 'active' " +
         "AND (g.capability_mask & 2) = 2 AND sc.state = 'active' " +
         "AND p.state = 'active'",
-      ).get(session.householdId, input.intentId, input.blobId, session.accountId);
+      ).get(session.householdId, input.intentId, input.blobId,
+        session.boundDeviceId, session.accountId);
       if (!row) return null;
       if (row.wireSha256 === null) return { status: "unconfirmed" };
       if (!Buffer.isBuffer(row.wireSha256) || row.wireSha256.length !== 32 ||
@@ -260,17 +263,26 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
     if (!HEX_64.test(tokenSha256)) return null;
     const row = this.db.prepare<[Buffer], SessionRow>(
       "SELECT s.household_id AS householdId, s.account_id AS accountId, " +
-      "s.id AS sessionId, s.csrf_secret AS csrfSecret " +
+      "s.id AS sessionId, binding.device_id AS boundDeviceId, " +
+      "s.csrf_secret AS csrfSecret " +
       "FROM managed_sessions s " +
       "JOIN managed_accounts a ON a.id = s.account_id " +
       "JOIN managed_memberships m ON m.household_id = s.household_id " +
       "AND m.account_id = s.account_id " +
       "JOIN managed_families f ON f.id = s.household_id " +
+      "JOIN managed_session_device_bindings binding " +
+      "ON binding.household_id = s.household_id " +
+      "AND binding.account_id = s.account_id AND binding.session_id = s.id " +
+      "JOIN managed_devices bound_device " +
+      "ON bound_device.household_id = binding.household_id " +
+      "AND bound_device.account_id = binding.account_id " +
+      "AND bound_device.id = binding.device_id " +
       "WHERE s.token_sha256 = ? AND s.revoked_at IS NULL " +
       "AND s.expires_at > unixepoch('now') " +
       "AND s.account_auth_version = a.auth_version " +
       "AND s.membership_auth_version = m.auth_version " +
-      "AND a.state = 'active' AND m.state = 'active' AND f.state = 'active'",
+      "AND a.state = 'active' AND m.state = 'active' " +
+      "AND f.state = 'active' AND bound_device.state = 'active'",
     ).get(Buffer.from(tokenSha256, "hex"));
     if (!row || !Buffer.isBuffer(row.csrfSecret) || row.csrfSecret.length !== 32)
       return null;
@@ -278,7 +290,9 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
   }
 
   private currentIntent(session: SessionRow, intentId: string): IntentRow | null {
-    const row = this.db.prepare<[string, string, string, string], IntentRow>(
+    const row = this.db.prepare<[
+      string, string, string, string, string
+    ], IntentRow>(
       "SELECT i.household_id AS householdId, d.account_id AS accountId, " +
       "i.session_id AS sessionId, i.id AS intentId, i.blob_id AS blobId, " +
       "i.profile_id AS profileId, i.scope_id AS scopeId, i.key_id AS keyId, " +
@@ -303,13 +317,15 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       "AND current_key.key_id = i.key_id " +
       "AND current_key.epoch = i.epoch " +
       "WHERE i.household_id = ? AND i.session_id = ? AND i.id = ? " +
+      "AND i.writer_device_id = ? " +
       "AND d.account_id = ? AND d.state = 'active' " +
       "AND (g.capability_mask & 2) = 2 AND sc.state = 'active' " +
       "AND sc.kind = 'day' AND p.state = 'active' " +
       "AND k.profile_id = i.profile_id AND k.scope_id = i.scope_id " +
       "AND k.purpose = 'day' AND i.purpose = 'day' AND i.wire_version = 2 " +
       "AND i.consumed_at IS NULL AND i.expires_at > unixepoch('now')",
-    ).get(session.householdId, session.sessionId, intentId, session.accountId);
+    ).get(session.householdId, session.sessionId, intentId,
+      session.boundDeviceId, session.accountId);
     return row ?? null;
   }
 }

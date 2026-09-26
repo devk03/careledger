@@ -30,7 +30,7 @@ export class ManagedSessionDeviceBindingDenied extends Error {
 }
 
 /**
- * UNMOUNTED managed-v9 candidate. The caller supplies an already opened,
+ * UNMOUNTED managed-v10 candidate. The caller supplies an already opened,
  * private managed connection and a deployment-configured origin, never a
  * request Host/Origin value. tokenSha256 must come from the HttpOnly cookie;
  * the mounted route must also enforce a trusted Origin/CORS policy and rate

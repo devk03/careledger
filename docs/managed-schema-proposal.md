@@ -224,5 +224,19 @@ The envelope reader has been narrowed to the bound device, but remains
 unmounted. A stolen cookie after binding can still expose
 ciphertext and access metadata; per-request proof remains a separate launch
 decision. Every future mounted writer and upload-intent path must require the
-same bound device; guarding this reader alone is insufficient. No managed
-draft has been applied.
+same bound device; guarding this reader alone is insufficient. Candidate
+ordinary/historical envelope writers and the day-upload ledger now require
+the bound device in their authorization queries. Remaining managed paths and
+insert triggers do not yet enforce this invariant. No managed draft has been
+applied.
+
+Draft `0010` adds insert-time session-bound issuer checks for both v2 envelope
+tables and the day upload intent, lease and committed blob. It is defense in
+depth alongside the unmounted TypeScript writer and ledger checks, not proof
+that any row is valid ciphertext or that every managed path is session-bound.
+Non-day/draft, active-key, day-revision and grant paths remain to be reviewed.
+Like `0009`, `0010` has not been applied to any database.
+This lineage is new-only: the runner creates a fresh empty managed database and
+does not migrate a database that already contains pre-binding v2 envelopes.
+Such a database must be rejected, not silently made unreadable or backfilled
+with invented device proof.
