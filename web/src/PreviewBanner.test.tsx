@@ -11,10 +11,22 @@ it("shows the fictional-only warning in staging", async () => {
   expect(screen.getByRole("link", {name: "Read the privacy model"})).toHaveAttribute("href", "/privacy");
 });
 
-it("hides the warning only after an explicit non-preview response", async () => {
+it("keeps the server-readable disclosure outside restricted preview", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ok: true, json: async () => ({restricted_preview: false})}));
   render(<PreviewBanner />);
-  await waitFor(() => expect(screen.queryByLabelText("Preview safety notice")).not.toBeInTheDocument());
+  const notice = await screen.findByLabelText("Record privacy notice");
+  expect(notice).toHaveTextContent("records are server-readable");
+  expect(notice).toHaveTextContent("not end-to-end encrypted");
+  expect(notice).not.toHaveTextContent("fictional records only");
+  expect(screen.getByRole("link", {name: "Read the privacy model"}))
+    .toHaveAttribute("href", "/privacy");
+});
+
+it("keeps the disclosure beside non-preview file intake", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ok: true, json: async () => ({restricted_preview: false})}));
+  render(<PreviewBanner placement="upload" />);
+  await waitFor(() => expect(screen.getByLabelText("Upload privacy notice"))
+    .toHaveTextContent("server you trust"));
 });
 
 it("keeps the warning if runtime status is unavailable", async () => {

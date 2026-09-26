@@ -17,10 +17,15 @@ export function PreviewBanner({ placement = "site" }: { placement?: "site" | "up
     return () => controller.abort();
   }, []);
 
-  if (!restrictedPreview) return null;
   return <aside className={`preview-safety-banner${placement === "upload" ? " preview-safety-banner-inline" : ""}`}
-    aria-label={placement === "upload" ? "Preview upload warning" : "Preview safety notice"}>
-    <span>Restricted community preview · fictional records only.</span>
-    <span>This installation is not end-to-end encrypted. <a href="/privacy">Read the privacy model</a>.</span>
+    aria-label={restrictedPreview
+      ? (placement === "upload" ? "Preview upload warning" : "Preview safety notice")
+      : (placement === "upload" ? "Upload privacy notice" : "Record privacy notice")}>
+    <span>{restrictedPreview
+      ? "Restricted community preview · fictional records only."
+      : "Community edition · records are server-readable."}</span>
+    <span>{restrictedPreview
+      ? "This installation is not end-to-end encrypted."
+      : "This is not end-to-end encrypted. Add personal records only to a server you trust."} <a href="/privacy">Read the privacy model</a>.</span>
   </aside>;
 }

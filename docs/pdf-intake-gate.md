@@ -1,6 +1,6 @@
 # PDF intake gate
 
-Status: **closed** as of 2026-09-25. This is an engineering decision record, not permission to upload medical PDFs. The isolated parser preview returns `UNSUPPORTED` for every PDF. The TypeScript app has no PDF upload route connected to that worker, and no PDF bytes from a real case may be used in tests.
+Status: **closed for the isolated TypeScript parser** as of 2026-09-25. This is an engineering decision record, not permission to upload medical PDFs to that parser. Its preview returns `UNSUPPORTED` for every PDF, and the TypeScript app has no PDF upload route connected to that worker. The hosted family-controlled E2EE path has a separate unsatisfied gate: its server cannot decrypt files to inspect them, and no approved on-device PDF inspector exists. No PDF bytes from a real case may be used in tests. The separate, server-readable Python community edition has its own PDF intake and inspector; its ability to accept a PDF does not satisfy either missing gate.
 
 ## What a `safe` verdict would have to mean
 
