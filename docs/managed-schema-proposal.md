@@ -201,3 +201,15 @@ The maintainer approved **creation** of the necessary migration files on
 and is not yet approved. This does not cover an existing database, real case
 data, production deployment, billing, a new external witness service, or a
 pull-request merge.
+
+Draft `0009` adds a one-use, short-lived Ed25519 challenge and immutable
+one-device-per-session binding. Its composite foreign keys prevent a session
+from being bound to a device owned by another account in the same household.
+SQL cannot validate the signature: a trusted server path must verify the
+enrolled key, session, device, nonce and deployment audience, then consume
+and bind atomically. The envelope reader has been narrowed to the bound
+device, but remains unmounted. A stolen cookie after binding can still expose
+ciphertext and access metadata; per-request proof remains a separate launch
+decision. Every future mounted writer and upload-intent path must require the
+same bound device; guarding this reader alone is insufficient. No managed
+draft has been applied.

@@ -12,7 +12,8 @@ const ID = /^[0-9a-f]{32}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 
 type AuthRow = { householdId: string; purpose: string;
-  recipientPublicKey: Buffer; currentGrantHead: Buffer };
+  recipientDeviceId: string; recipientPublicKey: Buffer;
+  currentGrantHead: Buffer };
 type BaseEnvelopeDbRow = {
   household_id: string; profile_id: string; scope_id: string;
   key_id: string; epoch: number; purpose: string;
@@ -59,10 +60,10 @@ export class ManagedScopeEnvelopeReadDenied extends Error {
 /**
  * UNMOUNTED ciphertext-only candidate read. tokenSha256 must be derived by
  * trusted server code from the HttpOnly session cookie, never from a caller
- * field. The active account, selected
- * device and grant are reloaded on EVERY call, but a session is NOT bound to
- * a device: caller-supplied recipientDeviceId is not proof of possession.
- * Do not mount until a session-bound device proof is enforced. Historical
+ * field. The selected device comes from an immutable session binding, never
+ * a caller field. This is still UNMOUNTED until the binding service verifies
+ * a fresh enrolled-device signature and the managed schema is tested.
+ * The active account, bound device and grant are reloaded on EVERY call. Historical
  * issuers need not remain active; a revoked selected device is denied.
  * Previously downloaded keys cannot be revoked. A route also needs trusted
  * Origin/CORS, no-store responses and a client-side latest-head witness;
@@ -70,7 +71,6 @@ export class ManagedScopeEnvelopeReadDenied extends Error {
  */
 export function readAccountScopedScopeEnvelopeCandidateV2(db: Database.Database, input: {
   tokenSha256: string;
-  recipientDeviceId: string;
   careProfileId: string;
   opaqueScopeId: string;
   keyId: string;
@@ -78,8 +78,7 @@ export function readAccountScopedScopeEnvelopeCandidateV2(db: Database.Database,
 }): VerifiedManagedEnvelopeRead {
   try {
     if (typeof input.tokenSha256 !== "string" || !SHA256.test(input.tokenSha256) ||
-      ![input.recipientDeviceId, input.careProfileId,
-        input.opaqueScopeId, input.keyId]
+      ![input.careProfileId, input.opaqueScopeId, input.keyId]
         .every((value) => typeof value === "string" && ID.test(value)) ||
       !Number.isSafeInteger(input.keyEpoch) || input.keyEpoch < 1 ||
       input.keyEpoch > 0xffffffff)
@@ -87,10 +86,9 @@ export function readAccountScopedScopeEnvelopeCandidateV2(db: Database.Database,
     const token = Buffer.from(input.tokenSha256, "hex");
     const read = db.transaction((): VerifiedManagedEnvelopeRead => {
       assertManagedSchema(db);
-      const auth = db.prepare<[
-        Buffer, string, string, string
-      ], AuthRow>(
+      const auth = db.prepare<[Buffer, string, string], AuthRow>(
         "SELECT s.household_id AS householdId, sc.kind AS purpose, " +
+        "d.id AS recipientDeviceId, " +
         "d.encryption_public_key AS recipientPublicKey, " +
         "g.head_sha256 AS currentGrantHead " +
         "FROM managed_sessions s " +
@@ -98,8 +96,12 @@ export function readAccountScopedScopeEnvelopeCandidateV2(db: Database.Database,
         "JOIN managed_memberships m ON m.household_id = s.household_id " +
         "AND m.account_id = s.account_id " +
         "JOIN managed_families f ON f.id = s.household_id " +
+        "JOIN managed_session_device_bindings binding " +
+        "ON binding.household_id = s.household_id " +
+        "AND binding.account_id = s.account_id " +
+        "AND binding.session_id = s.id " +
         "JOIN managed_devices d ON d.household_id = s.household_id " +
-        "AND d.account_id = s.account_id " +
+        "AND d.account_id = s.account_id AND d.id = binding.device_id " +
         "JOIN managed_profiles p ON p.household_id = s.household_id " +
         "JOIN managed_scopes sc ON sc.household_id = p.household_id " +
         "AND sc.profile_id = p.id " +
@@ -126,8 +128,7 @@ export function readAccountScopedScopeEnvelopeCandidateV2(db: Database.Database,
         "AND current_grant.subject_device_id = g.subject_device_id " +
         "AND current_grant.sequence = g.sequence " +
         "AND current_grant.event_sha256 = g.head_sha256 " +
-        "WHERE s.token_sha256 = ? AND d.id = ? " +
-        "AND p.id = ? AND sc.id = ? " +
+        "WHERE s.token_sha256 = ? AND p.id = ? AND sc.id = ? " +
         "AND s.revoked_at IS NULL AND s.expires_at > unixepoch('now') " +
         "AND s.account_auth_version = a.auth_version " +
         "AND s.membership_auth_version = m.auth_version " +
@@ -137,11 +138,10 @@ export function readAccountScopedScopeEnvelopeCandidateV2(db: Database.Database,
         "AND g.capability_mask = current_grant.capability_mask " +
         "AND (g.capability_mask & 1) = 1 " +
         "AND (current_grant.capability_mask & 1) = 1",
-      ).get(token, input.recipientDeviceId,
-        input.careProfileId, input.opaqueScopeId);
+      ).get(token, input.careProfileId, input.opaqueScopeId);
       if (!auth) throw new ManagedScopeEnvelopeReadDenied();
       const tuple = [auth.householdId, input.keyId,
-        input.keyEpoch, input.recipientDeviceId] as const;
+        input.keyEpoch, auth.recipientDeviceId] as const;
       // Corrupt/imported dual rows fail closed. Never fall back after an
       // invalid v2 row, and never query legacy v1 material.
       const ordinary = db.prepare<[
@@ -268,7 +268,7 @@ function baseRow(raw: BaseEnvelopeDbRow, auth: AuthRow,
     raw.scope_id !== request.opaqueScopeId ||
     raw.key_id !== request.keyId || raw.epoch !== request.keyEpoch ||
     raw.purpose !== auth.purpose ||
-    raw.recipient_device_id !== request.recipientDeviceId)
+    raw.recipient_device_id !== auth.recipientDeviceId)
     throw new ManagedScopeEnvelopeReadDenied();
   return { householdId: raw.household_id, careProfileId: raw.profile_id,
     opaqueScopeId: raw.scope_id, keyId: raw.key_id,
