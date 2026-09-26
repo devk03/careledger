@@ -1,9 +1,11 @@
-import { decodeManagedVaultBlobV2 } from "@adeno/contracts";
+import { decodeManagedVaultBlobV2, encodeManagedVaultBlobV2 } from "@adeno/contracts";
 
-import { decryptManagedVaultBlobV2, ManagedVaultIntegrityV2Error,
+import { decryptManagedVaultBlobV2, encryptManagedVaultBlobV2,
+  ManagedVaultIntegrityV2Error,
   type ManagedVaultScopeV2 } from "../crypto/managedVaultV2";
 import { generateVaultKeyMaterial, importVaultKey } from "../crypto/vault";
-import { InvalidLocalDraft, prepareLocalEncryptedDraft,
+import { InvalidLocalDraft, MAX_LOCAL_DRAFT_BYTES,
+  openLocalEncryptedDraft, prepareLocalEncryptedDraft,
   type LocalDraftIdentity } from "./intakeDraft";
 
 const identity: LocalDraftIdentity = {
@@ -38,6 +40,88 @@ function scope(objectId: string): ManagedVaultScopeV2 {
 async function open(key: CryptoKey, wire: Uint8Array, objectId: string) {
   return decryptManagedVaultBlobV2(key, decodeManagedVaultBlobV2(wire), scope(objectId));
 }
+
+async function rewriteMetadata(key: CryptoKey, draft: Awaited<ReturnType<
+  typeof prepareLocalEncryptedDraft>>, change: Record<string, unknown>) {
+  const metadata = JSON.parse(new TextDecoder().decode(await open(key,
+    draft.metadataWire, draft.metadataObjectId))) as Record<string, unknown>;
+  const prior = decodeManagedVaultBlobV2(draft.metadataWire);
+  const next = await encryptManagedVaultBlobV2(key,
+    new TextEncoder().encode(JSON.stringify({ ...metadata, ...change })),
+    scope(draft.metadataObjectId), prior.blobId);
+  return { ...draft, metadataWire: encodeManagedVaultBlobV2(next) };
+}
+
+it("opens only a matching fictional file pair on the family device", async () => {
+  const key = await draftKey();
+  const draft = await prepareLocalEncryptedDraft({ kind: "file", key, identity,
+    reservedBlobIds, file: localFile("fictional-visit.pdf", fictionalPdf),
+    clientSelectedAt: selectedAt, candidateCareDays: [careDay] });
+  const opened = await openLocalEncryptedDraft({ identity, key, draft });
+  expect(opened).toMatchObject({ kind: "file", opaqueDraftId: identity.opaqueDraftId,
+    originalName: "fictional-visit.pdf", mediaType: "application/pdf",
+    clientSelectedAt: selectedAt, candidateCareDays: [careDay],
+    byteSize: fictionalPdf.byteLength });
+  expect(opened).not.toHaveProperty("uploadedAt");
+  if (opened.kind !== "file") throw new Error("Expected fictional file");
+  expect(Array.from(opened.content)).toEqual(Array.from(fictionalPdf));
+  opened.content.fill(0);
+});
+
+it("opens an undated fictional note only as a pending local draft", async () => {
+  const key = await draftKey();
+  const body = "Fictional family observation, not a clinical conclusion.";
+  const draft = await prepareLocalEncryptedDraft({ kind: "family_note", key,
+    identity, reservedBlobIds, body, authorLabel: "Fictional adult",
+    clientSelectedAt: selectedAt, candidateCareDays: [] });
+  expect(await openLocalEncryptedDraft({ identity, key, draft }))
+    .toMatchObject({ kind: "family_note", body,
+      authorLabel: "Fictional adult", candidateCareDays: [],
+      clientSelectedAt: selectedAt });
+});
+
+it("rejects swapped or tampered wires, wrong family scope and false metadata", async () => {
+  const key = await draftKey();
+  const draft = await prepareLocalEncryptedDraft({ kind: "file", key, identity,
+    reservedBlobIds, file: localFile("fictional-visit.pdf", fictionalPdf),
+    clientSelectedAt: selectedAt, candidateCareDays: [careDay] });
+  const changed = draft.metadataWire.slice();
+  changed[changed.length - 1] = changed[changed.length - 1]! ^ 1;
+  for (const badDraft of [
+    { ...draft, metadataWire: changed },
+    { ...draft, contentWire: draft.metadataWire,
+      metadataWire: draft.contentWire },
+    { ...draft, contentBlobId: "ee".repeat(16) },
+    await rewriteMetadata(key, draft, { sourceSha256: "00".repeat(32) }),
+    await rewriteMetadata(key, draft, { byteSize: fictionalPdf.byteLength + 1 }),
+    await rewriteMetadata(key, draft, { mediaType: "image/png" }),
+    await rewriteMetadata(key, draft, { candidateCareDays: ["2026-02-30"] }),
+    await rewriteMetadata(key, draft, { uploadedAt: selectedAt }),
+  ]) await expect(openLocalEncryptedDraft({ identity, key,
+    draft: badDraft })).rejects.toBeInstanceOf(InvalidLocalDraft);
+  await expect(openLocalEncryptedDraft({ identity: { ...identity,
+    householdId: "aa".repeat(16) }, key, draft }))
+    .rejects.toBeInstanceOf(InvalidLocalDraft);
+  await expect(openLocalEncryptedDraft({ identity, key: await draftKey(),
+    draft })).rejects.toBeInstanceOf(InvalidLocalDraft);
+});
+
+it("snapshots encrypted wires before asynchronous decryption", async () => {
+  const key = await draftKey();
+  const draft = await prepareLocalEncryptedDraft({ kind: "family_note", key,
+    identity, reservedBlobIds, body: "Fictional original note",
+    authorLabel: "Fictional adult", clientSelectedAt: selectedAt,
+    candidateCareDays: [careDay] });
+  const mutableIdentity = { ...identity };
+  const pending = openLocalEncryptedDraft({ identity: mutableIdentity,
+    key, draft });
+  mutableIdentity.opaqueDraftId = "aa".repeat(16);
+  draft.contentWire.fill(0);
+  draft.metadataWire.fill(0);
+  expect(await pending).toMatchObject({ kind: "family_note",
+    body: "Fictional original note", candidateCareDays: [careDay],
+    opaqueDraftId: identity.opaqueDraftId });
+});
 
 it("protects two fictional files for one candidate care day without using selection time as care time", async () => {
   const key = await draftKey();
@@ -155,11 +239,18 @@ it("rejects wrong draft scope, malformed dates, spoofed file bytes and oversize 
   let read = false;
   await expect(prepareLocalEncryptedDraft({ kind: "file", key, identity,
     reservedBlobIds,
-    file: { name: "too-big.pdf", size: 100 * 1024 * 1024 + 1,
+    file: { name: "too-big.pdf", size: MAX_LOCAL_DRAFT_BYTES + 1,
       arrayBuffer: async () => { read = true; return new ArrayBuffer(0); } },
     clientSelectedAt: selectedAt, candidateCareDays: [] }))
     .rejects.toBeInstanceOf(InvalidLocalDraft);
   expect(read).toBe(false);
+  const validDraft = await prepareLocalEncryptedDraft({ kind: "file", key,
+    identity, reservedBlobIds, file: localFile("fictional.pdf", fictionalPdf),
+    clientSelectedAt: selectedAt, candidateCareDays: [] });
+  await expect(openLocalEncryptedDraft({ identity, key, draft: {
+    ...validDraft,
+    contentWire: new Uint8Array(MAX_LOCAL_DRAFT_BYTES + 33 + 16 * 32 + 1),
+  } })).rejects.toBeInstanceOf(InvalidLocalDraft);
   const malformed = { content: 42, metadata: reservedBlobIds.metadata } as unknown as
     { content: string; metadata: string };
   await expect(prepareLocalEncryptedDraft({ kind: "file", key, identity,
