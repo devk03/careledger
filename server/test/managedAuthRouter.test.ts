@@ -38,13 +38,18 @@ async function endpoint(options?: { limit?: "allow" | "deny" | "fail" |
       rateCalls.push(input);
       if (options?.limit === "fail" ||
         (options?.limit === "credential-fail" &&
-          input.action === "login-credential"))
+          input.action.endsWith("-credential")))
         throw new Error("private limiter failure");
       return options?.limit !== "deny" &&
         !(options?.limit === "credential-deny" &&
-          input.action === "login-credential");
+          input.action.endsWith("-credential"));
     },
     identity: {
+      async registerPendingOwner(input) {
+        calls.push({ action: "signup", input });
+        if (options?.service === "deny") throw new Error("private account state");
+        return { accepted: true };
+      },
       async login(input) {
         calls.push({ action: "login", input });
         if (options?.service === "deny") throw new Error("private account state");
@@ -73,14 +78,84 @@ async function endpoint(options?: { limit?: "allow" | "deny" | "fail" |
     "content-type": "application/json" };
   const loginBody = { email: "fictional@example.invalid",
     password: "fictional-password-phrase", householdId: familyId };
+  const signupBody = { email: "fictional@example.invalid",
+    password: "fictional-password-phrase" };
   async function post(path: string, body: unknown,
     overrides: Record<string, string> = {}) {
     return fetch(`${base}/${path}`, { method: "POST",
       headers: { ...headers, ...overrides },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   }
-  return { base, headers, post, calls, rateCalls, loginBody };
+  return { base, headers, post, calls, rateCalls, loginBody, signupBody };
 }
+
+it("acknowledges pending signup without a cookie, family ID, or email enumeration", async () => {
+  const fixture = await endpoint();
+  const first = await fixture.post("signup", fixture.signupBody);
+  const duplicate = await fixture.post("signup", {
+    ...fixture.signupBody, email: "FICTIONAL@EXAMPLE.INVALID",
+  });
+  for (const response of [first, duplicate]) {
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ accepted: true });
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  }
+  expect(fixture.calls.map((call) => call.action)).toEqual([
+    "signup", "signup",
+  ]);
+  const buckets = fixture.rateCalls.filter((call): call is {
+    action: string; credentialBucket: string } =>
+    typeof call === "object" && call !== null &&
+    "action" in call && call.action === "signup-credential" &&
+    "credentialBucket" in call &&
+    typeof call.credentialBucket === "string");
+  expect(buckets).toHaveLength(2);
+  expect(buckets[0]?.credentialBucket).toMatch(/^[0-9a-f]{64}$/u);
+  expect(buckets[0]?.credentialBucket).toBe(buckets[1]?.credentialBucket);
+  expect(JSON.stringify(fixture.rateCalls)).not.toContain(fixture.signupBody.email);
+});
+
+it("rejects unsafe signup requests before Argon2 and hides service errors", async () => {
+  const fixture = await endpoint();
+  for (const overrides of [
+    { origin: "https://attacker.example" },
+    { "sec-fetch-site": "cross-site" },
+  ]) {
+    expect((await fixture.post("signup", fixture.signupBody, overrides)).status)
+      .toBe(403);
+  }
+  for (const body of [null, [], { ...fixture.signupBody, extra: "x" },
+    { ...fixture.signupBody, email: "invalid" },
+    { ...fixture.signupBody, password: "short" }]) {
+    expect((await fixture.post("signup", body)).status).toBe(400);
+  }
+  expect((await fetch(`${fixture.base}/signup`, { method: "POST",
+    headers: fixture.headers, body: "{bad" })).status).toBe(400);
+  expect((await fixture.post("signup", { ...fixture.signupBody,
+    password: "x".repeat(3000) })).status).toBe(413);
+  expect((await fixture.post("signup", fixture.signupBody,
+    { "content-encoding": "gzip" })).status).toBe(400);
+  expect((await fetch(`${fixture.base}/signup`, {
+    method: "OPTIONS", headers: fixture.headers })).status).toBe(405);
+  expect(fixture.calls).toHaveLength(0);
+  const preParsed = await endpoint({ preParsed: true });
+  expect((await preParsed.post("signup", preParsed.signupBody)).status).toBe(400);
+  expect(preParsed.calls).toHaveLength(0);
+  for (const [limit, status] of [["deny", 429], ["fail", 503],
+    ["credential-deny", 429], ["credential-fail", 503]] as const) {
+    const rateLimited = await endpoint({ limit });
+    expect((await rateLimited.post("signup", rateLimited.signupBody)).status)
+      .toBe(status);
+    expect(rateLimited.calls).toHaveLength(0);
+  }
+  const denied = await endpoint({ service: "deny" });
+  const response = await denied.post("signup", denied.signupBody);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: "REQUEST_DENIED" });
+  expect(response.headers.get("set-cookie")).toBeNull();
+});
 
 it("sets only a secure cookie on verified login and reads a fresh session", async () => {
   const fixture = await endpoint();

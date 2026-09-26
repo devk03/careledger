@@ -555,21 +555,6 @@ try {
   const httpSession = addSession(beta, id("0"));
   const alphaHttpSession = addSession(alpha, id("1"));
   const httpEmail = "fictional-http-owner@example.invalid";
-  await identity.registerPendingOwner({ email: httpEmail,
-    password: registrationPassword });
-  const httpOwner = db.prepare("SELECT a.id AS accountId, " +
-    "m.household_id AS householdId FROM managed_accounts a " +
-    "JOIN managed_memberships m ON m.account_id=a.id " +
-    "WHERE a.login_email=?").get(httpEmail);
-  // Test-only direct SQL simulates an external verified-email ceremony.
-  db.prepare("UPDATE managed_accounts SET state='active', " +
-    "email_verified_at=?, auth_version=2 WHERE id=?")
-    .run(now, httpOwner.accountId);
-  db.prepare("UPDATE managed_memberships SET state='active', " +
-    "auth_version=2 WHERE household_id=? AND account_id=?")
-    .run(httpOwner.householdId, httpOwner.accountId);
-  db.prepare("UPDATE managed_families SET state='active' WHERE id=?")
-    .run(httpOwner.householdId);
   const app = express();
   let httpRouter;
   let authRouter;
@@ -598,6 +583,48 @@ try {
         cookie: `${SESSION_COOKIE_NAME}=${session.plaintext}`,
         "x-csrf-token": session.csrf, ...extraHeaders },
       body: JSON.stringify(body) });
+  const signupBody = { email: httpEmail, password: registrationPassword };
+  const httpSignup = async (body) => fetch(`${httpOrigin}/api/managed/auth/signup`, {
+    method: "POST", headers: { "content-type": "application/json",
+      origin: httpOrigin, "sec-fetch-site": "same-origin" },
+    body: JSON.stringify(body),
+  });
+  const signupResponse = await httpSignup(signupBody);
+  assert.equal(signupResponse.status, 202);
+  assert.deepEqual(await signupResponse.json(), { accepted: true });
+  assert.equal(signupResponse.headers.get("set-cookie"), null);
+  const httpOwner = db.prepare("SELECT a.id AS accountId, " +
+    "m.household_id AS householdId, a.state AS accountState, " +
+    "m.state AS memberState, f.state AS familyState " +
+    "FROM managed_accounts a " +
+    "JOIN managed_memberships m ON m.account_id=a.id " +
+    "JOIN managed_families f ON f.id=m.household_id " +
+    "WHERE a.login_email=?").get(httpEmail);
+  assert.deepEqual([httpOwner.accountState, httpOwner.memberState,
+    httpOwner.familyState], ["pending", "pending", "frozen"]);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_sessions " +
+    "WHERE account_id=?").get(httpOwner.accountId).n, 0);
+  await assert.rejects(identity.login({ email: httpEmail,
+    password: registrationPassword, householdId: httpOwner.householdId }),
+  (error) => error?.name === "ManagedIdentityDenied");
+  const repeatSignup = await httpSignup({ ...signupBody,
+    email: httpEmail.toUpperCase() });
+  assert.equal(repeatSignup.status, 202);
+  assert.deepEqual(await repeatSignup.json(), { accepted: true });
+  assert.equal(repeatSignup.headers.get("set-cookie"), null);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_accounts " +
+    "WHERE login_email=?").get(httpEmail).n, 1);
+  // Test-only direct SQL simulates a future one-use email verification
+  // ceremony; the v10 router must never expose this state transition.
+  const httpNow = Math.floor(Date.now() / 1000);
+  db.prepare("UPDATE managed_accounts SET state='active', " +
+    "email_verified_at=?, auth_version=2 WHERE id=?")
+    .run(httpNow, httpOwner.accountId);
+  db.prepare("UPDATE managed_memberships SET state='active', " +
+    "auth_version=2 WHERE household_id=? AND account_id=?")
+    .run(httpOwner.householdId, httpOwner.accountId);
+  db.prepare("UPDATE managed_families SET state='active' WHERE id=?")
+    .run(httpOwner.householdId);
   const httpLogin = await fetch(`${httpOrigin}/api/managed/auth/login`, {
     method: "POST", headers: { "content-type": "application/json",
       origin: httpOrigin, "sec-fetch-site": "same-origin" },

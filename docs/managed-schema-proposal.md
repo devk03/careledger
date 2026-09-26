@@ -231,15 +231,18 @@ and membership in the selected family; reads and logout recheck live state.
 The fictional test simulates email verification and family activation by
 direct SQL solely inside
 the rollback-only test transaction. There is no public email-token sender,
-one-use verification table, account recovery, managed auth route or deployed
+one-use verification table, account recovery, mounted managed auth route or deployed
 limiter. A new additive migration and separate application approval are needed
 for a complete public verification/recovery flow.
 Runtime managed current-session queries now require verified email, but v10 SQL
 still permits an active account with `email_verified_at` unset. That database
 guard and pending-signup expiry/cleanup belong in the next reviewed migration;
 neither is implied by the candidate service.
-The separate unmounted auth router exposes only login, session status and
-logout for already verified accounts. It requires a configured Origin,
+The separate unmounted auth router also accepts a pending signup request and
+returns only a generic acknowledgment without a cookie or family ID. Fictional
+HTTP+SQLite tests verify new and duplicate signup, frozen/pending state, and
+pre-verification login denial. It exposes login, session status and logout for
+already verified accounts. It requires a configured Origin,
 bounded JSON, cookie-derived session identity, pre-Argon2 IP and HMAC-derived
 credential limiter decisions, and CSRF for logout. The HMAC key is only an
 injected interface in fictional tests; provisioning a production secret and
@@ -250,8 +253,9 @@ rate-limited here; trusted ingress must bound abusive unauthenticated traffic.
 The login IP bucket currently sees the socket peer, which may be a shared
 reverse proxy; deployment must define a trusted client-address policy before
 mounting. The login token goes only into a Secure HttpOnly cookie, never the
-JSON response. Fictional HTTP+SQLite tests pass, but there is no public signup
-or email-activation route. Loopback HTTP tests do not prove production browser
+JSON response. Do not mount signup: v10 pending rows can reserve a unique email
+indefinitely and accumulate frozen families. There is no email sender, resend,
+expiry, or activation route. Loopback HTTP tests do not prove production browser
 cookie behavior over the eventual HTTPS deployment.
 The trusted-local pilot uses the same cookie name; never mount both auth
 stacks on one origin without an explicit session-separation design.
