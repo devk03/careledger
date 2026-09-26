@@ -7,6 +7,7 @@ export * from "./managedVaultWireV2.js";
 export * from "./indexHeadWire.js";
 export * from "./sessionDeviceBindingProofV1.js";
 export * from "./sessionDeviceBindingWireV1.js";
+export * from "./deviceEnrollmentProofV1.js";
 export type ISODate = string;
 
 export type SourceReference = {
