@@ -7,6 +7,9 @@ const OPAQUE_ID = /^[0-9a-f]{32}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const HEAD_HASH_DOMAIN = new TextEncoder().encode("adeno:index-head-hash:v1\0");
 const U64_MAX = (1n << 64n) - 1n;
+// The encrypted-index AES-GCM AAD encodes revision as uint32. A later wider
+// revision format needs an explicit protocol version/rotation, not wraparound.
+const MAX_ENCRYPTED_INDEX_SEQUENCE = 0xffffffffn;
 
 export type IndexViewIdentity = {
   householdId: string;
@@ -81,7 +84,8 @@ export async function signLocalIndexHead(input: {
     const publicRaw = new Uint8Array(await crypto.subtle.exportKey("raw", publicKey));
     if (publicRaw.byteLength !== 32) throw new IndexHeadIntegrityError();
     const sequence = previous ? previous.sequence + 1n : 1n;
-    if (sequence > U64_MAX) throw new IndexHeadIntegrityError();
+    if (sequence > MAX_ENCRYPTED_INDEX_SEQUENCE)
+      throw new IndexHeadIntegrityError();
     const context: IndexHeadContext = { ...identity,
       objectId, authorDeviceId, authorCounter, sequence,
       previousHeadSha256: previous?.headSha256 ?? ZERO_HEAD_SHA256,
@@ -135,6 +139,7 @@ export async function verifyIndexHeadCandidate(input: {
       context.viewId !== expected.viewId ||
       context.indexKeyId !== expected.indexKeyId ||
       context.keyEpoch !== expected.keyEpoch ||
+      context.sequence > MAX_ENCRYPTED_INDEX_SEQUENCE ||
       context.authorDeviceId !== signer.deviceId ||
       !OPAQUE_ID.test(signer.deviceId) ||
       !SHA256.test(trustedGrantHeadSha256) ||
@@ -180,7 +185,8 @@ function snapshotCheckpoint(value: TrustedIndexCheckpoint): TrustedIndexCheckpoi
     !Number.isSafeInteger(value.keyEpoch) || value.keyEpoch < 1 ||
     value.keyEpoch > 0xffffffff ||
     typeof value.sequence !== "bigint" || value.sequence < 1n ||
-    value.sequence > U64_MAX || typeof value.headSha256 !== "string" ||
+    value.sequence > MAX_ENCRYPTED_INDEX_SEQUENCE ||
+    typeof value.headSha256 !== "string" ||
     !SHA256.test(value.headSha256)) throw new IndexHeadIntegrityError();
   return { householdId: value.householdId, careProfileId: value.careProfileId,
     viewId: value.viewId, indexKeyId: value.indexKeyId,

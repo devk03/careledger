@@ -145,3 +145,17 @@ it("rejects oversized host-controlled bytes before copying them", async () => {
     new Uint8Array(MAX_MANAGED_VAULT_WIRE_BYTES + 1)))
     .rejects.toBeInstanceOf(IndexHeadIntegrityError);
 });
+
+it("does not wrap the uint32 AES-GCM index revision when the signed sequence advances", async () => {
+  const test = await fixture();
+  const prior = { ...test.first.candidate, sequence: 0xfffffffen };
+  const last = await signLocalIndexHead({ identity, objectId,
+    authorDeviceId: deviceId, authorCounter: 3n, grantHeadSha256: grantHead,
+    ciphertextWire: test.firstCiphertext, signingKeys: test.signingKeys,
+    previous: prior });
+  expect(last.candidate.sequence).toBe(0xffffffffn);
+  await expect(signLocalIndexHead({ identity, objectId,
+    authorDeviceId: deviceId, authorCounter: 4n, grantHeadSha256: grantHead,
+    ciphertextWire: test.secondCiphertext, signingKeys: test.signingKeys,
+    previous: last.candidate })).rejects.toBeInstanceOf(IndexHeadIntegrityError);
+});
