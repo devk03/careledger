@@ -444,6 +444,90 @@ try {
     "WHERE household_id=? AND session_id=? AND consumed_at IS NOT NULL")
     .get(alpha.h, alpha.s).n, 1);
 
+  // SQL-boundary regression: both active devices belong to the same account
+  // and have a current contribution grant. Only A is bound to this session.
+  // These structurally valid synthetic actions test SQLite guards, not the
+  // runtime's separate Ed25519 signature verification.
+  const fixtureNow = Math.floor(Date.now() / 1000);
+  const profileId = id("a");
+  const scopeId = id("b");
+  const keyId = id("c");
+  const keyCommitment = randomBytes(32);
+  db.prepare("INSERT INTO managed_profiles " +
+    "(household_id,id,state,created_by_account_id,created_at) " +
+    "VALUES (?,?,'active',?,?)")
+    .run(alpha.h, profileId, alpha.a, fixtureNow);
+  db.prepare("INSERT INTO managed_scopes " +
+    "(household_id,profile_id,id,kind,state,created_by_device_id,created_at) " +
+    "VALUES (?,?,?,'day','active',?,?)")
+    .run(alpha.h, profileId, scopeId, alpha.d, fixtureNow);
+  const addSyntheticAction = (() => {
+    let counter = 0;
+    let predecessor = null;
+    const insert = db.prepare("INSERT INTO managed_signed_actions " +
+      "(household_id,device_id,counter,action_kind,payload_sha256," +
+      "previous_action_sha256,action_sha256,signature,created_at) " +
+      "VALUES (?,?,?,?,?,?,?,?,?)");
+    return (kind) => {
+      const payloadSha256 = randomBytes(32);
+      const actionSha256 = randomBytes(32);
+      counter += 1;
+      insert.run(alpha.h, alpha.d, counter, kind, payloadSha256,
+        predecessor, actionSha256, randomBytes(64), fixtureNow);
+      predecessor = actionSha256;
+      return { counter, payloadSha256 };
+    };
+  })();
+  const registration = addSyntheticAction("key");
+  db.prepare("INSERT INTO managed_key_identities " +
+    "(household_id,profile_id,scope_id,key_id,epoch,purpose," +
+    "key_commitment,signed_payload_sha256,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,1,'day',?,?,?,?,?)")
+    .run(alpha.h, profileId, scopeId, keyId, keyCommitment,
+      registration.payloadSha256, alpha.d, registration.counter, fixtureNow);
+  const activation = addSyntheticAction("key");
+  db.prepare("INSERT INTO managed_active_key_events " +
+    "(household_id,profile_id,scope_id,sequence,previous_sha256," +
+    "previous_key_id,previous_epoch,event_sha256,key_id,epoch,purpose," +
+    "key_commitment,registration_sha256,issuer_device_id,session_id," +
+    "issuer_counter,created_at) " +
+    "VALUES (?,?,?,1,NULL,NULL,NULL,?,?,1,'day',?,?,?,?,?,?)")
+    .run(alpha.h, profileId, scopeId, activation.payloadSha256, keyId,
+      keyCommitment, registration.payloadSha256, alpha.d, alpha.s,
+      activation.counter, fixtureNow);
+  for (const deviceId of [alpha.d, secondDevice]) {
+    db.prepare("INSERT INTO managed_grant_heads " +
+      "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+      "head_sha256,capability_mask,updated_at) " +
+      "VALUES (?,?,?,?,0,NULL,0,?)")
+      .run(alpha.h, profileId, scopeId, deviceId, fixtureNow);
+    const grant = addSyntheticAction("grant");
+    db.prepare("INSERT INTO managed_grant_events " +
+      "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+      "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
+      "issuer_counter,created_at) " +
+      "VALUES (?,?,?,?,1,NULL,?,2,?,?,?)")
+      .run(alpha.h, profileId, scopeId, deviceId, grant.payloadSha256,
+        alpha.d, grant.counter, fixtureNow);
+  }
+  const insertAuthorizedIntent = db.prepare("INSERT INTO managed_upload_intents " +
+    "(household_id,id,profile_id,scope_id,key_id,epoch,purpose," +
+    "wire_version,blob_id,writer_device_id,session_id,plaintext_bytes," +
+    "chunk_count,created_at,expires_at) " +
+    "VALUES (?,?,?,?,?,1,'day',2,?,?,?,0,1,?,?)");
+  const intentArgs = (intentId, blobId, writerDeviceId) => [alpha.h,
+    intentId, profileId, scopeId, keyId, blobId, writerDeviceId, alpha.s,
+    fixtureNow, fixtureNow + 600];
+  insertAuthorizedIntent.run(...intentArgs(id("d"), id("e"), alpha.d));
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_upload_intents " +
+    "WHERE household_id=? AND profile_id=? AND scope_id=?")
+    .get(alpha.h, profileId, scopeId).n, 1);
+  assert.throws(() => insertAuthorizedIntent.run(...intentArgs(id("e"),
+    id("f"), secondDevice)), /day upload writer is not session-bound/u);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_upload_intents " +
+    "WHERE household_id=? AND profile_id=? AND scope_id=?")
+    .get(alpha.h, profileId, scopeId).n, 1);
+
   const betaInput = { tokenSha256: beta.session.sha256,
     csrfToken: beta.session.csrf, deviceId: beta.d };
   const betaChallenge = candidate.issueWire(betaInput);
@@ -617,7 +701,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup; verified-only login/session/logout and two-family device enrollment/binding over HTTP/SQLite; cross-family/replay/revocation/cap denial; day-intent bound-device guard");
+  console.log("PASS: fictional pending signup; verified-only login/session/logout and two-family device enrollment/binding over HTTP/SQLite; cross-family/replay/revocation/cap denial; authorized day intent accepts bound device A and rejects equally granted device B");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.
