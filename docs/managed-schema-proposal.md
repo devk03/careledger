@@ -205,10 +205,17 @@ pull-request merge.
 Draft `0009` adds a one-use, short-lived Ed25519 challenge and immutable
 one-device-per-session binding. Its composite foreign keys prevent a session
 from being bound to a device owned by another account in the same household.
-SQL cannot validate the signature: a trusted server path must verify the
-enrolled key, session, device, nonce and deployment audience, then consume
-and bind atomically. The envelope reader has been narrowed to the bound
-device, but remains unmounted. A stolen cookie after binding can still expose
+SQL cannot validate the signature: the unmounted candidate service now drafts
+verification of the enrolled key, session, device, nonce and configured
+deployment audience, followed by consume-and-bind in one write transaction.
+Invalid signatures are checked before taking the SQLite writer lock, then the
+same challenge, enrolled signing key and live session/device are rechecked
+under `BEGIN IMMEDIATE`; one session may issue at most 16 challenges. This
+cap bounds per-session accumulation, but broader login abuse, retention and
+rate limiting still need a mounted-route and operations design.
+It has not run against a migrated managed database or passed replay/race tests.
+The envelope reader has been narrowed to the bound device, but remains
+unmounted. A stolen cookie after binding can still expose
 ciphertext and access metadata; per-request proof remains a separate launch
 decision. Every future mounted writer and upload-intent path must require the
 same bound device; guarding this reader alone is insufficient. No managed
