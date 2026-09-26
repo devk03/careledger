@@ -1,33 +1,35 @@
 # Hosted E2EE schema proposal — review before migration
 
-Status: **partial implementation, 2026-09-25**. The maintainer authorized
-creation of the managed migration files. The first identity/grant draft is
+Status: **partial implementation, updated 2026-09-26**. The maintainer authorized
+creation of the managed migration files and separately approved one application
+to a new disposable fictional local database. The first identity/grant draft is
 [`0001_identity_scopes.sql`](../server/migrations/managed/0001_identity_scopes.sql).
-The second, still-unapplied
+The second
 [`0002_ciphertext_intake.sql`](../server/migrations/managed/0002_ciphertext_intake.sql)
 draft adds session-bound upload intents, key-identity nonce reservations,
 chunk metadata with opaque private-storage object IDs, and immutable committed
 ciphertext objects. A committed object is not a published timeline revision.
-The third, still-unapplied
+The third
 [`0003_day_revisions.sql`](../server/migrations/managed/0003_day_revisions.sql)
 draft adds append-only day snapshot revisions, session-bound adult publish
-authority and compare-and-swap heads. The fourth, still-unapplied
+authority and compare-and-swap heads. The fourth
 [`0004_staging_leases.sql`](../server/migrations/managed/0004_staging_leases.sql)
-draft adds one pre-write lease per day upload intent. The fifth, still-unapplied
+draft adds one pre-write lease per day upload intent. The fifth
 [`0005_non_day_intake.sql`](../server/migrations/managed/0005_non_day_intake.sql)
 draft adds separate source/draft ciphertext identity, nonce/object claims,
 pre-write leases and a signed two-blob pending-draft pair registration. It does not
-relax day-revision checks. The sixth, still-unapplied
+relax day-revision checks. The sixth
 [`0006_active_scope_keys.sql`](../server/migrations/managed/0006_active_scope_keys.sql)
 draft adds owner-signed monotonic current-key heads and guards both write paths;
 it never guesses an active key from an existing maximum epoch. The seventh,
-still-unapplied [`0007_scope_key_envelopes_v2.sql`](../server/migrations/managed/0007_scope_key_envelopes_v2.sql)
+[`0007_scope_key_envelopes_v2.sql`](../server/migrations/managed/0007_scope_key_envelopes_v2.sql)
 draft stores a fixed purpose-bound v2 envelope with active-key, current-grant,
 recipient and owner-action references while closing new v1 issuance. None of
 these migrations is registered
-with the production startup path or applied to any database. An explicit
+with the production startup path or applied to any non-fictional database. An explicit
 fictional-only runner pins their SHA-256 checksums and creates a fresh private
-temporary database only after a separate approval flag; it has not been run.
+temporary database only after a separate approval flag; it ran once with
+specific approval on 2026-09-26.
 That runner requires a source checkout containing `server/migrations/managed/`;
 it is compiled only by the explicit `build:fictional-schema` target, not by
 the ordinary server/Docker build (the regular typecheck still checks its source).
@@ -131,8 +133,8 @@ separate keys or join the claim protocol before any managed client is enabled.
 The new source/draft object ID is unique within its scope, but the existing
 day-intent schema does not store an object ID, so this is not a cross-lineage
 object-ID uniqueness claim. A pending draft pair is not adult approval. Neither
-day and non-day intents now have signed-current-key checks in the unapplied
-`0006` draft, but key rotation is not operational until the schema is tested,
+day and non-day intents now have signed-current-key checks in the `0006`
+draft, but key rotation is not operational until the schema is tested,
 canonical signatures are verified in runtime, and a current head is activated
 for each scope. A draft must obtain both intents and open both
 staging leases atomically under one combined quota decision before writing
@@ -197,8 +199,10 @@ with verified hashes and a tested fresh restore.
 ## Approval boundary
 
 The maintainer approved **creation** of the necessary migration files on
-2026-09-25. Application to a fresh fictional database was requested separately
-and is not yet approved. This does not cover an existing database, real case
+2026-09-25 and separately approved applying `0001`–`0010` to one new disposable
+fictional local DB on 2026-09-26. That application passed schema integrity,
+foreign-key and focused two-family binding checks. It does not cover any
+other existing database, real case
 data, production deployment, billing, a new external witness service, or a
 pull-request merge.
 
@@ -219,7 +223,8 @@ The browser tolerates 60 seconds of clock skew when deciding whether to sign;
 the server's database clock and one-use challenge state remain authoritative.
 Mounted routes must redact nonce/proof bodies from logs and errors and never
 accept a cookie digest from a request field.
-It has not run against a migrated managed database or passed replay/race tests.
+It passed a sequential replay denial against that migrated fictional database;
+simultaneous race tests have not run.
 The envelope reader has been narrowed to the bound device, but remains
 unmounted. A stolen cookie after binding can still expose
 ciphertext and access metadata; per-request proof remains a separate launch
@@ -227,15 +232,17 @@ decision. Every future mounted writer and upload-intent path must require the
 same bound device; guarding this reader alone is insufficient. Candidate
 ordinary/historical envelope writers and the day-upload ledger now require
 the bound device in their authorization queries. Remaining managed paths and
-insert triggers do not yet enforce this invariant. No managed draft has been
-applied.
+insert triggers do not yet enforce this invariant outside the `0010`-covered
+paths. No managed draft has been applied to a non-fictional database.
 
 Draft `0010` adds insert-time session-bound issuer checks for both v2 envelope
 tables and the day upload intent, lease and committed blob. It is defense in
 depth alongside the unmounted TypeScript writer and ledger checks, not proof
 that any row is valid ciphertext or that every managed path is session-bound.
 Non-day/draft, active-key, day-revision and grant paths remain to be reviewed.
-Like `0009`, `0010` has not been applied to any database.
+Like `0009`, `0010` has only been applied to the approved disposable fictional
+local database; its day-intent bound-writer guard was exercised there. The
+other insert guards and positive authorized write flows remain untested.
 This lineage is new-only: the runner creates a fresh empty managed database and
 does not migrate a database that already contains pre-binding v2 envelopes.
 Such a database must be rejected, not silently made unreadable or backfilled
