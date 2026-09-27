@@ -242,3 +242,57 @@ it("rejects a spoofed byte input and bounds cumulative writer allocation", async
     .toThrow(EncryptedIndexIntegrityError);
   expect(serializedNestedValue).toBe(false);
 });
+
+it("serializes only one validated snapshot of mutable index fields", () => {
+  let pageReads = 0;
+  let serializedUnvalidatedPage = false;
+  const pageValues = [1];
+  Object.defineProperty(pageValues, "0", { enumerable: true,
+    get() {
+      pageReads += 1;
+      return pageReads === 1 ? 1 : { toJSON() {
+        serializedUnvalidatedPage = true;
+        throw new Error("Unvalidated nested value was serialized");
+      } };
+    } });
+  let pageLengthReads = 0;
+  const changingPages = new Proxy(pageValues, { get(target, property, receiver) {
+    if (property === "length") {
+      pageLengthReads += 1;
+      return pageLengthReads === 1 ? 1 : 1001;
+    }
+    return Reflect.get(target, property, receiver);
+  } });
+  let dayLengthReads = 0;
+  const changingDays = new Proxy(["2030-04-12"], {
+    get(target, property, receiver) {
+      if (property === "length") {
+        dayLengthReads += 1;
+        return dayLengthReads === 1 ? 1 : 367;
+      }
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  let nameReads = 0;
+  const changingEntry = { ...entries[0]!, careDays: changingDays,
+    pageNumbers: changingPages };
+  Object.defineProperty(changingEntry, "displayName", { enumerable: true,
+    get() {
+      nameReads += 1;
+      return nameReads === 1 ? "fictional-snapshot.pdf" : "F".repeat(5_000_000);
+    } });
+  const payload = encodeLocalApprovedIndex({ identity, objectId,
+    sequence: 1n, entries: [changingEntry] as DecryptedTimelineEntry[] });
+  const serialized = JSON.parse(new TextDecoder().decode(payload)) as {
+    entries: Array<{ careDays: string[]; displayName: string;
+      pageNumbers: number[] }> };
+  expect(serialized.entries[0]).toMatchObject({
+    careDays: ["2030-04-12"], displayName: "fictional-snapshot.pdf",
+    pageNumbers: [1],
+  });
+  expect(pageReads).toBe(1);
+  expect(pageLengthReads).toBe(1);
+  expect(dayLengthReads).toBe(1);
+  expect(nameReads).toBe(1);
+  expect(serializedUnvalidatedPage).toBe(false);
+});

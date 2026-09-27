@@ -212,56 +212,66 @@ function validateEntries(value: unknown, careProfileId: string): DecryptedTimeli
   const copied: DecryptedTimelineEntry[] = [];
   let serializedBytes = 0;
   for (const candidate of value as unknown[]) {
-    if (!plainRecord(candidate) || candidate.reviewState !== "approved" ||
-      typeof candidate.id !== "string" || candidate.id.length !== 32 ||
-      typeof candidate.careProfileId !== "string" ||
-      candidate.careProfileId.length !== 32 ||
-      typeof candidate.receivedAt !== "string" ||
-      candidate.receivedAt.length !== 24 ||
-      !Array.isArray(candidate.careDays) ||
-      candidate.careDays.length > 366 ||
-      candidate.careDays.some((day: unknown) =>
-        typeof day !== "string" || day.length !== 10))
+    if (!plainRecord(candidate))
       throw new EncryptedIndexIntegrityError();
+    const { id, careProfileId: profileId, receivedAt, careDays,
+      reviewState, kind } = candidate;
+    if (!Array.isArray(careDays)) throw new EncryptedIndexIntegrityError();
+    const dayCount = careDays.length;
+    if (reviewState !== "approved" ||
+      typeof id !== "string" || id.length !== 32 ||
+      typeof profileId !== "string" || profileId.length !== 32 ||
+      typeof receivedAt !== "string" || receivedAt.length !== 24 ||
+      dayCount > 366)
+      throw new EncryptedIndexIntegrityError();
+    const copiedDays: string[] = [];
+    for (let index = 0; index < dayCount; index++) {
+      const day: unknown = careDays[index];
+      if (typeof day !== "string" || day.length !== 10)
+        throw new EncryptedIndexIntegrityError();
+      copiedDays.push(day);
+    }
+    const common = { id, careProfileId: profileId, receivedAt,
+      careDays: copiedDays, reviewState: "approved" as const };
     let entry: DecryptedTimelineEntry;
-    if (candidate.kind === "file") {
+    if (kind === "file") {
       if (!exactKeys(candidate, ["id", "careProfileId", "receivedAt",
         "careDays", "reviewState", "kind", "displayName", "printedDate",
-        "pageNumbers"]) || !validPrintedDate(candidate.printedDate) ||
-        typeof candidate.displayName !== "string" ||
-        candidate.displayName.length > 256 ||
-        !Array.isArray(candidate.pageNumbers) ||
-        candidate.pageNumbers.length > 1000 ||
-        candidate.pageNumbers.some((page: unknown) =>
-          typeof page !== "number" || !Number.isSafeInteger(page) ||
-          page < 1 || page > 10_000))
+        "pageNumbers"]))
         throw new EncryptedIndexIntegrityError();
-      entry = { id: candidate.id,
-        careProfileId: candidate.careProfileId as string,
-        receivedAt: candidate.receivedAt as string,
-        careDays: [...candidate.careDays], reviewState: "approved",
-        kind: "file", displayName: candidate.displayName as string,
-        printedDate: candidate.printedDate === null ? null :
-          (candidate.printedDate as { kind: string }).kind === "day" ?
-            { kind: "day", value: (candidate.printedDate as
-              { value: string }).value } :
-            { kind: "unclear", originalText: (candidate.printedDate as
-              { originalText: string }).originalText },
-        pageNumbers: [...candidate.pageNumbers] };
-    } else if (candidate.kind === "family_note") {
+      const displayName = candidate.displayName;
+      const pageNumbers = candidate.pageNumbers;
+      const printedDate = copyPrintedDate(candidate.printedDate);
+      if (!Array.isArray(pageNumbers))
+        throw new EncryptedIndexIntegrityError();
+      const pageCount = pageNumbers.length;
+      if (typeof displayName !== "string" || displayName.length > 256 ||
+        pageCount > 1000)
+        throw new EncryptedIndexIntegrityError();
+      const copiedPages: number[] = [];
+      for (let index = 0; index < pageCount; index++) {
+        const page: unknown = pageNumbers[index];
+        if (typeof page !== "number" || !Number.isSafeInteger(page) ||
+          page < 1 || page > 10_000)
+          throw new EncryptedIndexIntegrityError();
+        copiedPages.push(page);
+      }
+      entry = { ...common, kind: "file", displayName, printedDate,
+        pageNumbers: copiedPages };
+    } else if (kind === "family_note") {
       if (!exactKeys(candidate, ["id", "careProfileId", "receivedAt",
         "careDays", "reviewState", "kind", "body", "authorLabel",
-        "printedDate"]) || candidate.printedDate !== null ||
-        typeof candidate.body !== "string" || candidate.body.length > 20_000 ||
-        typeof candidate.authorLabel !== "string" ||
-        candidate.authorLabel.length > 256)
+        "printedDate"]))
         throw new EncryptedIndexIntegrityError();
-      entry = { id: candidate.id,
-        careProfileId: candidate.careProfileId as string,
-        receivedAt: candidate.receivedAt as string,
-        careDays: [...candidate.careDays], reviewState: "approved",
-        kind: "family_note", body: candidate.body as string,
-        authorLabel: candidate.authorLabel as string, printedDate: null };
+      const body = candidate.body;
+      const authorLabel = candidate.authorLabel;
+      const printedDate = candidate.printedDate;
+      if (printedDate !== null || typeof body !== "string" ||
+        body.length > 20_000 || typeof authorLabel !== "string" ||
+        authorLabel.length > 256)
+        throw new EncryptedIndexIntegrityError();
+      entry = { ...common, kind: "family_note", body, authorLabel,
+        printedDate: null };
     } else throw new EncryptedIndexIntegrityError();
     serializedBytes += new TextEncoder().encode(JSON.stringify(entry)).byteLength;
     if (serializedBytes > MAX_INDEX_PLAINTEXT_BYTES - 1024)
@@ -274,16 +284,22 @@ function validateEntries(value: unknown, careProfileId: string): DecryptedTimeli
   return copied;
 }
 
-function validPrintedDate(value: unknown): boolean {
-  if (value === null) return true;
-  if (!plainRecord(value)) return false;
-  return (value.kind === "day" &&
-    exactKeys(value, ["kind", "value"]) &&
-    typeof value.value === "string" && value.value.length === 10) ||
-    (value.kind === "unclear" &&
-      exactKeys(value, ["kind", "originalText"]) &&
-      typeof value.originalText === "string" &&
-      value.originalText.length <= 256);
+function copyPrintedDate(value: unknown): Extract<DecryptedTimelineEntry,
+  { kind: "file" }>["printedDate"] {
+  if (value === null) return null;
+  if (!plainRecord(value)) throw new EncryptedIndexIntegrityError();
+  const kind = value.kind;
+  if (kind === "day" && exactKeys(value, ["kind", "value"])) {
+    const day = value.value;
+    if (typeof day === "string" && day.length === 10)
+      return { kind: "day", value: day };
+  } else if (kind === "unclear" &&
+    exactKeys(value, ["kind", "originalText"])) {
+    const originalText = value.originalText;
+    if (typeof originalText === "string" && originalText.length <= 256)
+      return { kind: "unclear", originalText };
+  }
+  throw new EncryptedIndexIntegrityError();
 }
 
 function snapshotIdentity(value: IndexViewIdentity): IndexViewIdentity {
