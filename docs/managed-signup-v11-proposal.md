@@ -80,10 +80,11 @@ releases the address. Do not silently convert, delete or bypass such rows.
    a cookie. Other failed/expired/replayed proofs receive generic responses.
    Existing active accounts use a separate login/recovery flow; email signup
    must never reset their password or add a membership.
-4. The current verification contract returning only `householdId` is
-   insufficient: the service needs token, recipient-chosen password, normalized
-   email binding and a replay-safe outcome. The existing `registerPendingOwner`
-   path must remain unmounted and the web signup/verification UI must switch to
+4. The unmounted verification transport now passes token and
+   recipient-chosen password to an injected service, but the service still
+   needs normalized email binding and a replay-safe outcome. The existing
+   `registerPendingOwner` path must remain unmounted and the web
+   signup/verification UI must switch to
    this proof-first contract. Durable resend bounds, generic timing,
    token/password redaction, recipient-address policy and retention are release
    gates. Neither proof creation nor consumption issues a session, device

@@ -10,20 +10,23 @@ type VerificationLimit = { action: "verify-ip" | "verify-token";
 
 export interface ManagedEmailVerificationService {
   /**
-   * Atomically activate once for an unexpired, recipient-bound proof. A retry
+   * Atomically create a verified owner/family for an unexpired proof. A retry
    * after a committed-but-lost response must return the same validated receipt
-   * for a short documented window, without repeating activation. Return null
-   * for unknown/expired proofs. Validate the household ID before commit.
+   * for a short documented window, without changing the first password or
+   * repeating activation. Return null for unknown/expired proofs. The service
+   * validates the household ID before commit; this transport never persists
+   * or logs the plaintext password.
    */
-  consumeOrReadReceipt(token: string):
+  consumeOrReadReceipt(input: { token: string; password: string }):
     Promise<{ householdId: string } | null>;
 }
 
 /**
  * UNMOUNTED transport only. A future service must issue/send high-entropy
- * proofs, persist only hashes, enforce one-use/expiry and activate the exact
- * pending account/family in one transaction. This router cannot supply those
- * guarantees and must not be mounted against a mock or v10 identity database.
+ * proofs, persist only hashes, enforce one-use/expiry and create the verified
+ * owner/family atomically after the recipient chooses a password. This router
+ * cannot supply those guarantees and must not be mounted against a mock or
+ * v10 identity database.
  */
 export function createManagedEmailVerificationRouter(input: {
   expectedOrigin: string;
@@ -59,7 +62,7 @@ export function createManagedEmailVerificationRouter(input: {
     }
     next();
   });
-  const json = express.json({ limit: "256b", type: "application/json",
+  const json = express.json({ limit: "1kb", type: "application/json",
     strict: true, inflate: false });
   async function allowed(request: Request, action: VerificationLimit["action"],
     tokenBucket?: string): Promise<"allow" | "deny" | "unavailable"> {
@@ -96,8 +99,11 @@ export function createManagedEmailVerificationRouter(input: {
         return;
       }
       const body: unknown = request.body;
-      if (!plainRecord(body) || !exactKeys(body, ["token"]) ||
-        typeof body.token !== "string" || !TOKEN.test(body.token)) {
+      if (!plainRecord(body) || !exactKeys(body, ["password", "token"]) ||
+        typeof body.token !== "string" || !TOKEN.test(body.token) ||
+        typeof body.password !== "string" || body.password.length < 12 ||
+        body.password.length > 128 || body.password.includes("\0") ||
+        Buffer.byteLength(body.password, "utf8") > 512) {
         response.status(400).json({ error: "INVALID_REQUEST" });
         return;
       }
@@ -110,7 +116,9 @@ export function createManagedEmailVerificationRouter(input: {
         return;
       }
       try {
-        const result = await input.verification.consumeOrReadReceipt(body.token);
+        const result = await input.verification.consumeOrReadReceipt({
+          token: body.token, password: body.password,
+        });
         if (!result) {
           response.status(202).json({ accepted: true });
         } else if (typeof result.householdId === "string" &&
