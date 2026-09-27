@@ -35,6 +35,8 @@ import { createManagedAuthRouter } from
   "../dist/managed/managedAuthRouter.js";
 import { SqliteManagedIdentityCandidate } from
   "../dist/managed/sqliteManagedIdentity.js";
+import { SqliteManagedSessions } from
+  "../dist/managed/sqliteManagedSessions.js";
 import { issueScopeEnvelopeV2 } from
   "../dist/managed/sqliteScopeEnvelopeWriter.js";
 import { issueHistoricalScopeEnvelopeV2 } from
@@ -213,6 +215,12 @@ try {
     family.session = addSession(family, family.s);
     family.key = addDevice(family, family.d, family.e, family.s);
   }
+  const currentSessions = new SqliteManagedSessions(db);
+  assert.equal((await currentSessions.findByTokenSha256(
+    families[0].session.sha256))?.householdId, families[0].h);
+  assert.equal((await currentSessions.findByTokenSha256(
+    families[1].session.sha256))?.householdId, families[1].h);
+  assert.equal(await currentSessions.findByTokenSha256("00".repeat(32)), null);
   const identity = new SqliteManagedIdentityCandidate(db);
   const registrationEmail = "fictional-owner@example.invalid";
   const registrationPassword = "invented-passphrase-for-test-only";
@@ -1760,6 +1768,9 @@ try {
   assert.equal(await ledger.readReceipt(firstReceiptInput), null);
   db.prepare("UPDATE managed_sessions SET revoked_at=? " +
     "WHERE household_id=? AND id=?").run(revokeGrantAt, alpha.h, alpha.s);
+  assert.equal(await currentSessions.findByTokenSha256(alpha.session.sha256), null);
+  assert.equal((await currentSessions.findByTokenSha256(
+    beta.session.sha256))?.householdId, beta.h);
   await assert.rejects(ledger.publishVerified({ intent: stagedSecond,
     tokenSha256: alpha.session.sha256, csrfToken: alpha.session.csrf,
     wireSha256: digest(secondWire), wireBytes: secondWire.byteLength,
