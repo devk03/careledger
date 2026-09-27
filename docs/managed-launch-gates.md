@@ -38,7 +38,8 @@ On 2026-09-27, with separate user approval scoped to fictional local use, the
 same pinned `0001`–`0010` runner created a **second** new empty disposable
 database. It has private directory/file modes, schema version 10, an empty
 family table, and passing integrity/foreign-key checks. The prior 2026-09-26
-temporary database was absent and was not recreated or used. A guarded test
+temporary database remains present and was not modified or used in this run.
+A guarded test
 copied only the new empty database, seeded invented family rows there, and
 observed one winning and one rejected concurrent grant-head update; a fresh
 sequence with the old predecessor was also rejected. This covers one grant

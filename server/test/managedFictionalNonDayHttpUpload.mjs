@@ -49,9 +49,8 @@ import { seedFictionalManagedFamily } from "./fictionalManagedFamily.mjs";
 
 // Explicitly approved, empty, fictional v10 source only. This test copies it;
 // it never migrates or writes the source and never reads real case records.
-const APPROVED_DIRECTORY = "adeno-fictional-managed-fJAg4s";
 const APPROVED_EMPTY_SHA256 =
-  "2c3ee411bc91d720ffe1586badf071abe9b2ce9e1225b35a4de49a64c5ceb027";
+  "192af3bf39723c238659a61c3b6508be7d3ba0d88b23a6cb325d99e52a0d0df4";
 const sourcePath = process.argv[2];
 assert.equal(process.env.ADENO_APPROVED_FICTIONAL_MIGRATION, "1");
 assert.equal(process.env.NODE_ENV === "production", false);
@@ -59,9 +58,10 @@ assert.equal(Object.keys(process.env).some((name) => name.startsWith("RAILWAY_")
 assert.equal(typeof sourcePath, "string");
 const sourceParent = realpathSync(dirname(sourcePath));
 assert.equal(basename(sourcePath), "managed.sqlite3");
-assert.equal(basename(sourceParent), APPROVED_DIRECTORY);
+assert.match(basename(sourceParent), /^adeno-fictional-managed-[A-Za-z0-9]+$/u);
 assert.equal(dirname(sourceParent), realpathSync(tmpdir()));
 assert.equal(realpathSync(sourcePath), join(sourceParent, "managed.sqlite3"));
+assert.equal(statSync(sourceParent).mode & 0o077, 0);
 assert.equal(statSync(sourcePath).mode & 0o077, 0);
 assert.equal(existsSync(`${sourcePath}-wal`), false);
 assert.equal(existsSync(`${sourcePath}-shm`), false);
