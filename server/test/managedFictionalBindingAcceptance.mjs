@@ -53,6 +53,8 @@ import { createManagedUploadComposition,
   "../dist/managed/managedUploadComposition.js";
 import { CiphertextObjectIntegrityError, readCiphertextChunk } from
   "../dist/managed/ciphertextObjectStore.js";
+import { readCommittedCiphertextReferences } from
+  "../dist/managed/committedCiphertextReferences.js";
 
 // One-time audit of the exact 2026-09-26 approved fictional database. This is
 // intentionally not a general-purpose caller-selected database test/runner.
@@ -196,6 +198,7 @@ try {
       65, 65);
     walExtraProbe.close();
   } finally { walDb.close(); }
+  assert.deepEqual(readCommittedCiphertextReferences(db), []);
   db.exec("BEGIN IMMEDIATE");
   for (const family of families) {
     db.prepare("INSERT INTO managed_families VALUES (?,'active',?)")
@@ -988,6 +991,15 @@ try {
     status: "committed", wireSha256: sha256Hex(composedWire),
     wireBytes: composedWire.byteLength,
   });
+  const committedReferences = readCommittedCiphertextReferences(db);
+  assert.equal(committedReferences.length, 2);
+  assert.deepEqual(new Set(committedReferences.map((reference) =>
+    reference.storageObjectId)), new Set([id("5"), composedChunk.objectId]));
+  assert.ok(committedReferences.some((reference) =>
+    reference.householdId === alpha.h &&
+    reference.storageObjectId === composedChunk.objectId &&
+    reference.sha256 === composedChunk.sha256.toString("hex") &&
+    reference.byteSize === composedChunk.byteSize));
 
   const alteredIntentId = id("1");
   const alteredBlobId = id("6");
@@ -1113,6 +1125,88 @@ try {
     "VALUES (?,?,?,?,?,1,'day',2,?,?,?,0,1,?,?)")
     .run(beta.h, betaQuotaIntentId, betaProfileId, betaScopeId, betaKeyId,
       betaQuotaBlobId, beta.d, beta.s, betaFixtureAt, betaFixtureAt + 600);
+
+  // Beta has no committed day blob yet. A structurally authorized invented
+  // source-only blob must still be included in any database-backed backup.
+  const betaSourceScopeId = randomBytes(16).toString("hex");
+  const betaSourceKeyId = randomBytes(16).toString("hex");
+  const betaSourceIntentId = randomBytes(16).toString("hex");
+  const betaSourceBlobId = randomBytes(16).toString("hex");
+  const betaSourceObjectId = randomBytes(16).toString("hex");
+  const betaSourceStorageId = randomBytes(16).toString("hex");
+  const betaSourceCommitment = randomBytes(32);
+  const betaSourceAt = Math.floor(Date.now() / 1000);
+  db.prepare("INSERT INTO managed_scopes " +
+    "(household_id,profile_id,id,kind,state,created_by_device_id,created_at) " +
+    "VALUES (?,?,?,'source','active',?,?)")
+    .run(beta.h, betaProfileId, betaSourceScopeId, beta.d, betaSourceAt);
+  const betaSourceRegistration = betaAction("key");
+  db.prepare("INSERT INTO managed_key_identities " +
+    "(household_id,profile_id,scope_id,key_id,epoch,purpose," +
+    "key_commitment,signed_payload_sha256,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,1,'source',?,?,?,?,?)")
+    .run(beta.h, betaProfileId, betaSourceScopeId, betaSourceKeyId,
+      betaSourceCommitment, betaSourceRegistration.payloadHash, beta.d,
+      betaSourceRegistration.counter, betaSourceAt);
+  const betaSourceActivation = betaAction("key");
+  db.prepare("INSERT INTO managed_active_key_events " +
+    "(household_id,profile_id,scope_id,sequence,previous_sha256," +
+    "previous_key_id,previous_epoch,event_sha256,key_id,epoch,purpose," +
+    "key_commitment,registration_sha256,issuer_device_id,session_id," +
+    "issuer_counter,created_at) VALUES " +
+    "(?,?,?,1,NULL,NULL,NULL,?,?,1,'source',?,?,?,?,?,?)")
+    .run(beta.h, betaProfileId, betaSourceScopeId,
+      betaSourceActivation.payloadHash, betaSourceKeyId,
+      betaSourceCommitment, betaSourceRegistration.payloadHash,
+      beta.d, beta.s, betaSourceActivation.counter, betaSourceAt);
+  db.prepare("INSERT INTO managed_grant_heads " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "head_sha256,capability_mask,updated_at) VALUES (?,?,?,?,0,NULL,0,?)")
+    .run(beta.h, betaProfileId, betaSourceScopeId, beta.d, betaSourceAt);
+  const betaSourceGrant = betaAction("grant");
+  db.prepare("INSERT INTO managed_grant_events " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,1,NULL,?,3,?,?,?)")
+    .run(beta.h, betaProfileId, betaSourceScopeId, beta.d,
+      betaSourceGrant.payloadHash, beta.d, betaSourceGrant.counter,
+      betaSourceAt);
+  db.prepare("INSERT INTO managed_non_day_upload_intents " +
+    "(household_id,id,profile_id,scope_id,key_id,epoch,purpose,role," +
+    "draft_reservation_id,object_id,aad_revision,wire_version,blob_id," +
+    "writer_device_id,session_id,plaintext_bytes,chunk_count,created_at,expires_at) " +
+    "VALUES (?,?,?,?,?,1,'source','original',NULL,?,1,2,?,?,?,0,1,?,?)")
+    .run(beta.h, betaSourceIntentId, betaProfileId, betaSourceScopeId,
+      betaSourceKeyId, betaSourceObjectId, betaSourceBlobId, beta.d, beta.s,
+      betaSourceAt, betaSourceAt + 600);
+  db.prepare("INSERT INTO managed_non_day_staging_leases " +
+    "(household_id,intent_id,attempt_id,reserved_bytes,opened_at) " +
+    "VALUES (?,?,?,?,?)")
+    .run(beta.h, betaSourceIntentId, randomBytes(16).toString("hex"), 65,
+      betaSourceAt);
+  const betaSourceNonce = randomBytes(12);
+  db.prepare("INSERT INTO managed_non_day_nonce_reservations " +
+    "(household_id,key_id,epoch,nonce,intent_id,chunk_index,reserved_at) " +
+    "VALUES (?,?,1,?,?,0,?)")
+    .run(beta.h, betaSourceKeyId, betaSourceNonce, betaSourceIntentId,
+      betaSourceAt);
+  db.prepare("INSERT INTO managed_non_day_blob_chunks " +
+    "(household_id,intent_id,chunk_index,nonce,storage_object_id," +
+    "ciphertext_bytes,ciphertext_sha256) VALUES (?,?,0,?,?,16,?)")
+    .run(beta.h, betaSourceIntentId, betaSourceNonce,
+      betaSourceStorageId, digest(Buffer.alloc(16, 0xa1)));
+  db.prepare("INSERT INTO managed_non_day_committed_blobs " +
+    "(household_id,blob_id,intent_id,profile_id,scope_id,key_id,epoch," +
+    "purpose,role,object_id,aad_revision,writer_device_id,wire_version," +
+    "wire_sha256,wire_bytes,committed_at) VALUES " +
+    "(?,?,?,?,?,?,1,'source','original',?,1,?,2,?,65,?)")
+    .run(beta.h, betaSourceBlobId, betaSourceIntentId, betaProfileId,
+      betaSourceScopeId, betaSourceKeyId, betaSourceObjectId, beta.d,
+      digest(Buffer.alloc(65, 0xa2)), betaSourceAt);
+  const sourceOnlyReferences = readCommittedCiphertextReferences(db)
+    .filter((reference) => reference.householdId === beta.h);
+  assert.deepEqual(sourceOnlyReferences.map((reference) =>
+    reference.storageObjectId), [betaSourceStorageId]);
   const globalOccupancy = () => db.prepare("SELECT COALESCE(SUM(bytes),0) " +
     "AS bytes FROM managed_wire_occupancy").get().bytes;
   const familyOccupancy = (householdId) => db.prepare(
@@ -1171,6 +1265,10 @@ try {
     intentId: betaQuotaIntentId, blobId: betaQuotaBlobId }), {
     status: "committed", wireSha256: sha256Hex(betaQuotaWire), wireBytes: 65,
   });
+  assert.deepEqual(new Set(readCommittedCiphertextReferences(db)
+    .filter((reference) => reference.householdId === beta.h)
+    .map((reference) => reference.storageObjectId)),
+  new Set([betaSourceStorageId, id("d")]));
   quotaLedger.close();
   assert.equal(db.inTransaction, true);
 

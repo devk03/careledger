@@ -89,6 +89,14 @@ failure syncing the parent after rename can leave a complete directory that
 must be inspected before retry. Snapshot IDs are create-only reservations; a
 failed attempt uses a fresh ID rather than reusing the previous one. No consistent
 database-snapshot provider or full backup encryption/retention is implemented.
+An unmounted read-only extractor now lists chunk references belonging to
+committed day and source/draft blobs in an already-migrated managed database.
+A separate offline inventory compares an explicitly supplied committed reference set with a
+quiesced private object root, verifies committed hashes, and counts pending and
+unreferenced final objects by inode so hard-linked aliases are not double-counted.
+Its byte totals are unique-inode file lengths, not allocated disk usage.
+It never removes files or releases leases. These pieces do not yet create or
+pin a matching database/object backup, prove quiescence, or repair an orphan.
 A separate, unmounted restore primitive can verify the pinned object manifest
 and copy those ciphertext objects with their original IDs into a newly created
 private, offline root. It publishes that root only after its objects are
