@@ -36,6 +36,12 @@ editing a real person's records.
 
 ## Mandatory two-family acceptance run
 
+Browser device keys are still memory-only. The
+[IndexedDB persistence proposal](managed-device-key-store-proposal.md) is a
+design, not an applied client-side database migration or recovery proof. No
+managed enrollment should be mounted until a saved-and-reloaded keypair can
+complete the real proof and binding flow on a supported browser.
+
 The release test uses two unrelated invented families, at least two adults and
 one child. It must show, through a real browser, API and one supported MCP
 client: zero cross-family reads or writes; wrong-scope and revoked access denied
