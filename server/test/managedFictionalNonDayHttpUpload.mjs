@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign } from
+  "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { chmod, copyFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { encodeManagedVaultBlobV2 } from "@adeno/contracts";
+import { encodeManagedVaultBlobV2,
+  encodePendingDraftPairActionPayloadV1,
+  PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1 } from "@adeno/contracts";
 import Database from "better-sqlite3";
 import express from "express";
 
@@ -24,6 +27,8 @@ import { SqliteManagedSessions } from
   "../dist/managed/sqliteManagedSessions.js";
 import { createNonDayDraftUploadComposition } from
   "../dist/managed/nonDayDraftUploadComposition.js";
+import { ManagedPendingDraftPairDenied, submitPendingDraftPair } from
+  "../dist/managed/sqlitePendingDraftPairWriter.js";
 import { SqliteNonDayDraftUploadLedger } from
   "../dist/managed/sqliteNonDayDraftUploadLedger.js";
 import { createManagedUploadReceiptRouter } from
@@ -66,8 +71,12 @@ try {
   db.pragma("synchronous = EXTRA");
   assertManagedSchema(db);
   const now = Math.floor(Date.now() / 1000);
+  const signingKeys = generateKeyPairSync("ed25519");
+  const enrolledSigningPublicKey = signingKeys.publicKey.export({
+    format: "der", type: "spki" }).subarray(-32);
   const [alpha, beta] = db.transaction(() => [
-    seedFictionalManagedFamily(db, "1", "2", now),
+    seedFictionalManagedFamily(db, "1", "2", now,
+      { enrolledSigningPublicKey }),
     seedFictionalManagedFamily(db, "6", "7", now,
       { intentByte: "c", blobByte: "d" }),
   ]).immediate();
@@ -290,6 +299,86 @@ try {
     "managed_non_day_staging_leases WHERE household_id=? " +
     "AND committed_at IS NULL").get(alpha.householdId).n, 0);
 
+  const keyRow = db.prepare("SELECT key_commitment AS commitment " +
+    "FROM managed_key_identities WHERE household_id=? AND key_id=? " +
+    "AND epoch=1").get(alpha.householdId, alphaDraft.keyId);
+  const activeHead = db.prepare("SELECT head_sha256 AS digest FROM " +
+    "managed_current_scope_keys WHERE household_id=? AND profile_id=? " +
+    "AND scope_id=?").get(alpha.householdId, alpha.profileId,
+      alphaDraft.scopeId);
+  const grantHead = db.prepare("SELECT head_sha256 AS digest FROM " +
+    "managed_grant_heads WHERE household_id=? AND profile_id=? " +
+    "AND scope_id=? AND subject_device_id=?")
+    .get(alpha.householdId, alpha.profileId, alphaDraft.scopeId,
+      alpha.deviceId);
+  const predecessor = db.prepare("SELECT counter, action_sha256 AS digest " +
+    "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
+    "ORDER BY counter DESC LIMIT 1")
+    .get(alpha.householdId, alpha.deviceId);
+  const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const context = { householdId: alpha.householdId,
+    careProfileId: alpha.profileId, opaqueDraftScopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, reservationId: alphaPair.ids.reservationId,
+    contentIntentId: alphaPair.ids.contentIntentId,
+    metadataIntentId: alphaPair.ids.metadataIntentId,
+    contentBlobId: alphaPair.ids.contentBlobId,
+    metadataBlobId: alphaPair.ids.metadataBlobId,
+    contentObjectId: alphaPair.draftScope("content").objectId,
+    metadataObjectId: alphaPair.draftScope("metadata").objectId,
+    authorDeviceId: alpha.deviceId, sessionId: alpha.session.sessionId,
+    keyEpoch: 1, authorCounter: BigInt(predecessor.counter + 1),
+    pairedAt: BigInt(db.prepare("SELECT unixepoch('now') AS now").get().now),
+    contentWireBytes: alphaPair.wires.content.byteLength,
+    metadataWireBytes: alphaPair.wires.metadata.byteLength,
+    keyCommitmentSha256: keyRow.commitment.toString("hex"),
+    activeKeyHeadSha256: activeHead.digest.toString("hex"),
+    grantHeadSha256: grantHead.digest.toString("hex"),
+    contentWireSha256: sha256(alphaPair.wires.content),
+    metadataWireSha256: sha256(alphaPair.wires.metadata),
+    previousActionSha256: predecessor.digest.toString("hex"),
+    issuerSigningKeySha256: sha256(enrolledSigningPublicKey) };
+  const payload = encodePendingDraftPairActionPayloadV1(context);
+  const signature = sign(null, payload, signingKeys.privateKey);
+  const action = { householdId: context.householdId,
+    deviceId: context.authorDeviceId, counter: context.authorCounter,
+    actionKind: "review", payloadSha256: sha256(payload),
+    previousActionSha256: context.previousActionSha256,
+    actionSha256: sha256(Buffer.concat([
+      Buffer.from(PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1),
+      Buffer.from(payload), signature])), signature,
+    createdAt: context.pairedAt };
+  const submit = (changes = {}) => submitPendingDraftPair(db, {
+    tokenSha256: alpha.tokenSha256, csrfToken: alpha.csrfToken,
+    context, action, ...changes });
+  const beforePairAction = db.prepare("SELECT count(*) AS n FROM " +
+    "managed_signed_actions WHERE household_id=?")
+    .get(alpha.householdId).n;
+  for (const change of [
+    { csrfToken: "wrong" },
+    { tokenSha256: beta.tokenSha256 },
+    { context: { ...context, metadataWireSha256: "00".repeat(32) } },
+    { action: { ...action, signature: Buffer.alloc(64) } },
+  ]) assert.throws(() => submit(change), ManagedPendingDraftPairDenied);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_signed_actions " +
+    "WHERE household_id=?").get(alpha.householdId).n, beforePairAction);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_pending_draft_pairs").get().n, 0);
+  const pending = submit();
+  assert.deepEqual(pending, { status: "pending",
+    reservationId: context.reservationId, pairSha256: action.payloadSha256 });
+  assert.deepEqual(submit(), pending);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_signed_actions " +
+    "WHERE household_id=?").get(alpha.householdId).n,
+  beforePairAction + 1);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_pending_draft_pairs WHERE household_id=?")
+    .get(alpha.householdId).n, 1);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_pending_draft_blob_uses WHERE household_id=?")
+    .get(alpha.householdId).n, 2);
+  assert.throws(() => submit({ action: { ...action,
+    signature: Buffer.alloc(64) } }), ManagedPendingDraftPairDenied);
+
   for (const role of ["content", "metadata"]) {
     const row = db.prepare("SELECT nonce AS iv, storage_object_id AS objectId, " +
       "ciphertext_sha256 AS digest, ciphertext_bytes AS bytes " +
@@ -367,7 +456,7 @@ try {
   assert.equal((await receipt(badPair.ids, "metadata", beta)).status, 401);
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.pragma("integrity_check", { simple: true }), "ok");
-  process.stdout.write("PASS: fictional non-day draft content+metadata through Express, private ciphertext disk, v10 commit/receipt, second-connection read, cross-family and revocation denial; no migration or real records.\n");
+  process.stdout.write("PASS: fictional non-day draft upload/receipt through Express, private ciphertext disk, unmounted signed pending-pair writer, exact retry, cross-family and revocation denial; no migration or real records.\n");
 } finally {
   if (server) await new Promise((resolve) => server.close(resolve));
   db.close();

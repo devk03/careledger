@@ -40,11 +40,10 @@ export class PendingDraftPairActionDenied extends Error {
 
 /**
  * Pure signature and state-binding check, not database authorization.
- * A future unmounted writer must load `current` from reservation, exact two
+ * The unmounted v10 writer loads `current` from reservation, exact two
  * committed blobs/intents, live session-device binding, current key/grant and
- * signer enrollment in ONE BEGIN IMMEDIATE transaction, then insert the
- * signed action and pending pair atomically. This function does not decrypt
- * metadata or approve/publish a care day.
+ * signer enrollment in ONE BEGIN IMMEDIATE transaction for a new write.
+ * This function does not decrypt metadata or approve/publish a care day.
  */
 export function verifyPendingDraftPairAction(input: {
   context: PendingDraftPairActionContextV1;

@@ -7,7 +7,8 @@ const id = (byte) => byte.repeat(32);
 
 // Structural invented fixture only. Signatures are not real enrollment proofs.
 export function seedFictionalManagedFamily(db, byte, accountByte, now,
-  { intentByte = "8", blobByte = "9", plaintextBytes = 0 } = {}) {
+  { intentByte = "8", blobByte = "9", plaintextBytes = 0,
+    enrolledSigningPublicKey } = {}) {
   const householdId = id(byte);
   const accountId = id(accountByte);
   const sessionId = id("3");
@@ -20,7 +21,9 @@ export function seedFictionalManagedFamily(db, byte, accountByte, now,
   const token = issueSessionToken();
   const csrfSecret = randomBytes(32);
   const encryptionPublicKey = randomBytes(32);
-  const signingPublicKey = randomBytes(32);
+  const signingPublicKey = enrolledSigningPublicKey ?? randomBytes(32);
+  if (!Buffer.isBuffer(signingPublicKey) || signingPublicKey.length !== 32)
+    throw new Error("Invalid fictional signing key");
   const enrollmentId = id("a");
   const bindingChallengeId = id("b");
   const keyCommitment = randomBytes(32);
