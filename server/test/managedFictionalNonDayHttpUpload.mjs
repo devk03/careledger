@@ -14,6 +14,8 @@ import { createManagedCiphertextAdmissionRouter } from
   "../dist/managed/ciphertextAdmission.js";
 import { readCiphertextChunk } from
   "../dist/managed/ciphertextObjectStore.js";
+import { createManagedDraftPairRouter } from
+  "../dist/managed/managedDraftPairRouter.js";
 import { SqliteDraftPairReservation } from
   "../dist/managed/sqliteDraftPairReservation.js";
 import { assertManagedSchema } from
@@ -78,12 +80,20 @@ try {
     maxGlobalStoredBytes: 2 * 1024 * 1024 });
   const sessions = new SqliteManagedSessions(db);
   const app = express();
+  let limitMode = "allow";
   server = await new Promise((resolve) => {
     const running = app.listen(0, "127.0.0.1", () => resolve(running));
   });
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}`;
+  app.use("/api/managed/draft-pairs", createManagedDraftPairRouter({
+    expectedOrigin: base, service: reservation,
+    rateLimit: () => {
+      if (limitMode === "error") throw new Error("fictional limiter unavailable");
+      return limitMode === "allow";
+    },
+  }));
   app.use(createManagedCiphertextAdmissionRouter({ sessions,
     expectedOrigin: base, store: composition.store }));
   app.use(createManagedUploadReceiptRouter({ expectedOrigin: base,
@@ -101,14 +111,25 @@ try {
   const receipt = (ids, role, family) => fetch(`${url(ids, role)}/receipt`, {
     method: "POST", headers: headers(family, false),
   });
+  const draftPost = (action, family, body, overrides = {}) =>
+    fetch(`${base}/api/managed/draft-pairs/${action}`, {
+      method: "POST", headers: { ...headers(family),
+        "content-type": "application/json", ...overrides },
+      body: JSON.stringify(body),
+    });
   const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 },
     false, ["encrypt", "decrypt"]);
   const marker = "FICTIONAL_DRAFT_RECORD_NOT_A_REAL_PERSON";
   const contentPlain = new TextEncoder().encode(marker);
   async function pair(family, scope, content = contentPlain) {
-    const ids = reservation.reserve({ ...auth(family),
+    const reserved = await draftPost("reserve", family, {
       profileId: family.profileId, scopeId: scope.scopeId,
       keyId: scope.keyId, epoch: 1 });
+    const ids = await reserved.json();
+    assert.equal(reserved.status, 201, JSON.stringify(ids));
+    assert.equal(Object.keys(ids).sort().join(), ["reservationId",
+      "contentIntentId", "metadataIntentId", "contentBlobId",
+      "metadataBlobId", "expiresAt"].sort().join());
     const objectIds = { content: randomBytes(16).toString("hex"),
       metadata: randomBytes(16).toString("hex") };
     const draftScope = (role) => ({ householdId: family.householdId,
@@ -123,18 +144,71 @@ try {
       draftScope("metadata"), Buffer.from(ids.metadataBlobId, "hex"));
     const wires = { content: Buffer.from(encodeManagedVaultBlobV2(contentBlob)),
       metadata: Buffer.from(encodeManagedVaultBlobV2(metadataBlob)) };
-    reservation.bindIntents({ ...auth(family), reservationId: ids.reservationId,
+    const bound = await draftPost("bind-intents", family, {
+      reservationId: ids.reservationId,
       content: { objectId: objectIds.content,
         plaintextBytes: contentBlob.plaintextSize },
       metadata: { objectId: objectIds.metadata,
         plaintextBytes: metadataBlob.plaintextSize } });
-    reservation.openPairedLeases({ ...auth(family),
-      reservationId: ids.reservationId });
+    assert.equal(bound.status, 201, await bound.text());
+    const leased = await draftPost("open-leases", family,
+      { reservationId: ids.reservationId });
+    const leases = await leased.json();
+    assert.equal(leased.status, 201, JSON.stringify(leases));
+    assert.match(leases.contentAttemptId, /^[0-9a-f]{32}$/u);
+    assert.match(leases.metadataAttemptId, /^[0-9a-f]{32}$/u);
     return { ids, wires, blobs: { content: contentBlob,
       metadata: metadataBlob }, draftScope };
   }
 
   const alphaPair = await pair(alpha, alphaDraft);
+  const counts = () => ({ reservations: db.prepare("SELECT count(*) AS n " +
+    "FROM managed_draft_reservations").get().n,
+  intents: db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_upload_intents").get().n,
+  leases: db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_staging_leases").get().n });
+  const beforeDeniedRequests = counts();
+  assert.equal((await draftPost("reserve", alpha, {
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1 },
+  { "x-csrf-token": "wrong" })).status, 404);
+  assert.equal((await draftPost("reserve", alpha, {
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1 },
+  { origin: "https://attacker.example" })).status, 403);
+  assert.equal((await draftPost("reserve", alpha, {
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1, patientName: "never allowed" })).status,
+  400);
+  assert.equal((await draftPost("reserve", alpha, {
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1 },
+  { "content-encoding": "gzip" })).status, 400);
+  assert.equal((await draftPost("reserve", alpha, {
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1,
+    padding: "x".repeat(3_000) })).status, 413);
+  assert.equal((await draftPost("open-leases", beta,
+    { reservationId: alphaPair.ids.reservationId })).status, 404);
+  assert.equal((await draftPost("open-leases", alpha,
+    { reservationId: alphaPair.ids.reservationId })).status, 404);
+  assert.equal((await fetch(`${base}/api/managed/draft-pairs/reserve`, {
+    method: "GET", headers: headers(alpha, false) })).status, 405);
+  const options = await fetch(`${base}/api/managed/draft-pairs/reserve`, {
+    method: "OPTIONS", headers: headers(alpha, false) });
+  assert.equal(options.status, 405);
+  assert.equal(options.headers.get("access-control-allow-origin"), null);
+  limitMode = "deny";
+  assert.equal((await draftPost("reserve", alpha, {
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1 })).status, 429);
+  limitMode = "error";
+  assert.equal((await draftPost("reserve", alpha, {
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1 })).status, 503);
+  limitMode = "allow";
+  assert.deepEqual(counts(), beforeDeniedRequests);
   const before = db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
     "FROM managed_wire_occupancy").get().bytes;
   assert.equal(before, alphaPair.wires.content.byteLength +
