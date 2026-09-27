@@ -707,7 +707,8 @@ try {
   // The ledger borrows the same already-private, integrity-checked connection
   // as other managed services. Its nested transactions must not publish or
   // close the outer fictional BEGIN/ROLLBACK transaction.
-  const ledger = new SqliteManagedUploadLedger({ connection: db }, 1000);
+  const ledger = new SqliteManagedUploadLedger({ connection: db }, 1000,
+    4 * MANAGED_VAULT_CHUNK_BYTES);
   assert.equal(db.inTransaction, true);
   const sessionView = (family) => ({
     scope: { householdId: family.h, userId: family.a },
@@ -785,7 +786,8 @@ try {
   insertAuthorizedIntent.run(alpha.h, id("f"), profileId, scopeId,
     keyId, id("9"), alpha.d, alpha.s, secondIntentAt,
     secondIntentAt + 600);
-  const strictLedger = new SqliteManagedUploadLedger({ connection: db }, 65);
+  const strictLedger = new SqliteManagedUploadLedger({ connection: db }, 65,
+    4 * MANAGED_VAULT_CHUNK_BYTES);
   await assert.rejects(strictLedger.openForStaging({
     session: sessionView(alpha), tokenSha256: alpha.session.sha256,
     csrfToken: alpha.session.csrf, intentId: id("f"),
@@ -837,7 +839,7 @@ try {
     .run(alpha.h, multiIntentId, profileId, scopeId, keyId, multiBlobId,
       alpha.d, alpha.s, multiPlaintextBytes, multiAt, multiAt + 600);
   const multiLedger = new SqliteManagedUploadLedger({ connection: db },
-    2 * MANAGED_VAULT_CHUNK_BYTES);
+    2 * MANAGED_VAULT_CHUNK_BYTES, 4 * MANAGED_VAULT_CHUNK_BYTES);
   const stagedMulti = await multiLedger.openForStaging({
     session: sessionView(alpha), tokenSha256: alpha.session.sha256,
     csrfToken: alpha.session.csrf, intentId: multiIntentId,
@@ -898,11 +900,13 @@ try {
     "adeno-fictional-composed-"));
   assert.throws(() => createManagedUploadComposition({ connection: db,
     objectRoot: "relative-fictional-object-root",
-    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES }),
+    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES,
+    maxGlobalStoredBytes: 4 * MANAGED_VAULT_CHUNK_BYTES }),
   ManagedUploadCompositionUnavailable);
   const composed = createManagedUploadComposition({ connection: db,
     objectRoot: composedObjectRoot,
-    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES });
+    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES,
+    maxGlobalStoredBytes: 4 * MANAGED_VAULT_CHUNK_BYTES });
   const composedStore = composed.store;
   const uploadPreflight = { tokenSha256: alpha.session.sha256,
     csrfToken: alpha.session.csrf };
@@ -951,7 +955,8 @@ try {
     "adeno-fictional-altered-"));
   const altered = createManagedUploadComposition({ connection: db,
     objectRoot: alteredObjectRoot,
-    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES });
+    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES,
+    maxGlobalStoredBytes: 4 * MANAGED_VAULT_CHUNK_BYTES });
   const alteredStore = altered.store;
   const alteredIv = Buffer.alloc(12, 7);
   const alteredCiphertext = new Uint8Array(16).fill(8);
@@ -994,6 +999,136 @@ try {
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
     "WHERE household_id=? AND intent_id=? AND committed_at IS NULL")
     .get(alpha.h, alteredIntentId).n, 1);
+  assert.equal(db.inTransaction, true);
+
+  // Global logical quota: a second household with its own active day grant
+  // competes for the same total reservation pool, although both families are
+  // below their individual caps. Key/grant rows here are structural fixtures.
+  const betaProfileId = id("a");
+  const betaScopeId = id("b");
+  const betaKeyId = id("c");
+  const betaKeyCommitment = randomBytes(32);
+  const betaFixtureAt = Math.floor(Date.now() / 1000);
+  const betaAction = (kind) => {
+    const prior = db.prepare("SELECT counter, action_sha256 AS hash " +
+      "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
+      "ORDER BY counter DESC LIMIT 1").get(beta.h, beta.d);
+    const counter = (prior?.counter ?? 0) + 1;
+    const payloadHash = randomBytes(32);
+    db.prepare("INSERT INTO managed_signed_actions " +
+      "(household_id,device_id,counter,action_kind,payload_sha256," +
+      "previous_action_sha256,action_sha256,signature,created_at) " +
+      "VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(beta.h, beta.d, counter, kind, payloadHash,
+        prior?.hash ?? null, randomBytes(32), randomBytes(64), betaFixtureAt);
+    return { counter, payloadHash };
+  };
+  db.prepare("INSERT INTO managed_profiles " +
+    "(household_id,id,state,created_by_account_id,created_at) " +
+    "VALUES (?,?,'active',?,?)")
+    .run(beta.h, betaProfileId, beta.a, betaFixtureAt);
+  db.prepare("INSERT INTO managed_scopes " +
+    "(household_id,profile_id,id,kind,state,created_by_device_id,created_at) " +
+    "VALUES (?,?,?,'day','active',?,?)")
+    .run(beta.h, betaProfileId, betaScopeId, beta.d, betaFixtureAt);
+  const betaRegistration = betaAction("key");
+  db.prepare("INSERT INTO managed_key_identities " +
+    "(household_id,profile_id,scope_id,key_id,epoch,purpose," +
+    "key_commitment,signed_payload_sha256,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,1,'day',?,?,?,?,?)")
+    .run(beta.h, betaProfileId, betaScopeId, betaKeyId, betaKeyCommitment,
+      betaRegistration.payloadHash, beta.d, betaRegistration.counter,
+      betaFixtureAt);
+  const betaActivation = betaAction("key");
+  db.prepare("INSERT INTO managed_active_key_events " +
+    "(household_id,profile_id,scope_id,sequence,previous_sha256," +
+    "previous_key_id,previous_epoch,event_sha256,key_id,epoch,purpose," +
+    "key_commitment,registration_sha256,issuer_device_id,session_id," +
+    "issuer_counter,created_at) " +
+    "VALUES (?,?,?,1,NULL,NULL,NULL,?,?,1,'day',?,?,?,?,?,?)")
+    .run(beta.h, betaProfileId, betaScopeId,
+      betaActivation.payloadHash, betaKeyId, betaKeyCommitment,
+      betaRegistration.payloadHash, beta.d, beta.s,
+      betaActivation.counter, betaFixtureAt);
+  db.prepare("INSERT INTO managed_grant_heads " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "head_sha256,capability_mask,updated_at) VALUES (?,?,?,?,0,NULL,0,?)")
+    .run(beta.h, betaProfileId, betaScopeId, beta.d, betaFixtureAt);
+  const betaGrant = betaAction("grant");
+  db.prepare("INSERT INTO managed_grant_events " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,1,NULL,?,3,?,?,?)")
+    .run(beta.h, betaProfileId, betaScopeId, beta.d,
+      betaGrant.payloadHash, beta.d, betaGrant.counter, betaFixtureAt);
+  const betaQuotaIntentId = id("a");
+  const betaQuotaBlobId = id("b");
+  db.prepare("INSERT INTO managed_upload_intents " +
+    "(household_id,id,profile_id,scope_id,key_id,epoch,purpose," +
+    "wire_version,blob_id,writer_device_id,session_id,plaintext_bytes," +
+    "chunk_count,created_at,expires_at) " +
+    "VALUES (?,?,?,?,?,1,'day',2,?,?,?,0,1,?,?)")
+    .run(beta.h, betaQuotaIntentId, betaProfileId, betaScopeId, betaKeyId,
+      betaQuotaBlobId, beta.d, beta.s, betaFixtureAt, betaFixtureAt + 600);
+  const globalOccupancy = () => db.prepare("SELECT COALESCE(SUM(bytes),0) " +
+    "AS bytes FROM managed_wire_occupancy").get().bytes;
+  const familyOccupancy = (householdId) => db.prepare(
+    "SELECT COALESCE(SUM(bytes),0) AS bytes FROM managed_wire_occupancy " +
+    "WHERE household_id=?").get(householdId).bytes;
+  const baselineOccupancy = globalOccupancy();
+  assert.ok(Number.isSafeInteger(baselineOccupancy));
+  const individualCap = 2 * MANAGED_VAULT_CHUNK_BYTES;
+  assert.ok(familyOccupancy(alpha.h) + 65 <= individualCap);
+  assert.ok(familyOccupancy(beta.h) + 65 <= individualCap);
+  const betaOpenInput = { session: sessionView(beta),
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf,
+    intentId: betaQuotaIntentId, signal: uploadSignal };
+  const fullLedger = new SqliteManagedUploadLedger({ connection: db },
+    individualCap, baselineOccupancy);
+  await assert.rejects(fullLedger.openForStaging(betaOpenInput),
+    ManagedVaultUploadDeniedError);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
+    "WHERE household_id=? AND intent_id=?")
+    .get(beta.h, betaQuotaIntentId).n, 0);
+  fullLedger.close();
+  const quotaLedger = new SqliteManagedUploadLedger({ connection: db },
+    individualCap, baselineOccupancy + 65);
+  const stagedBeta = await quotaLedger.openForStaging(betaOpenInput);
+  assert.ok(stagedBeta);
+  assert.equal(globalOccupancy(), baselineOccupancy + 65);
+  assert.ok(familyOccupancy(alpha.h) + 65 <= individualCap);
+  const alphaQuotaIntentId = id("a");
+  insertAuthorizedIntent.run(alpha.h, alphaQuotaIntentId, profileId, scopeId,
+    keyId, id("b"), alpha.d, alpha.s, betaFixtureAt, betaFixtureAt + 600);
+  await assert.rejects(quotaLedger.openForStaging({
+    session: sessionView(alpha), tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf, intentId: alphaQuotaIntentId,
+    signal: uploadSignal }), ManagedVaultUploadDeniedError);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
+    "WHERE household_id=? AND intent_id=?")
+    .get(alpha.h, alphaQuotaIntentId).n, 0);
+  assert.equal(globalOccupancy(), baselineOccupancy + 65);
+  const betaQuotaIv = Buffer.alloc(12, 9);
+  const betaQuotaCiphertext = new Uint8Array(16).fill(9);
+  const betaQuotaWire = encodeManagedVaultBlobV2({
+    format: MANAGED_VAULT_FORMAT_V2,
+    blobId: Buffer.from(betaQuotaBlobId, "hex"), plaintextSize: 0,
+    chunkSize: MANAGED_VAULT_CHUNK_BYTES,
+    chunks: [{ iv: betaQuotaIv, ciphertext: betaQuotaCiphertext.buffer }],
+  });
+  await quotaLedger.publishVerified({ intent: stagedBeta,
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf,
+    wireSha256: digest(betaQuotaWire), wireBytes: betaQuotaWire.byteLength,
+    chunks: [{ index: 0, iv: betaQuotaIv, storageObjectId: id("d"),
+      ciphertextSha256: digest(betaQuotaCiphertext), ciphertextBytes: 16 }],
+    signal: uploadSignal });
+  assert.equal(globalOccupancy(), baselineOccupancy + 65);
+  assert.deepEqual(await quotaLedger.readReceipt({
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf,
+    intentId: betaQuotaIntentId, blobId: betaQuotaBlobId }), {
+    status: "committed", wireSha256: sha256Hex(betaQuotaWire), wireBytes: 65,
+  });
+  quotaLedger.close();
   assert.equal(db.inTransaction, true);
 
   // Separate historical-key backfill fixture. These old key/grant actions are
@@ -1522,7 +1657,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, disk-proof ledger/receipt, tamper denial and two-chunk rollback; cross-family, nonce replay, quota and grant/device/session revocation denial");
+  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, disk-proof ledger/receipt, tamper denial, two-family global logical quota and two-chunk rollback; cross-family, nonce replay and grant/device/session revocation denial");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.

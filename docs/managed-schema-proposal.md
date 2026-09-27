@@ -43,9 +43,17 @@ exact received wire bytes to an unmounted staging adapter. That adapter writes
 private chunks, re-reads each object through the commit-proof helper, checks
 the complete wire digest, and converts SHA-256 hex to 32-byte database values.
 An unmounted managed ledger now drafts an atomic current-grant/session/nonce
-commit and per-family lease quota. A borrowed private managed connection let
+commit and per-family plus global **logical wire** lease quotas. A borrowed private managed connection let
 the rollback-only fictional v10 run prove a one-chunk commit, receipt transition,
-quota denial, nonce-reuse rollback, revocation denial and lease accounting.
+quota denial across two unrelated families, nonce-reuse rollback, revocation
+denial and lease accounting. The global cap sums existing committed day/non-day
+wires and uncommitted leases under the same immediate transaction; the fictional
+test shows that a committed blob replaces its lease without double counting.
+This cap does not include orphaned files, pending aliases, WAL files or backups.
+It is an application-side check, not a database invariant: a differently
+configured or direct writer could bypass it. Every future non-day writer must
+use the same policy, and a single-writer/central configuration plus independent
+multi-connection race evidence remain release gates.
 The same fictional run now composes that ledger with real private object staging:
 it re-reads invented ciphertext-shaped bytes, verifies the exact wire digest,
 commits their object IDs and hashes, and returns a matching receipt. Altering a

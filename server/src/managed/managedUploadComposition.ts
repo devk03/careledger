@@ -23,6 +23,7 @@ export function createManagedUploadComposition(input: {
   connection: Database.Database;
   objectRoot: string;
   maxStoredBytesPerFamily: number;
+  maxGlobalStoredBytes: number;
 }): Readonly<{ store: ManagedVaultUploadStore;
   receipts: ManagedUploadReceiptReader }> {
   let objectRoot: string;
@@ -38,7 +39,7 @@ export function createManagedUploadComposition(input: {
     objectRoot = realpathSync(input.objectRoot);
   } catch { throw new ManagedUploadCompositionUnavailable(); }
   const ledger = new SqliteManagedUploadLedger({ connection: input.connection },
-    input.maxStoredBytesPerFamily);
+    input.maxStoredBytesPerFamily, input.maxGlobalStoredBytes);
   return Object.freeze({
     store: createStagedManagedVaultUploadStore({ objectRoot, ledger }),
     receipts: Object.freeze({ readReceipt: (request:

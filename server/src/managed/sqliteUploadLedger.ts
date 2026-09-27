@@ -61,6 +61,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
   ManagedUploadReceiptReader {
   private readonly db: Database.Database;
   private readonly maxStoredBytesPerFamily: number;
+  private readonly maxGlobalStoredBytes: number;
   private readonly ownsConnection: boolean;
   private readonly canonicalPath: string;
   private readonly schemaVersion: number;
@@ -68,12 +69,14 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
   /** A shared connection lets managed services compose one write transaction.
    * The caller retains ownership; close() only closes a path-opened connection. */
   constructor(source: string | { connection: Database.Database },
-    maxStoredBytesPerFamily: number) {
+    maxStoredBytesPerFamily: number, maxGlobalStoredBytes: number) {
     const ownsConnection = typeof source === "string";
     const path = ownsConnection ? source : source?.connection?.name;
     if (typeof path !== "string" || !isAbsolute(path) ||
       !Number.isSafeInteger(maxStoredBytesPerFamily) ||
-      maxStoredBytesPerFamily < 65)
+      maxStoredBytesPerFamily < 65 ||
+      !Number.isSafeInteger(maxGlobalStoredBytes) ||
+      maxGlobalStoredBytes < 65)
       throw new IncompatibleManagedLedger();
     assertPrivateDirectory(dirname(path));
     assertPrivateFile(path, true);
@@ -118,6 +121,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
     this.canonicalPath = realpathSync(path);
     this.schemaVersion = schemaVersion;
     this.maxStoredBytesPerFamily = maxStoredBytesPerFamily;
+    this.maxGlobalStoredBytes = maxGlobalStoredBytes;
   }
 
   async openForStaging(input: Parameters<ManagedUploadLedger["openForStaging"]>[0]):
@@ -139,7 +143,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       const row = this.currentIntent(currentSession, input.intentId);
       if (!row) return null;
       const wireBytes = 33 + row.plaintextBytes + 32 * row.chunkCount;
-      if (!this.withinFamilyQuota(row.householdId, wireBytes))
+      if (!this.withinQuota(row.householdId, wireBytes))
         throw new ManagedVaultUploadDeniedError();
       const attemptId = randomBytes(16).toString("hex");
       this.db.prepare<[string, string, string, number, number]>(
@@ -190,7 +194,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
         input.wireBytes !== 33 + row.plaintextBytes + 32 * row.chunkCount ||
         !validChunks(input.chunks, row.plaintextBytes))
         throw new ManagedVaultUploadDeniedError();
-      if (!this.withinFamilyQuota(row.householdId, 0))
+      if (!this.withinQuota(row.householdId, 0))
         throw new ManagedVaultUploadDeniedError();
 
       const now = Math.floor(Date.now() / 1000);
@@ -306,14 +310,20 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
     } catch { throw new IncompatibleManagedLedger(); }
   }
 
-  /** Count committed wires plus every uncommitted physical reservation. */
-  private withinFamilyQuota(householdId: string, additionalBytes: number): boolean {
-    const usage = this.db.prepare<[string], { bytes: number }>(
-      "SELECT COALESCE(SUM(bytes), 0) AS bytes FROM managed_wire_occupancy " +
-      "WHERE household_id = ?",
+  /** Account for committed wires and uncommitted leases across all families. */
+  private withinQuota(householdId: string, additionalBytes: number): boolean {
+    const usage = this.db.prepare<[string], { familyBytes: number;
+      globalBytes: number }>(
+      "SELECT COALESCE(SUM(CASE WHEN household_id = ? THEN bytes " +
+      "ELSE 0 END), 0) AS familyBytes, " +
+      "COALESCE(SUM(bytes), 0) AS globalBytes FROM managed_wire_occupancy",
     ).get(householdId);
-    return !!usage && Number.isSafeInteger(usage.bytes) &&
-      usage.bytes <= this.maxStoredBytesPerFamily - additionalBytes;
+    return !!usage && Number.isSafeInteger(additionalBytes) &&
+      additionalBytes >= 0 &&
+      Number.isSafeInteger(usage.familyBytes) && usage.familyBytes >= 0 &&
+      Number.isSafeInteger(usage.globalBytes) && usage.globalBytes >= 0 &&
+      usage.familyBytes <= this.maxStoredBytesPerFamily - additionalBytes &&
+      usage.globalBytes <= this.maxGlobalStoredBytes - additionalBytes;
   }
 
   private currentSession(tokenSha256: string, csrfToken: string): SessionRow | null {
