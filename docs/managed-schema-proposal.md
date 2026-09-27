@@ -52,8 +52,14 @@ test shows that a committed blob replaces its lease without double counting.
 This cap does not include orphaned files, pending aliases, WAL files or backups.
 It is an application-side check, not a database invariant: a differently
 configured or direct writer could bypass it. Every future non-day writer must
-use the same policy, and a single-writer/central configuration plus independent
-multi-connection race evidence remain release gates.
+use the same policy. A separate, pinned-source fictional test copies the empty
+managed schema into a private temp directory, seeds two structural authorized
+families, starts two independent ledger workers while a SQLite writer lock is
+held, and observes exactly one 65-byte lease and one quota denial after release.
+The test
+leaves its synthetic copy for inspection and does not exercise a full signed
+client grant. One race does not establish all concurrency behavior; a
+single-writer/central configuration remains a release gate.
 The unmounted ledger now rejects a borrowed connection unless its initial
 journal/sync pair is WAL+FULL/EXTRA or DELETE+EXTRA, and detects changes on
 each ledger transaction; a path-owned connection sets EXTRA itself. This is
@@ -342,7 +348,7 @@ rotation/key/grant setup is structural test data, not
 proof of the full signed key-rotation ceremony; a backfill-specific revoked
 recipient-device case remains untested. Ledger nonce-collision rollback and a
 one-chunk exact disk-object proof joined to metadata commit are tested in
-separate fictional paths. HTTP/browser upload, concurrent races and complete
+separate fictional paths. HTTP/browser upload, broader concurrent races and complete
 authorized flows remain untested.
 This lineage is new-only: the runner creates a fresh empty managed database and
 does not migrate a database that already contains pre-binding v2 envelopes.
