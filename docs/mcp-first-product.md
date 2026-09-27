@@ -4,6 +4,8 @@ Current direction: the [visual treatment timeline](treatment-timeline-product.md
 
 Decision recorded 2026-09-22. This is the intended product direction, not an implemented feature. The maintainer confirmed that hosted storage must remain family controlled and the server must not gain the ability to decrypt family records merely to support web-based AI clients. The existing community app has no MCP endpoint, no inbound MCP OAuth, no individual family accounts, and no managed end-to-end encrypted record flow. The current app remains useful as a local record workspace while this design is built.
 
+An [unmounted fictional-local HTTP candidate](managed-mcp-profile-http-candidate.md) now proves the SDK transport for a metadata-only connection profile. It does not change the deployed app, implement OAuth/consent, or expose health records.
+
 ## Product shape
 
 adeno is the trusted record, timeline and family coordination layer. The website is where a caregiver drops files, views the day-by-day history, corrects day cards, checks source pages, approves updates and manages access. A compatible AI client can query the same approved timeline through adeno's narrowly scoped MCP tools and submit source material for later review. Website access remains fully usable without an AI client.

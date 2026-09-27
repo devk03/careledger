@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@adeno/contracts": "file:../packages/contracts",
+    "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@node-rs/argon2": "2.2.1",
     "better-sqlite3": "13.0.3",
