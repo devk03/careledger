@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => ({
   },
   test: {
     environment: "jsdom",
-    exclude: ["e2e/**", "node_modules/**", "dist/**"],
+    exclude: ["e2e/**", "e2e-public-shell/**", "node_modules/**", "dist/**"],
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
   },

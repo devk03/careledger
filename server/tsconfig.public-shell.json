@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "dist-public-shell" },
+  "include": [
+    "src/publicShell.ts",
+    "src/publicProjectStats.ts",
+    "src/runPublicShell.ts"
+  ],
+  "exclude": ["test/**/*.ts"]
+}

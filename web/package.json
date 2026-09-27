@@ -8,9 +8,11 @@
     "dev": "npm run build:contracts && vite --host 0.0.0.0",
     "preview:ui": "npm run build:contracts && vite --mode ui-preview --host 127.0.0.1 --port 5175 --strictPort",
     "build": "npm run build:contracts && tsc -b && vite build",
+    "build:public-shell": "tsc -p tsconfig.public-shell.json && vite build --config vite.public-shell.config.ts",
     "lint": "eslint . --max-warnings 0",
     "test": "npm run build:contracts && vitest run",
-    "test:e2e": "npm run build:contracts && playwright test"
+    "test:e2e": "npm run build:contracts && playwright test",
+    "test:public-shell": "npm --prefix ../server run build:public-shell && npm run build:public-shell && playwright test --config playwright.public-shell.config.ts"
   },
   "dependencies": {
     "@adeno/contracts": "file:../packages/contracts",
