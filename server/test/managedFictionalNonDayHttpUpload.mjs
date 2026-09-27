@@ -122,11 +122,23 @@ try {
   const marker = "FICTIONAL_DRAFT_RECORD_NOT_A_REAL_PERSON";
   const contentPlain = new TextEncoder().encode(marker);
   async function pair(family, scope, content = contentPlain) {
-    const reserved = await draftPost("reserve", family, {
+    const beforePair = {
+      reservations: db.prepare("SELECT count(*) AS n FROM " +
+        "managed_draft_reservations").get().n,
+      intents: db.prepare("SELECT count(*) AS n FROM " +
+        "managed_non_day_upload_intents").get().n,
+      leases: db.prepare("SELECT count(*) AS n FROM " +
+        "managed_non_day_staging_leases").get().n,
+    };
+    const reserveBody = { reservationId: randomBytes(16).toString("hex"),
       profileId: family.profileId, scopeId: scope.scopeId,
-      keyId: scope.keyId, epoch: 1 });
+      keyId: scope.keyId, epoch: 1 };
+    const reserved = await draftPost("reserve", family, reserveBody);
     const ids = await reserved.json();
     assert.equal(reserved.status, 201, JSON.stringify(ids));
+    const reserveRetry = await draftPost("reserve", family, reserveBody);
+    assert.equal(reserveRetry.status, 201);
+    assert.deepEqual(await reserveRetry.json(), ids);
     assert.equal(Object.keys(ids).sort().join(), ["reservationId",
       "contentIntentId", "metadataIntentId", "contentBlobId",
       "metadataBlobId", "expiresAt"].sort().join());
@@ -144,21 +156,40 @@ try {
       draftScope("metadata"), Buffer.from(ids.metadataBlobId, "hex"));
     const wires = { content: Buffer.from(encodeManagedVaultBlobV2(contentBlob)),
       metadata: Buffer.from(encodeManagedVaultBlobV2(metadataBlob)) };
-    const bound = await draftPost("bind-intents", family, {
+    const bindBody = {
       reservationId: ids.reservationId,
       content: { objectId: objectIds.content,
         plaintextBytes: contentBlob.plaintextSize },
       metadata: { objectId: objectIds.metadata,
-        plaintextBytes: metadataBlob.plaintextSize } });
-    assert.equal(bound.status, 201, await bound.text());
+        plaintextBytes: metadataBlob.plaintextSize } };
+    const bound = await draftPost("bind-intents", family, bindBody);
+    const boundIds = await bound.json();
+    assert.equal(bound.status, 201, JSON.stringify(boundIds));
+    const bindRetry = await draftPost("bind-intents", family, bindBody);
+    assert.equal(bindRetry.status, 201);
+    assert.deepEqual(await bindRetry.json(), boundIds);
+    assert.equal((await draftPost("bind-intents", family, {
+      ...bindBody, metadata: { ...bindBody.metadata,
+        objectId: randomBytes(16).toString("hex") } })).status, 404);
     const leased = await draftPost("open-leases", family,
       { reservationId: ids.reservationId });
     const leases = await leased.json();
     assert.equal(leased.status, 201, JSON.stringify(leases));
+    const leaseRetry = await draftPost("open-leases", family,
+      { reservationId: ids.reservationId });
+    assert.equal(leaseRetry.status, 201);
+    assert.deepEqual(await leaseRetry.json(), leases);
     assert.match(leases.contentAttemptId, /^[0-9a-f]{32}$/u);
     assert.match(leases.metadataAttemptId, /^[0-9a-f]{32}$/u);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+      "managed_draft_reservations").get().n, beforePair.reservations + 1);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+      "managed_non_day_upload_intents").get().n, beforePair.intents + 2);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+      "managed_non_day_staging_leases").get().n, beforePair.leases + 2);
     return { ids, wires, blobs: { content: contentBlob,
-      metadata: metadataBlob }, draftScope };
+      metadata: metadataBlob }, draftScope, leases, reserveBody, bindBody,
+    boundIds };
   }
 
   const alphaPair = await pair(alpha, alphaDraft);
@@ -169,30 +200,26 @@ try {
   leases: db.prepare("SELECT count(*) AS n FROM " +
     "managed_non_day_staging_leases").get().n });
   const beforeDeniedRequests = counts();
-  assert.equal((await draftPost("reserve", alpha, {
+  const deniedReserve = { reservationId: randomBytes(16).toString("hex"),
     profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
-    keyId: alphaDraft.keyId, epoch: 1 },
+    keyId: alphaDraft.keyId, epoch: 1 };
+  assert.equal((await draftPost("reserve", alpha, deniedReserve,
   { "x-csrf-token": "wrong" })).status, 404);
-  assert.equal((await draftPost("reserve", alpha, {
-    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
-    keyId: alphaDraft.keyId, epoch: 1 },
+  assert.equal((await draftPost("reserve", alpha, deniedReserve,
   { origin: "https://attacker.example" })).status, 403);
   assert.equal((await draftPost("reserve", alpha, {
-    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
-    keyId: alphaDraft.keyId, epoch: 1, patientName: "never allowed" })).status,
+    ...deniedReserve, patientName: "never allowed" })).status,
   400);
-  assert.equal((await draftPost("reserve", alpha, {
-    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
-    keyId: alphaDraft.keyId, epoch: 1 },
+  assert.equal((await draftPost("reserve", alpha, deniedReserve,
   { "content-encoding": "gzip" })).status, 400);
   assert.equal((await draftPost("reserve", alpha, {
-    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
-    keyId: alphaDraft.keyId, epoch: 1,
-    padding: "x".repeat(3_000) })).status, 413);
+    ...deniedReserve, padding: "x".repeat(3_000) })).status, 413);
   assert.equal((await draftPost("open-leases", beta,
     { reservationId: alphaPair.ids.reservationId })).status, 404);
-  assert.equal((await draftPost("open-leases", alpha,
-    { reservationId: alphaPair.ids.reservationId })).status, 404);
+  const stableLeases = await draftPost("open-leases", alpha,
+    { reservationId: alphaPair.ids.reservationId });
+  assert.equal(stableLeases.status, 201);
+  assert.deepEqual(await stableLeases.json(), alphaPair.leases);
   assert.equal((await fetch(`${base}/api/managed/draft-pairs/reserve`, {
     method: "GET", headers: headers(alpha, false) })).status, 405);
   const options = await fetch(`${base}/api/managed/draft-pairs/reserve`, {
@@ -200,13 +227,11 @@ try {
   assert.equal(options.status, 405);
   assert.equal(options.headers.get("access-control-allow-origin"), null);
   limitMode = "deny";
-  assert.equal((await draftPost("reserve", alpha, {
-    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
-    keyId: alphaDraft.keyId, epoch: 1 })).status, 429);
+  assert.equal((await draftPost("reserve", alpha,
+    alphaPair.reserveBody)).status, 429);
+  assert.equal((await draftPost("reserve", alpha, deniedReserve)).status, 429);
   limitMode = "error";
-  assert.equal((await draftPost("reserve", alpha, {
-    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
-    keyId: alphaDraft.keyId, epoch: 1 })).status, 503);
+  assert.equal((await draftPost("reserve", alpha, deniedReserve)).status, 503);
   limitMode = "allow";
   assert.deepEqual(counts(), beforeDeniedRequests);
   const before = db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
@@ -241,6 +266,20 @@ try {
     assert.deepEqual(receiptBody, { status: "committed",
       wireSha256: createHash("sha256").update(alphaPair.wires[role])
         .digest("hex"), wireBytes: alphaPair.wires[role].byteLength });
+    if (role === "content") {
+      const beforeReadback = counts();
+      const reserveReadback = await draftPost("reserve", alpha,
+        alphaPair.reserveBody);
+      assert.equal(reserveReadback.status, 201);
+      assert.deepEqual(await reserveReadback.json(), alphaPair.ids);
+      const bindReadback = await draftPost("bind-intents", alpha,
+        alphaPair.bindBody);
+      assert.equal(bindReadback.status, 201);
+      assert.deepEqual(await bindReadback.json(), alphaPair.boundIds);
+      assert.equal((await draftPost("open-leases", alpha,
+        { reservationId: alphaPair.ids.reservationId })).status, 404);
+      assert.deepEqual(counts(), beforeReadback);
+    }
     assert.equal(db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
       "FROM managed_wire_occupancy").get().bytes, before);
   }

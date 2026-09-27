@@ -12,10 +12,13 @@ const MAX_METADATA_BYTES = 16 * 1024;
 class InvalidDraftBody extends Error {}
 
 /**
- * UNMOUNTED managed draft preflight. A reservation response can be lost, and
- * v10 cannot safely reclaim abandoned leases or ID claims. Do not expose this
- * router publicly until idempotent recovery, storage reconciliation, shared
- * rate limiting and non-day SQL bound-device guards have been reviewed.
+ * UNMOUNTED managed draft preflight. The client must persist a fresh WebCrypto
+ * 128-bit reservation ID before requesting server-issued intent/blob IDs.
+ * Exact same-session retries can recover within the live reservation window;
+ * expiry, revocation and limiter denial still fail closed. V10 cannot safely
+ * reclaim abandoned leases or ID claims. Do not expose this router publicly
+ * until lifecycle recovery, shared rate limiting and non-day SQL bound-device
+ * guards have been reviewed.
  * No medical plaintext, filenames or care dates pass through these routes.
  */
 export function createManagedDraftPairRouter(input: {
@@ -108,12 +111,16 @@ export function createManagedDraftPairRouter(input: {
   }
 
   post("reserve", (caller, body) => {
-    if (!exactKeys(body, ["profileId", "scopeId", "keyId", "epoch"]) ||
+    if (!exactKeys(body, ["reservationId", "profileId", "scopeId",
+      "keyId", "epoch"]) ||
+      !validId(body.reservationId) ||
       !validId(body.profileId) || !validId(body.scopeId) ||
       !validId(body.keyId) || !Number.isSafeInteger(body.epoch) ||
       (body.epoch as number) < 1 || (body.epoch as number) > 0xffffffff)
       throw new InvalidDraftBody();
-    return input.service.reserve({ ...caller, profileId: body.profileId,
+    return input.service.reserve({ ...caller,
+      reservationId: body.reservationId,
+      profileId: body.profileId,
       scopeId: body.scopeId, keyId: body.keyId,
       epoch: body.epoch as number });
   });

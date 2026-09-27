@@ -83,6 +83,7 @@ try {
   const auth = (family) => ({ tokenSha256: family.tokenSha256,
     csrfToken: family.csrfToken });
   const reserve = (family, scope) => service.reserve({ ...auth(family),
+    reservationId: randomBytes(16).toString("hex"),
     profileId: family.profileId, scopeId: scope.scopeId,
     keyId: scope.keyId, epoch: 1 });
   const busyDb = new Database(dbPath, { fileMustExist: true, timeout: 50 });
@@ -93,6 +94,7 @@ try {
     const busyService = new SqliteDraftPairReservation(busyDb, 4096, 8192);
     db.exec("BEGIN IMMEDIATE");
     assert.throws(() => busyService.reserve({ ...auth(alpha),
+      reservationId: randomBytes(16).toString("hex"),
       profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
       keyId: alphaDraft.keyId, epoch: 1 }), ManagedDraftPairBusy);
     db.exec("ROLLBACK");
@@ -106,14 +108,29 @@ try {
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_upload_id_claims " +
     "WHERE household_id=? AND lineage='draft_reserved'")
     .get(alpha.householdId).n, 4);
+  const retryAlpha = () => service.reserve({ ...auth(alpha),
+    reservationId: alphaIds.reservationId,
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1 });
+  assert.deepEqual(retryAlpha(), alphaIds);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_upload_id_claims " +
+    "WHERE household_id=? AND lineage='draft_reserved'")
+    .get(alpha.householdId).n, 4);
   assert.throws(() => service.reserve({ ...auth(alpha), csrfToken: "wrong",
+    reservationId: randomBytes(16).toString("hex"),
     profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
     keyId: alphaDraft.keyId, epoch: 1 }), ManagedDraftPairDenied);
   assert.throws(() => service.reserve({ ...auth(beta),
+    reservationId: randomBytes(16).toString("hex"),
     profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
     keyId: alphaDraft.keyId, epoch: 1 }), ManagedDraftPairDenied);
   const secondSession = seedSecondSession(db, alpha, now);
+  assert.throws(() => service.reserve({ ...secondSession,
+    reservationId: alphaIds.reservationId,
+    profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+    keyId: alphaDraft.keyId, epoch: 1 }), ManagedDraftPairDenied);
   const secondSessionPair = service.reserve({ ...secondSession,
+    reservationId: randomBytes(16).toString("hex"),
     profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
     keyId: alphaDraft.keyId, epoch: 1 });
   assert.notEqual(secondSessionPair.reservationId, alphaIds.reservationId);
@@ -148,6 +165,13 @@ try {
   ManagedDraftPairDenied);
   const bound = service.bindIntents({ ...auth(alpha),
     reservationId: alphaIds.reservationId, ...parts });
+  assert.deepEqual(service.bindIntents({ ...auth(alpha),
+    reservationId: alphaIds.reservationId, ...parts }), bound);
+  assert.throws(() => service.bindIntents({ ...auth(alpha),
+    reservationId: alphaIds.reservationId,
+    content: { ...parts.content,
+      objectId: randomBytes(16).toString("hex") },
+    metadata: parts.metadata }), ManagedDraftPairDenied);
   assert.equal(bound.contentBlobId, alphaIds.contentBlobId);
   assert.equal(bound.metadataBlobId, alphaIds.metadataBlobId);
   assert.deepEqual(db.prepare("SELECT role FROM managed_non_day_upload_intents " +
@@ -180,8 +204,8 @@ try {
   assert.notEqual(leases.contentAttemptId, leases.metadataAttemptId);
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_non_day_staging_leases " +
     "WHERE household_id=?").get(alpha.householdId).n, 2);
-  assert.throws(() => service.openPairedLeases({ ...auth(alpha),
-    reservationId: alphaIds.reservationId }), ManagedDraftPairDenied);
+  assert.deepEqual(service.openPairedLeases({ ...auth(alpha),
+    reservationId: alphaIds.reservationId }), leases);
 
   // Two independent SQLite connections contest a cap that admits one pair.
   const raceAlpha = reserve(alpha, alphaDraft);
@@ -236,6 +260,42 @@ try {
       pair.contentIntentId, pair.metadataIntentId).n;
     assert.equal(rows, results[index].status === "reserved" ? 2 : 0);
   }
+  // Two connections racing the same caller-generated ID must return one
+  // immutable reservation and the same four server-generated IDs.
+  const sameReservationId = randomBytes(16).toString("hex");
+  const beforeSameId = db.prepare("SELECT count(*) AS n FROM " +
+    "managed_draft_reservations WHERE household_id=?")
+    .get(beta.householdId).n;
+  const sameIdWorkers = Array.from({ length: 2 }, () => {
+    const worker = new Worker(new URL("./managedDraftPairReserveWorker.mjs",
+      import.meta.url), { workerData: { path: dbPath,
+      tokenSha256: beta.tokenSha256, csrfToken: beta.csrfToken,
+      reservationId: sameReservationId, profileId: beta.profileId,
+      scopeId: betaDraft.scopeId, keyId: betaDraft.keyId } });
+    workers.push(worker);
+    const ready = workerMessage(worker, "ready");
+    const result = workerMessage(worker, "result");
+    ready.catch(() => {});
+    result.catch(() => {});
+    return { worker, ready, result };
+  });
+  await bounded(Promise.all(sameIdWorkers.map((item) => item.ready)));
+  db.exec("BEGIN IMMEDIATE");
+  const sameIdAttempting = sameIdWorkers.map(({ worker }) =>
+    workerMessage(worker, "attempting"));
+  for (const { worker } of sameIdWorkers) worker.postMessage({ type: "go" });
+  await bounded(Promise.all(sameIdAttempting));
+  db.exec("COMMIT");
+  const sameResults = await bounded(Promise.all(sameIdWorkers.map((item) =>
+    item.result)));
+  assert.deepEqual(sameResults[0].result, sameResults[1].result);
+  assert.equal(sameResults[0].result.reservationId, sameReservationId);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_draft_reservations WHERE household_id=?")
+    .get(beta.householdId).n, beforeSameId + 1);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_upload_id_claims " +
+    "WHERE household_id=? AND reservation_id=?")
+    .get(beta.householdId, sameReservationId).n, 4);
   const dayLedger = new SqliteManagedUploadLedger({ connection: db },
     4096, 8192);
   const dayLease = await dayLedger.openForStaging({ session: beta.session,
@@ -247,9 +307,11 @@ try {
   const preRotation = reserve(alpha, alphaDraft);
   for (let index = 0; index < 3; index++) reserve(alpha, alphaDraft);
   assert.throws(() => reserve(alpha, alphaDraft), ManagedDraftPairDenied);
+  assert.deepEqual(retryAlpha(), alphaIds);
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_draft_reservations " +
     "WHERE household_id=?").get(alpha.householdId).n, 8);
   rotateDraftScope(db, alpha, alphaDraft, now);
+  assert.throws(() => retryAlpha(), ManagedDraftPairDenied);
   assert.throws(() => service.bindIntents({ ...auth(alpha),
     reservationId: preRotation.reservationId,
     content: { objectId: randomBytes(16).toString("hex"),
@@ -269,6 +331,10 @@ try {
   db.prepare("UPDATE managed_devices SET state='revoked', " +
     "revoked_at=unixepoch('now') WHERE household_id=? AND id=?")
     .run(beta.householdId, beta.deviceId);
+  assert.throws(() => service.reserve({ ...auth(beta),
+    reservationId: betaIds.reservationId,
+    profileId: beta.profileId, scopeId: betaDraft.scopeId,
+    keyId: betaDraft.keyId, epoch: 1 }), ManagedDraftPairDenied);
   assert.throws(() => service.openPairedLeases({ ...auth(beta),
     reservationId: betaIds.reservationId }), ManagedDraftPairDenied);
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_non_day_staging_leases " +
@@ -311,7 +377,7 @@ try {
     if (existsSync(path)) assert.equal(readFileSync(path).includes(
       Buffer.from(marker)), false);
   }
-  console.log("Fictional v10 draft-pair reservation, atomic leases and two-worker quota outcome passed;");
+  console.log("Fictional v10 draft-pair reservation, atomic leases, same-ID two-worker retry and quota outcome passed;");
   console.log("no route mounted, no migration applied, no real data used.");
 } finally {
   try { if (db.inTransaction) db.exec("ROLLBACK"); }

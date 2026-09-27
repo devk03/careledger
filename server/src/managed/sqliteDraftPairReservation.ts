@@ -24,7 +24,12 @@ type Reservation = { householdId: string; id: string; profileId: string;
   sessionId: string; contentIntentId: string; metadataIntentId: string;
   contentBlobId: string; metadataBlobId: string; expiresAt: number };
 type Intent = { id: string; role: "content" | "metadata";
-  plaintextBytes: number; chunkCount: number };
+  blobId: string; objectId: string; plaintextBytes: number;
+  chunkCount: number; consumedAt: number | null;
+  attemptId: string | null; reservedBytes: number | null;
+  committedAt: number | null; profileId: string; scopeId: string;
+  keyId: string; epoch: number; sessionId: string;
+  writerDeviceId: string; expiresAt: number };
 
 export class ManagedDraftPairDenied extends Error {
   constructor() {
@@ -62,16 +67,38 @@ export class SqliteDraftPairReservation {
     this.assertOperational();
   }
 
-  reserve(input: Caller & { profileId: string; scopeId: string;
+  reserve(input: Caller & { reservationId: string;
+    profileId: string; scopeId: string;
     keyId: string; epoch: number }) {
     return this.run(() => {
-      if (![input.profileId, input.scopeId, input.keyId].every(validId) ||
+      if (![input.reservationId, input.profileId, input.scopeId,
+        input.keyId].every(validId) ||
         !Number.isSafeInteger(input.epoch) || input.epoch < 1 ||
         input.epoch > 0xffffffff) throw new ManagedDraftPairDenied();
       const session = this.requireSession(input);
       this.requireDraftScope(session, input.profileId, input.scopeId,
         input.keyId, input.epoch);
       const now = this.now();
+      const existing = this.db.prepare<[string, string], Reservation>(
+        "SELECT household_id AS householdId, id, profile_id AS profileId, " +
+        "scope_id AS scopeId, key_id AS keyId, epoch, " +
+        "writer_device_id AS writerDeviceId, session_id AS sessionId, " +
+        "content_intent_id AS contentIntentId, " +
+        "metadata_intent_id AS metadataIntentId, " +
+        "content_blob_id AS contentBlobId, " +
+        "metadata_blob_id AS metadataBlobId, expires_at AS expiresAt " +
+        "FROM managed_draft_reservations WHERE household_id=? AND id=?",
+      ).get(session.householdId, input.reservationId);
+      if (existing) {
+        if (existing.sessionId !== session.sessionId ||
+          existing.writerDeviceId !== session.deviceId ||
+          existing.profileId !== input.profileId ||
+          existing.scopeId !== input.scopeId ||
+          existing.keyId !== input.keyId ||
+          existing.epoch !== input.epoch || existing.expiresAt <= now)
+          throw new ManagedDraftPairDenied();
+        return responseIds(existing);
+      }
       const recent = this.db.prepare<[string, number, number, string], {
         deviceCount: number; familyCount: number }>(
         "SELECT count(*) FILTER (WHERE writer_device_id = ? " +
@@ -84,7 +111,8 @@ export class SqliteDraftPairReservation {
         MAX_DEVICE_RESERVATIONS_PER_TEN_MINUTES ||
         recent.familyCount >= MAX_FAMILY_RESERVATIONS_PER_DAY)
         throw new ManagedDraftPairDenied();
-      const result = { reservationId: newId(), contentIntentId: newId(),
+      const result = { reservationId: input.reservationId,
+        contentIntentId: newId(),
         metadataIntentId: newId(), contentBlobId: newId(),
         metadataBlobId: newId(), expiresAt: now + 600 };
       this.db.prepare(
@@ -114,6 +142,22 @@ export class SqliteDraftPairReservation {
         throw new ManagedDraftPairDenied();
       const session = this.requireSession(input);
       const reservation = this.requireReservation(session, input.reservationId);
+      const existing = this.db.prepare<[string, string], Intent>(
+        "SELECT id, role, blob_id AS blobId, object_id AS objectId, " +
+        "plaintext_bytes AS plaintextBytes, chunk_count AS chunkCount, " +
+        "consumed_at AS consumedAt, profile_id AS profileId, " +
+        "scope_id AS scopeId, key_id AS keyId, epoch, " +
+        "session_id AS sessionId, writer_device_id AS writerDeviceId, " +
+        "expires_at AS expiresAt, NULL AS attemptId, " +
+        "NULL AS reservedBytes, NULL AS committedAt " +
+        "FROM managed_non_day_upload_intents WHERE household_id=? " +
+        "AND draft_reservation_id=? AND purpose='draft'",
+      ).all(session.householdId, reservation.id);
+      if (existing.length !== 0) {
+        if (!matchingIntents(existing, reservation, input.content,
+          input.metadata)) throw new ManagedDraftPairDenied();
+        return responseIds(reservation);
+      }
       const now = this.now();
       const insert = this.db.prepare(
         "INSERT INTO managed_non_day_upload_intents " +
@@ -134,11 +178,7 @@ export class SqliteDraftPairReservation {
           session.deviceId, session.sessionId, item.plaintextBytes,
           chunks(item.plaintextBytes), now, reservation.expiresAt);
       }
-      return { contentIntentId: reservation.contentIntentId,
-        metadataIntentId: reservation.metadataIntentId,
-        contentBlobId: reservation.contentBlobId,
-        metadataBlobId: reservation.metadataBlobId,
-        expiresAt: reservation.expiresAt };
+      return responseIds(reservation);
     });
   }
 
@@ -148,21 +188,38 @@ export class SqliteDraftPairReservation {
       const session = this.requireSession(input);
       const reservation = this.requireReservation(session, input.reservationId);
       const intents = this.db.prepare<[string, string], Intent>(
-        "SELECT id, role, plaintext_bytes AS plaintextBytes, " +
-        "chunk_count AS chunkCount FROM managed_non_day_upload_intents " +
-        "WHERE household_id = ? AND draft_reservation_id = ? " +
-        "AND purpose = 'draft' AND consumed_at IS NULL " +
-        "AND expires_at > unixepoch('now')",
+        "SELECT i.id, i.role, i.blob_id AS blobId, " +
+        "i.object_id AS objectId, i.plaintext_bytes AS plaintextBytes, " +
+        "i.chunk_count AS chunkCount, i.consumed_at AS consumedAt, " +
+        "i.profile_id AS profileId, i.scope_id AS scopeId, " +
+        "i.key_id AS keyId, i.epoch, i.session_id AS sessionId, " +
+        "i.writer_device_id AS writerDeviceId, i.expires_at AS expiresAt, " +
+        "l.attempt_id AS attemptId, l.reserved_bytes AS reservedBytes, " +
+        "l.committed_at AS committedAt " +
+        "FROM managed_non_day_upload_intents i LEFT JOIN " +
+        "managed_non_day_staging_leases l ON l.household_id=i.household_id " +
+        "AND l.intent_id=i.id WHERE i.household_id=? " +
+        "AND i.draft_reservation_id=? AND i.purpose='draft' " +
+        "AND i.expires_at>unixepoch('now')",
       ).all(session.householdId, reservation.id);
-      if (intents.length !== 2 ||
-        !intents.some((row) => row.role === "content" &&
-          row.id === reservation.contentIntentId) ||
-        !intents.some((row) => row.role === "metadata" &&
-          row.id === reservation.metadataIntentId) ||
-        intents.some((row) => !Number.isSafeInteger(row.plaintextBytes) ||
-          !Number.isSafeInteger(row.chunkCount)))
+      if (!matchingIntents(intents, reservation))
         throw new ManagedDraftPairDenied();
       const total = intents.reduce((sum, row) => sum + wireBytes(row), 0);
+      const leased = intents.filter((row) => row.attemptId !== null);
+      if (leased.length !== 0 && leased.length !== 2)
+        throw new ManagedDraftPairDenied();
+      if (leased.length === 2) {
+        if (intents.some((row) => !validId(row.attemptId) ||
+          row.reservedBytes !== wireBytes(row) ||
+          row.committedAt !== null || row.consumedAt !== null))
+          throw new ManagedDraftPairDenied();
+        return { contentAttemptId: intents.find((row) =>
+          row.role === "content")!.attemptId!,
+        metadataAttemptId: intents.find((row) =>
+          row.role === "metadata")!.attemptId!, reservedBytes: total };
+      }
+      if (intents.some((row) => row.consumedAt !== null))
+        throw new ManagedDraftPairDenied();
       const usage = this.db.prepare<[string], { familyBytes: number;
         globalBytes: number }>(
         "SELECT COALESCE(SUM(CASE WHEN household_id = ? THEN bytes ELSE 0 END),0) " +
@@ -335,6 +392,45 @@ function validBytes(value: unknown, maximum: number): value is number {
 
 function chunks(plaintextBytes: number): number {
   return Math.max(1, Math.ceil(plaintextBytes / MANAGED_VAULT_CHUNK_BYTES));
+}
+
+function responseIds(reservation: Reservation) {
+  return { reservationId: reservation.id,
+    contentIntentId: reservation.contentIntentId,
+    metadataIntentId: reservation.metadataIntentId,
+    contentBlobId: reservation.contentBlobId,
+    metadataBlobId: reservation.metadataBlobId,
+    expiresAt: reservation.expiresAt };
+}
+
+function matchingIntents(rows: readonly Intent[], reservation: Reservation,
+  content?: { objectId: string; plaintextBytes: number },
+  metadata?: { objectId: string; plaintextBytes: number }): boolean {
+  if (rows.length !== 2) return false;
+  for (const role of ["content", "metadata"] as const) {
+    const row = rows.find((item) => item.role === role);
+    const supplied = role === "content" ? content : metadata;
+    const maximum = role === "content" ? MAX_CONTENT_BYTES :
+      MAX_METADATA_BYTES;
+    if (!row || row.id !== (role === "content" ?
+      reservation.contentIntentId : reservation.metadataIntentId) ||
+      row.blobId !== (role === "content" ?
+        reservation.contentBlobId : reservation.metadataBlobId) ||
+      row.profileId !== reservation.profileId ||
+      row.scopeId !== reservation.scopeId ||
+      row.keyId !== reservation.keyId ||
+      row.epoch !== reservation.epoch ||
+      row.sessionId !== reservation.sessionId ||
+      row.writerDeviceId !== reservation.writerDeviceId ||
+      row.expiresAt !== reservation.expiresAt ||
+      !validId(row.objectId) ||
+      !validBytes(row.plaintextBytes, maximum) ||
+      row.chunkCount !== chunks(row.plaintextBytes) ||
+      (supplied !== undefined &&
+        (row.objectId !== supplied.objectId ||
+          row.plaintextBytes !== supplied.plaintextBytes))) return false;
+  }
+  return true;
 }
 
 function wireBytes(intent: Intent): number {
