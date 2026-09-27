@@ -26,7 +26,7 @@ Use one replica, a durable volume at `/data`, health check `/health/ready`, and 
 
 Deploy only an audited `git archive` of the release commit, not the private parent workspace or a general filesystem copy. Docker's build context is allowlisted. Provider keys remain unset for this preview. Retrieve setup privately through the operator shell using `python -m app.setup_link`; never put its token in build/runtime logs or GitHub.
 
-For a hosted release build, set Docker build arguments `ADENO_RELEASE_BUILD=1` and `ADENO_RELEASE_SHA` to the exact 40-character public Git commit. Missing or malformed revisions then fail the build. Local self-hosted builds may omit both arguments; they show no source-revision link. Compare the live footer link with the archived release commit before admitting users. This is an operator-supplied provenance label, not a cryptographic attestation of the running image.
+For a hosted release build, set Docker build arguments `ADENO_RELEASE_BUILD=1` and `ADENO_RELEASE_SHA` to the exact 40-character public Git commit. Compose forwards these optional environment values to the Dockerfile; a normal local build defaults to non-release mode and shows no source-revision link. For example, set both in the operator environment before `docker compose build`, or configure build arguments explicitly in another platform. Missing or malformed revisions fail a release-mode build. The validator checks format and presence, **not** that the bytes in the build context match the supplied commit. Compare the live footer link, archived source, reviewed image digest and deployment artifact before admitting users. This is an operator-supplied provenance label, not a cryptographic attestation of the running image.
 
 For an internet-facing deployment:
 

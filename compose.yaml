@@ -2,6 +2,9 @@ services:
   careledger:
     build:
       context: .
+      args:
+        ADENO_RELEASE_BUILD: ${ADENO_RELEASE_BUILD:-0}
+        ADENO_RELEASE_SHA: ${ADENO_RELEASE_SHA:-}
     environment:
       APP_PORT: 8080
       APP_EDITION: ${APP_EDITION:-community}
