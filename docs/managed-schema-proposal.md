@@ -297,8 +297,15 @@ Like `0009`, `0010` has only been applied to the approved disposable fictional
 local database. Its day-intent bound-writer guard and an ordinary v2 envelope
 positive/negative writer/read path were exercised there under rollback. A
 genuinely signed structural envelope action passed; a recipient's actual HPKE
-decryption was not shown. Historical backfill, lease/blob guards, concurrent
-races and complete authorized write flows remain untested.
+decryption was not shown. A separate fictional key-rotation fixture now also
+passes a genuinely signed historical-backfill writer/read path from an owner
+device to a different granted device, cross-family and unbound-issuer denial,
+duplicate-action rollback, and current-grant revocation denial. The
+rotation/key/grant setup is structural test data, not
+proof of the full signed key-rotation ceremony; a backfill-specific revoked
+recipient-device case remains untested. Ledger metadata commit and
+nonce-collision rollback are tested separately; exact disk-object proof joined
+to that commit, concurrent races and complete authorized flows remain untested.
 This lineage is new-only: the runner creates a fresh empty managed database and
 does not migrate a database that already contains pre-binding v2 envelopes.
 Such a database must be rejected, not silently made unreadable or backfilled

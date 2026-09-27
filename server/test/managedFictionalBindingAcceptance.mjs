@@ -13,11 +13,13 @@ import { encodeDeviceEnrollmentNonceMaterialV1,
   encodeSessionDeviceBindingProofV1,
   encodeSessionDeviceProofWireV1,
   encodeScopeEnvelopeActionPayloadV1,
+  encodeScopeEnvelopeBackfillPayloadV1,
   encodeScopeKeyEnvelopeV2,
   encodeManagedVaultBlobV2,
   MANAGED_VAULT_FORMAT_V2,
   MANAGED_VAULT_CHUNK_BYTES,
-  SCOPE_ENVELOPE_ACTION_HASH_DOMAIN_V1 } from "@adeno/contracts";
+  SCOPE_ENVELOPE_ACTION_HASH_DOMAIN_V1,
+  SCOPE_ENVELOPE_BACKFILL_HASH_DOMAIN_V1 } from "@adeno/contracts";
 import { issueCsrfToken, issueSessionToken } from
   "../dist/auth/cookieSession.js";
 import { SESSION_COOKIE_NAME } from "../dist/auth/cookieSession.js";
@@ -34,6 +36,8 @@ import { SqliteManagedIdentityCandidate } from
   "../dist/managed/sqliteManagedIdentity.js";
 import { issueScopeEnvelopeV2 } from
   "../dist/managed/sqliteScopeEnvelopeWriter.js";
+import { issueHistoricalScopeEnvelopeV2 } from
+  "../dist/managed/sqliteScopeEnvelopeBackfillWriter.js";
 import { readAccountScopedScopeEnvelopeCandidateV2 } from
   "../dist/managed/sqliteScopeEnvelopeReader.js";
 import { IncompatibleManagedLedger, SqliteManagedUploadLedger } from
@@ -875,6 +879,283 @@ try {
   multiLedger.close();
   assert.equal(db.inTransaction, true);
 
+  // Separate historical-key backfill fixture. These old key/grant actions are
+  // invented structural SQL rows; the backfill action itself is freshly
+  // Ed25519-signed and checked by the unmounted writer in one transaction.
+  const historicalScopeId = id("3");
+  const historicalKeyId = id("4");
+  const currentKeyId = id("5");
+  const historicalCommitment = randomBytes(32);
+  const currentCommitment = randomBytes(32);
+  const appendStructuralAction = (kind) => {
+    const prior = db.prepare("SELECT counter, action_sha256 AS hash " +
+      "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
+      "ORDER BY counter DESC LIMIT 1").get(alpha.h, alpha.d);
+    const counter = (prior?.counter ?? 0) + 1;
+    const payloadHash = randomBytes(32);
+    const actionHash = randomBytes(32);
+    const createdAt = Math.floor(Date.now() / 1000);
+    db.prepare("INSERT INTO managed_signed_actions " +
+      "(household_id,device_id,counter,action_kind,payload_sha256," +
+      "previous_action_sha256,action_sha256,signature,created_at) " +
+      "VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(alpha.h, alpha.d, counter, kind, payloadHash,
+        prior?.hash ?? null, actionHash, randomBytes(64), createdAt);
+    return { counter, payloadHash, actionHash, createdAt };
+  };
+  db.prepare("INSERT INTO managed_scopes " +
+    "(household_id,profile_id,id,kind,state,created_by_device_id,created_at) " +
+    "VALUES (?,?,?,'day','active',?,?)")
+    .run(alpha.h, profileId, historicalScopeId, alpha.d,
+      Math.floor(Date.now() / 1000));
+  const registerHistorical = appendStructuralAction("key");
+  db.prepare("INSERT INTO managed_key_identities " +
+    "(household_id,profile_id,scope_id,key_id,epoch,purpose," +
+    "key_commitment,signed_payload_sha256,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,1,'day',?,?,?,?,?)")
+    .run(alpha.h, profileId, historicalScopeId, historicalKeyId,
+      historicalCommitment, registerHistorical.payloadHash, alpha.d,
+      registerHistorical.counter, registerHistorical.createdAt);
+  const activateHistorical = appendStructuralAction("key");
+  db.prepare("INSERT INTO managed_active_key_events " +
+    "(household_id,profile_id,scope_id,sequence,previous_sha256," +
+    "previous_key_id,previous_epoch,event_sha256,key_id,epoch,purpose," +
+    "key_commitment,registration_sha256,issuer_device_id,session_id," +
+    "issuer_counter,created_at) VALUES " +
+    "(?,?,?,1,NULL,NULL,NULL,?,?,1,'day',?,?,?,?,?,?)")
+    .run(alpha.h, profileId, historicalScopeId,
+      activateHistorical.payloadHash, historicalKeyId,
+      historicalCommitment, registerHistorical.payloadHash,
+      alpha.d, alpha.s, activateHistorical.counter,
+      activateHistorical.createdAt);
+  const registerCurrent = appendStructuralAction("key");
+  db.prepare("INSERT INTO managed_key_identities " +
+    "(household_id,profile_id,scope_id,key_id,epoch,purpose," +
+    "key_commitment,signed_payload_sha256,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,2,'day',?,?,?,?,?)")
+    .run(alpha.h, profileId, historicalScopeId, currentKeyId,
+      currentCommitment, registerCurrent.payloadHash, alpha.d,
+      registerCurrent.counter, registerCurrent.createdAt);
+  const activateCurrent = appendStructuralAction("key");
+  db.prepare("INSERT INTO managed_active_key_events " +
+    "(household_id,profile_id,scope_id,sequence,previous_sha256," +
+    "previous_key_id,previous_epoch,event_sha256,key_id,epoch,purpose," +
+    "key_commitment,registration_sha256,issuer_device_id,session_id," +
+    "issuer_counter,created_at) VALUES " +
+    "(?,?,?,2,?,?,1,?,?,2,'day',?,?,?,?,?,?)")
+    .run(alpha.h, profileId, historicalScopeId,
+      activateHistorical.payloadHash, historicalKeyId,
+      activateCurrent.payloadHash, currentKeyId,
+      currentCommitment, registerCurrent.payloadHash,
+      alpha.d, alpha.s, activateCurrent.counter, activateCurrent.createdAt);
+  const historicalRecipientSession = addSession(alpha, id("6"));
+  const recipientChallenge = candidate.issueWire({
+    tokenSha256: historicalRecipientSession.sha256,
+    csrfToken: historicalRecipientSession.csrf, deviceId: secondDevice });
+  candidate.bindWire({ tokenSha256: historicalRecipientSession.sha256,
+    csrfToken: historicalRecipientSession.csrf,
+    proof: proof(recipientChallenge, secondKey) });
+  db.prepare("INSERT INTO managed_grant_heads " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "head_sha256,capability_mask,updated_at) VALUES (?,?,?,?,0,NULL,0,?)")
+    .run(alpha.h, profileId, historicalScopeId, secondDevice,
+      Math.floor(Date.now() / 1000));
+  const historicalGrant = appendStructuralAction("grant");
+  db.prepare("INSERT INTO managed_grant_events " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,1,NULL,?,1,?,?,?)")
+    .run(alpha.h, profileId, historicalScopeId, secondDevice,
+      historicalGrant.payloadHash, alpha.d, historicalGrant.counter,
+      historicalGrant.createdAt);
+  const historicalCounts = () => ({
+    actions: db.prepare("SELECT count(*) AS n FROM managed_signed_actions " +
+      "WHERE household_id=?").get(alpha.h).n,
+    backfills: db.prepare("SELECT count(*) AS n " +
+      "FROM managed_scope_envelope_backfills_v2 WHERE household_id=?")
+      .get(alpha.h).n,
+  });
+  const historicalCandidate = (issuerDeviceId = alpha.d,
+    issuerPrivateKey = alpha.key, issuerHouseholdId = alpha.h,
+    sessionId = alpha.s, options = {}) => {
+    const issuerPublic = db.prepare("SELECT signing_public_key AS value " +
+      "FROM managed_devices WHERE household_id=? AND id=?")
+      .get(issuerHouseholdId, issuerDeviceId).value;
+    const recipientPublic = db.prepare("SELECT encryption_public_key AS value " +
+      "FROM managed_devices WHERE household_id=? AND id=?")
+      .get(alpha.h, secondDevice).value;
+    const prior = db.prepare("SELECT counter, action_sha256 AS hash " +
+      "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
+      "ORDER BY counter DESC LIMIT 1")
+      .get(issuerHouseholdId, issuerDeviceId);
+    const issuerCounter = BigInt((prior?.counter ?? 0) + 1) +
+      (options.counterOffset ?? 0n);
+    const previousActionSha256 = options.previousActionSha256 ??
+      (prior?.hash.toString("hex") ?? null);
+    const createdAt = options.createdAt ??
+      BigInt(Math.floor(Date.now() / 1000));
+    const recipientKeySha256 = sha256Hex(recipientPublic);
+    const wire = encodeScopeKeyEnvelopeV2({
+      format: "hpke-x25519-hkdf-sha256-aes256gcm-scope-v2",
+      context: { householdId: alpha.h, careProfileId: profileId,
+        opaqueScopeId: historicalScopeId, keyId: historicalKeyId,
+        keyEpoch: 1, purpose: "day", recipientDeviceId: secondDevice },
+      keyCommitmentSha256: historicalCommitment.toString("hex"),
+      recipientKeySha256, encapsulatedKey: new Uint8Array(32).fill(8),
+      ciphertext: new Uint8Array(48).fill(9).buffer,
+    });
+    const row = { householdId: alpha.h, careProfileId: profileId,
+      opaqueScopeId: historicalScopeId, keyId: historicalKeyId,
+      keyEpoch: 1, purpose: "day", recipientDeviceId: secondDevice,
+      keyCommitmentSha256: historicalCommitment.toString("hex"),
+      recipientKeySha256, wireVersion: 2, wire,
+      wireSha256: sha256Hex(wire), historicalActivationSequence: 1n,
+      historicalActivationSha256:
+        activateHistorical.payloadHash.toString("hex"),
+      currentActiveKeySequence: 2n,
+      currentActiveKeyHeadSha256: activateCurrent.payloadHash.toString("hex"),
+      currentGrantSequence: 1n,
+      currentGrantHeadSha256: historicalGrant.payloadHash.toString("hex"),
+      signedPayloadSha256: "", issuerDeviceId, issuerCounter,
+      sessionId, createdAt };
+    const payload = encodeScopeEnvelopeBackfillPayloadV1({
+      householdId: row.householdId, careProfileId: row.careProfileId,
+      opaqueScopeId: row.opaqueScopeId, keyId: row.keyId,
+      keyEpoch: row.keyEpoch, purpose: row.purpose,
+      recipientDeviceId: row.recipientDeviceId,
+      keyCommitmentSha256: row.keyCommitmentSha256,
+      recipientKeySha256: row.recipientKeySha256,
+      wireSha256: row.wireSha256,
+      historicalActivationSequence: row.historicalActivationSequence,
+      historicalActivationSha256: row.historicalActivationSha256,
+      currentActiveKeySequence: row.currentActiveKeySequence,
+      activeKeyHeadSha256: row.currentActiveKeyHeadSha256,
+      currentGrantSequence: row.currentGrantSequence,
+      grantHeadSha256: row.currentGrantHeadSha256,
+      issuerDeviceId, issuerCounter, sessionId: row.sessionId, createdAt,
+      previousActionSha256, issuerSigningKeySha256: sha256Hex(issuerPublic),
+    });
+    const signature = sign(null, Buffer.from(payload), issuerPrivateKey);
+    row.signedPayloadSha256 = sha256Hex(payload);
+    const action = { householdId: alpha.h, deviceId: issuerDeviceId,
+      counter: issuerCounter, actionKind: "envelope",
+      payloadSha256: row.signedPayloadSha256, previousActionSha256,
+      actionSha256: sha256Hex(Buffer.concat([
+        Buffer.from(SCOPE_ENVELOPE_BACKFILL_HASH_DOMAIN_V1),
+        Buffer.from(payload), signature,
+      ])), signature, createdAt };
+    return { row, action };
+  };
+  const issueHistorical = (value, session = alpha.session) =>
+    issueHistoricalScopeEnvelopeV2(db, { tokenSha256: session.sha256,
+      csrfToken: session.csrf, ...value });
+  const expectHistoricalDeniedAtomically = (value, session = alpha.session) => {
+    const before = historicalCounts();
+    assert.throws(() => issueHistorical(value, session),
+      (error) => error?.name === "ManagedScopeEnvelopeBackfillIssueDenied");
+    assert.deepEqual(historicalCounts(), before);
+  };
+  expectHistoricalDeniedAtomically(historicalCandidate(beta.d, beta.key,
+    beta.h, beta.s), beta.session);
+  expectHistoricalDeniedAtomically(historicalCandidate(secondDevice, secondKey));
+  const tamperedHistorical = historicalCandidate();
+  tamperedHistorical.row.wire = Uint8Array.from(tamperedHistorical.row.wire);
+  tamperedHistorical.row.wire[239] ^= 1;
+  expectHistoricalDeniedAtomically(tamperedHistorical);
+  const badHistoricalSignature = historicalCandidate();
+  badHistoricalSignature.action.signature = Buffer.from(
+    badHistoricalSignature.action.signature);
+  badHistoricalSignature.action.signature[0] ^= 1;
+  const signedHistoricalPayload = encodeScopeEnvelopeBackfillPayloadV1({
+    householdId: badHistoricalSignature.row.householdId,
+    careProfileId: badHistoricalSignature.row.careProfileId,
+    opaqueScopeId: badHistoricalSignature.row.opaqueScopeId,
+    keyId: badHistoricalSignature.row.keyId,
+    keyEpoch: badHistoricalSignature.row.keyEpoch,
+    purpose: badHistoricalSignature.row.purpose,
+    recipientDeviceId: badHistoricalSignature.row.recipientDeviceId,
+    keyCommitmentSha256: badHistoricalSignature.row.keyCommitmentSha256,
+    recipientKeySha256: badHistoricalSignature.row.recipientKeySha256,
+    wireSha256: badHistoricalSignature.row.wireSha256,
+    historicalActivationSequence:
+      badHistoricalSignature.row.historicalActivationSequence,
+    historicalActivationSha256:
+      badHistoricalSignature.row.historicalActivationSha256,
+    currentActiveKeySequence:
+      badHistoricalSignature.row.currentActiveKeySequence,
+    activeKeyHeadSha256:
+      badHistoricalSignature.row.currentActiveKeyHeadSha256,
+    currentGrantSequence: badHistoricalSignature.row.currentGrantSequence,
+    grantHeadSha256: badHistoricalSignature.row.currentGrantHeadSha256,
+    issuerDeviceId: badHistoricalSignature.row.issuerDeviceId,
+    issuerCounter: badHistoricalSignature.row.issuerCounter,
+    sessionId: badHistoricalSignature.row.sessionId,
+    createdAt: badHistoricalSignature.row.createdAt,
+    previousActionSha256:
+      badHistoricalSignature.action.previousActionSha256,
+    issuerSigningKeySha256: sha256Hex(db.prepare(
+      "SELECT signing_public_key AS value FROM managed_devices " +
+      "WHERE household_id=? AND id=?")
+      .get(alpha.h, alpha.d).value),
+  });
+  badHistoricalSignature.action.actionSha256 = sha256Hex(Buffer.concat([
+    Buffer.from(SCOPE_ENVELOPE_BACKFILL_HASH_DOMAIN_V1),
+    Buffer.from(signedHistoricalPayload),
+    badHistoricalSignature.action.signature,
+  ]));
+  expectHistoricalDeniedAtomically(badHistoricalSignature);
+  expectHistoricalDeniedAtomically(historicalCandidate(alpha.d, alpha.key,
+    alpha.h, alpha.s, { createdAt: 1n }));
+  expectHistoricalDeniedAtomically(historicalCandidate(alpha.d, alpha.key,
+    alpha.h, alpha.s, { counterOffset: 1n }));
+  expectHistoricalDeniedAtomically(historicalCandidate(alpha.d, alpha.key,
+    alpha.h, alpha.s, { previousActionSha256: "00".repeat(32) }));
+  const revokedBackfillSession = addSession(alpha, id("7"));
+  const revokedBackfillChallenge = candidate.issueWire({
+    tokenSha256: revokedBackfillSession.sha256,
+    csrfToken: revokedBackfillSession.csrf, deviceId: alpha.d });
+  candidate.bindWire({ tokenSha256: revokedBackfillSession.sha256,
+    csrfToken: revokedBackfillSession.csrf,
+    proof: proof(revokedBackfillChallenge, alpha.key) });
+  db.prepare("UPDATE managed_sessions SET revoked_at=? " +
+    "WHERE household_id=? AND id=?")
+    .run(Math.floor(Date.now() / 1000), alpha.h, id("7"));
+  expectHistoricalDeniedAtomically(historicalCandidate(alpha.d, alpha.key,
+    alpha.h, id("7")), revokedBackfillSession);
+  const beforeHistorical = historicalCounts();
+  issueHistorical(historicalCandidate());
+  assert.deepEqual(historicalCounts(), {
+    actions: beforeHistorical.actions + 1,
+    backfills: beforeHistorical.backfills + 1,
+  });
+  const historicalRead = () => readAccountScopedScopeEnvelopeCandidateV2(db, {
+    tokenSha256: historicalRecipientSession.sha256, careProfileId: profileId,
+    opaqueScopeId: historicalScopeId, keyId: historicalKeyId, keyEpoch: 1 });
+  assert.equal(historicalRead().kind, "historical-backfill");
+  assert.equal(historicalRead().row.recipientDeviceId, secondDevice);
+  assert.throws(() => readAccountScopedScopeEnvelopeCandidateV2(db, {
+    tokenSha256: alpha.session.sha256, careProfileId: profileId,
+    opaqueScopeId: historicalScopeId, keyId: historicalKeyId, keyEpoch: 1 }),
+  (error) => error?.name === "ManagedScopeEnvelopeReadDenied");
+  assert.throws(() => readAccountScopedScopeEnvelopeCandidateV2(db, {
+    tokenSha256: beta.session.sha256, careProfileId: profileId,
+    opaqueScopeId: historicalScopeId, keyId: historicalKeyId, keyEpoch: 1 }),
+  (error) => error?.name === "ManagedScopeEnvelopeReadDenied");
+  // The signed action insert happens first. A duplicate backfill must roll it
+  // back along with the rejected row, not consume a device action counter.
+  expectHistoricalDeniedAtomically(historicalCandidate());
+  const revokeHistoricalGrant = appendStructuralAction("grant");
+  db.prepare("INSERT INTO managed_grant_events " +
+    "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+    "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
+    "issuer_counter,created_at) VALUES (?,?,?,?,2,?,?,0,?,?,?)")
+    .run(alpha.h, profileId, historicalScopeId, secondDevice,
+      historicalGrant.payloadHash, revokeHistoricalGrant.payloadHash,
+      alpha.d, revokeHistoricalGrant.counter, revokeHistoricalGrant.createdAt);
+  assert.throws(historicalRead,
+    (error) => error?.name === "ManagedScopeEnvelopeReadDenied");
+  expectHistoricalDeniedAtomically(historicalCandidate());
+
   const revokedIssuerSession = addSession(alpha, id("2"));
   const revokedIssuerChallenge = candidate.issueWire({
     tokenSha256: revokedIssuerSession.sha256,
@@ -1124,7 +1405,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, signed envelope writer/reader, one-chunk ledger/receipt and two-chunk rollback; cross-family, nonce replay, quota and grant/device/session revocation denial");
+  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, one-chunk ledger/receipt and two-chunk rollback; cross-family, nonce replay, quota and grant/device/session revocation denial");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.
