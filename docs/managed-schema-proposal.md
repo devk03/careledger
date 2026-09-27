@@ -51,7 +51,10 @@ it re-reads invented ciphertext-shaped bytes, verifies the exact wire digest,
 commits their object IDs and hashes, and returns a matching receipt. Altering a
 staged object's bytes before commit leaves no committed blob/chunk/nonce rows.
 The SQL rows are rolled back, while synthetic private temp objects remain for
-inspection. This is not a mounted HTTP/browser upload or an AES-GCM proof;
+inspection. An unmounted composition factory now exposes only the staged
+upload store and receipt reader, and rejects a non-absolute/non-private object
+root before wiring; it does not expose the raw ledger to its caller. This is
+not a mounted HTTP/browser upload or an AES-GCM proof;
 there is no reconciler for orphaned objects or safe retry path. The draft remains
 day-only; `0005` has no mounted non-day ledger or intent-issuance API. A ciphertext-only snapshot primitive can copy and re-hash an exact list
 of committed object references without scanning pending files; it publishes a

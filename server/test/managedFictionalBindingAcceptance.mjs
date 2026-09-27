@@ -48,8 +48,9 @@ import { ManagedVaultUploadDeniedError, ManagedVaultUploadExistsError,
   "../dist/managed/ciphertextAdmission.js";
 import { ManagedUploadReceiptCsrfError } from
   "../dist/managed/uploadReceipt.js";
-import { createStagedManagedVaultUploadStore } from
-  "../dist/managed/stagedUploadStore.js";
+import { createManagedUploadComposition,
+  ManagedUploadCompositionUnavailable } from
+  "../dist/managed/managedUploadComposition.js";
 import { CiphertextObjectIntegrityError, readCiphertextChunk } from
   "../dist/managed/ciphertextObjectStore.js";
 
@@ -888,8 +889,6 @@ try {
   // These are ciphertext-shaped invented bytes, not clinical content or a
   // demonstration of successful AES-GCM decryption. Temp objects are retained
   // for inspection; this script never deletes them or commits its SQL rows.
-  const composedLedger = new SqliteManagedUploadLedger({ connection: db },
-    2 * MANAGED_VAULT_CHUNK_BYTES);
   const composedIntentId = id("0");
   const composedBlobId = id("2");
   const composedAt = Math.floor(Date.now() / 1000);
@@ -897,8 +896,14 @@ try {
     keyId, composedBlobId, alpha.d, alpha.s, composedAt, composedAt + 600);
   const composedObjectRoot = await mkdtemp(join(tmpdir(),
     "adeno-fictional-composed-"));
-  const composedStore = createStagedManagedVaultUploadStore({
-    objectRoot: composedObjectRoot, ledger: composedLedger });
+  assert.throws(() => createManagedUploadComposition({ connection: db,
+    objectRoot: "relative-fictional-object-root",
+    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES }),
+  ManagedUploadCompositionUnavailable);
+  const composed = createManagedUploadComposition({ connection: db,
+    objectRoot: composedObjectRoot,
+    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES });
+  const composedStore = composed.store;
   const uploadPreflight = { tokenSha256: alpha.session.sha256,
     csrfToken: alpha.session.csrf };
   const composedIv = Buffer.alloc(12, 6);
@@ -931,7 +936,7 @@ try {
   assert.deepEqual(await readCiphertextChunk(composedObjectRoot, alpha.h,
     composedChunk.objectId, composedChunk.sha256.toString("hex"),
     composedChunk.byteSize), Buffer.from(composedCiphertext));
-  assert.deepEqual(await composedLedger.readReceipt({
+  assert.deepEqual(await composed.receipts.readReceipt({
     ...uploadPreflight, intentId: composedIntentId, blobId: composedBlobId }), {
     status: "committed", wireSha256: sha256Hex(composedWire),
     wireBytes: composedWire.byteLength,
@@ -944,8 +949,10 @@ try {
     keyId, alteredBlobId, alpha.d, alpha.s, alteredAt, alteredAt + 600);
   const alteredObjectRoot = await mkdtemp(join(tmpdir(),
     "adeno-fictional-altered-"));
-  const alteredStore = createStagedManagedVaultUploadStore({
-    objectRoot: alteredObjectRoot, ledger: composedLedger });
+  const altered = createManagedUploadComposition({ connection: db,
+    objectRoot: alteredObjectRoot,
+    maxStoredBytesPerFamily: 2 * MANAGED_VAULT_CHUNK_BYTES });
+  const alteredStore = altered.store;
   const alteredIv = Buffer.alloc(12, 7);
   const alteredCiphertext = new Uint8Array(16).fill(8);
   const alteredWire = encodeManagedVaultBlobV2({
@@ -981,13 +988,12 @@ try {
     "managed_committed_blobs"]) assert.equal(db.prepare(
     `SELECT count(*) AS n FROM ${table} WHERE household_id=? AND intent_id=?`)
     .get(alpha.h, alteredIntentId).n, 0);
-  assert.deepEqual(await composedLedger.readReceipt({
+  assert.deepEqual(await altered.receipts.readReceipt({
     ...uploadPreflight, intentId: alteredIntentId, blobId: alteredBlobId }),
   { status: "unconfirmed" });
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
     "WHERE household_id=? AND intent_id=? AND committed_at IS NULL")
     .get(alpha.h, alteredIntentId).n, 1);
-  composedLedger.close();
   assert.equal(db.inTransaction, true);
 
   // Separate historical-key backfill fixture. These old key/grant actions are
