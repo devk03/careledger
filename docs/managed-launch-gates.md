@@ -46,6 +46,14 @@ sequence with the old predecessor was also rejected. This covers one grant
 compare-and-swap race, not all grant, nonce, or revision concurrency. No
 Railway, Hermes, community, or real-family database was touched.
 
+A separate [fictional Chromium HTTP proof](managed-browser-draft-pair-http.md)
+now exercises browser WebCrypto, the real cookie/CSRF/fetch boundary, local
+upload journal, exact receipts and a signed pending note pair against unmounted
+routes in an ephemeral loopback server. This scripted test does not supply a
+caregiver-facing intake UI, PDF/photo validation, enrolled-and-persisted device
+keys, public route safety or crash recovery. It does not turn the record-intake
+gate green.
+
 ## Mandatory two-family acceptance run
 
 Browser device keys are still memory-only. The
