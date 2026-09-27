@@ -245,6 +245,16 @@ the rollback-only test transaction. There is no public email-token sender,
 one-use verification table, account recovery, mounted managed auth route or deployed
 limiter. A new additive migration and separate application approval are needed
 for a complete public verification/recovery flow.
+An additional unmounted verification transport now accepts only a bounded
+same-origin bearer proof, applies injected IP and HMAC-token limiter decisions,
+never issues a cookie, and returns the opaque household ID only when an
+injected service reports a committed proof or its idempotent receipt. Fictional
+HTTP tests cover that transport contract, including retry after an uncertain
+service result. The eventual service must activate only once but return the
+same short-lived result if a committed response was lost. There is still **no
+durable verification service**, token sender, expiry/replay enforcement, or
+account activation path behind it; a mocked result does not prove one-use
+verification or safe recovery.
 Runtime managed current-session queries now require verified email, but v10 SQL
 still permits an active account with `email_verified_at` unset. That database
 guard and pending-signup expiry/cleanup belong in the next reviewed migration;
@@ -264,9 +274,9 @@ rate-limited here; trusted ingress must bound abusive unauthenticated traffic.
 The login IP bucket currently sees the socket peer, which may be a shared
 reverse proxy; deployment must define a trusted client-address policy before
 mounting. The login token goes only into a Secure HttpOnly cookie, never the
-JSON response. Do not mount signup: v10 pending rows can reserve a unique email
+JSON response. Do not mount signup or verification: v10 pending rows can reserve a unique email
 indefinitely and accumulate frozen families. There is no email sender, resend,
-expiry, or activation route. Loopback HTTP tests do not prove production browser
+expiry, or functional activation service. Loopback HTTP tests do not prove production browser
 cookie behavior over the eventual HTTPS deployment.
 The trusted-local pilot uses the same cookie name; never mount both auth
 stacks on one origin without an explicit session-separation design.
