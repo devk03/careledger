@@ -25,6 +25,9 @@ import { issueCsrfToken, issueSessionToken } from
   "../dist/auth/cookieSession.js";
 import { SESSION_COOKIE_NAME } from "../dist/auth/cookieSession.js";
 import { assertManagedSchema } from "../dist/managed/managedSchemaGuard.js";
+import { assertProofFirstSignupLegacyState,
+  ManagedSignupPreflightDenied } from
+  "../dist/managed/managedSignupPreflight.js";
 import { SqliteSessionDeviceBindingCandidate } from
   "../dist/managed/sqliteSessionDeviceBinding.js";
 import { SqliteDeviceEnrollmentCandidate } from
@@ -80,6 +83,15 @@ const db = new Database(path, { fileMustExist: true });
 db.pragma("foreign_keys = ON");
 db.pragma("trusted_schema = OFF");
 assertManagedSchema(db);
+assert.doesNotThrow(() => assertProofFirstSignupLegacyState(db));
+db.pragma("trusted_schema = ON");
+assert.throws(() => assertProofFirstSignupLegacyState(db),
+  ManagedSignupPreflightDenied);
+db.pragma("trusted_schema = OFF");
+db.exec("ATTACH DATABASE ':memory:' AS fictional_preflight_attach");
+assert.throws(() => assertProofFirstSignupLegacyState(db),
+  ManagedSignupPreflightDenied);
+db.exec("DETACH DATABASE fictional_preflight_attach");
 assert.equal(db.prepare("SELECT count(*) AS n FROM managed_families").get().n, 0);
 const now = Math.floor(Date.now() / 1000);
 const id = (byte) => byte.repeat(32);
@@ -215,6 +227,40 @@ try {
     family.session = addSession(family, family.s);
     family.key = addDevice(family, family.d, family.e, family.s);
   }
+  assert.doesNotThrow(() => assertProofFirstSignupLegacyState(db));
+  db.prepare("UPDATE managed_families SET state='frozen' WHERE id=?")
+    .run(families[0].h);
+  assert.doesNotThrow(() => assertProofFirstSignupLegacyState(db));
+  db.prepare("UPDATE managed_families SET state='active' WHERE id=?")
+    .run(families[0].h);
+  db.exec("SAVEPOINT fictional_orphan_signup_preflight");
+  db.prepare("INSERT INTO managed_families VALUES (?,'frozen',?)")
+    .run(id("b"), now);
+  assert.throws(() => assertProofFirstSignupLegacyState(db),
+    ManagedSignupPreflightDenied);
+  db.exec("ROLLBACK TO fictional_orphan_signup_preflight");
+  db.exec("RELEASE fictional_orphan_signup_preflight");
+  db.exec("SAVEPOINT fictional_temp_signup_preflight");
+  db.exec("CREATE TEMP TABLE fictional_preflight_shadow (n INTEGER)");
+  assert.throws(() => assertProofFirstSignupLegacyState(db),
+    ManagedSignupPreflightDenied);
+  db.exec("ROLLBACK TO fictional_temp_signup_preflight");
+  db.exec("RELEASE fictional_temp_signup_preflight");
+  for (const [suffix, state, verifiedAt] of [
+    ["c", "pending", now], ["d", "active", null],
+  ]) {
+    db.exec("SAVEPOINT fictional_account_signup_preflight");
+    db.prepare("INSERT INTO managed_accounts " +
+      "(id,login_email,password_hash,state,email_verified_at,created_at) " +
+      "VALUES (?,?,?,?,?,?)")
+      .run(id(suffix), `fictional-${suffix}@example.invalid`,
+        "fictional-not-a-real-password-hash-placeholder-000000",
+        state, verifiedAt, now);
+    assert.throws(() => assertProofFirstSignupLegacyState(db),
+      ManagedSignupPreflightDenied);
+    db.exec("ROLLBACK TO fictional_account_signup_preflight");
+    db.exec("RELEASE fictional_account_signup_preflight");
+  }
   const currentSessions = new SqliteManagedSessions(db);
   assert.equal((await currentSessions.findByTokenSha256(
     families[0].session.sha256))?.householdId, families[0].h);
@@ -227,6 +273,8 @@ try {
   assert.deepEqual(await identity.registerPendingOwner({
     email: registrationEmail, password: registrationPassword,
   }), { accepted: true });
+  assert.throws(() => assertProofFirstSignupLegacyState(db),
+    ManagedSignupPreflightDenied);
   const registered = db.prepare("SELECT a.id AS accountId, " +
     "m.household_id AS householdId, a.state AS accountState, " +
     "m.state AS memberState, f.state AS familyState " +

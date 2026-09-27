@@ -4,6 +4,9 @@ Status: design for approval only. No `0011` SQL file has been created or
 applied. The existing managed v10 and community databases are unchanged.
 The unmounted v10 auth router explicitly denies `/signup`; its legacy
 `registerPendingOwner` method remains only for structural fictional tests.
+An unmounted read-only preflight now rejects databases with unverified/pending
+accounts or frozen families lacking an active verified owner. It does not
+provide a writer fence, convert legacy rows, or authorize v11 activation.
 
 ## Why this change
 
