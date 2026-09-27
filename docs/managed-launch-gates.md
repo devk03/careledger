@@ -54,6 +54,16 @@ caregiver-facing intake UI, PDF/photo validation, enrolled-and-persisted device
 keys, public route safety or crash recovery. It does not turn the record-intake
 gate green.
 
+A separate [fictional Chromium device HTTP proof](managed-browser-device-http.md)
+now joins the real managed login/session, enrollment challenge/proof, separate
+owner approval and session-binding services on a private v10 copy. Wrong
+proof/code/family, repeated submissions, missing cookie and wrong CSRF are
+denied. An independently verified in-flight binding proof is denied after
+revocation. The test does not isolate every one-use layer or persist browser
+keys, verify email delivery,
+provide a manual approval UI or authorize a production mount, so the family
+identity and E2EE gates remain open.
+
 ## Mandatory two-family acceptance run
 
 Browser device keys are still memory-only. The
