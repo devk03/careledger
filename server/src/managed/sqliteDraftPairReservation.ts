@@ -33,6 +33,13 @@ export class ManagedDraftPairDenied extends Error {
   }
 }
 
+export class ManagedDraftPairBusy extends Error {
+  constructor() {
+    super("The encrypted draft store is temporarily busy.");
+    this.name = "ManagedDraftPairBusy";
+  }
+}
+
 /**
  * Unmounted managed-v10 draft intake preflight. The caller owns an already
  * opened, private, approved-schema SQLite connection. This service creates no
@@ -189,7 +196,14 @@ export class SqliteDraftPairReservation {
         this.assertOperational();
         return action();
       }).immediate();
-    } catch { throw new ManagedDraftPairDenied(); }
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error &&
+        typeof error.code === "string" &&
+        (error.code.startsWith("SQLITE_BUSY") ||
+          error.code.startsWith("SQLITE_LOCKED")))
+        throw new ManagedDraftPairBusy();
+      throw new ManagedDraftPairDenied();
+    }
   }
 
   private requireSession(input: Caller): Session {

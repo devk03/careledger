@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { chmod, copyFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { Worker } from "node:worker_threads";
 
 import { decodeManagedVaultBlobV2, encodeManagedVaultBlobV2 } from
   "@adeno/contracts";
@@ -13,7 +14,8 @@ import { issueCsrfToken, issueSessionToken } from
   "../dist/auth/cookieSession.js";
 import { assertManagedSchema } from
   "../dist/managed/managedSchemaGuard.js";
-import { ManagedDraftPairDenied, SqliteDraftPairReservation } from
+import { ManagedDraftPairBusy, ManagedDraftPairDenied,
+  SqliteDraftPairReservation } from
   "../dist/managed/sqliteDraftPairReservation.js";
 import { encryptManagedVaultBlobV2 } from
   "../../web/src/crypto/managedVaultV2.ts";
@@ -45,6 +47,7 @@ const dbPath = join(root, "managed.sqlite3");
 await copyFile(sourcePath, dbPath);
 await chmod(dbPath, 0o600);
 const db = new Database(dbPath, { fileMustExist: true, timeout: 5_000 });
+const workers = [];
 try {
   db.pragma("foreign_keys = ON");
   db.pragma("trusted_schema = OFF");
@@ -77,6 +80,21 @@ try {
   const reserve = (family, scope) => service.reserve({ ...auth(family),
     profileId: family.profileId, scopeId: scope.scopeId,
     keyId: scope.keyId, epoch: 1 });
+  const busyDb = new Database(dbPath, { fileMustExist: true, timeout: 50 });
+  try {
+    busyDb.pragma("foreign_keys = ON");
+    busyDb.pragma("trusted_schema = OFF");
+    busyDb.pragma("synchronous = EXTRA");
+    const busyService = new SqliteDraftPairReservation(busyDb, 4096, 8192);
+    db.exec("BEGIN IMMEDIATE");
+    assert.throws(() => busyService.reserve({ ...auth(alpha),
+      profileId: alpha.profileId, scopeId: alphaDraft.scopeId,
+      keyId: alphaDraft.keyId, epoch: 1 }), ManagedDraftPairBusy);
+    db.exec("ROLLBACK");
+  } finally {
+    if (db.inTransaction) db.exec("ROLLBACK");
+    busyDb.close();
+  }
   const alphaIds = reserve(alpha, alphaDraft);
   assert.equal(new Set(Object.values(alphaIds).filter((value) =>
     typeof value === "string")).size, 5);
@@ -160,8 +178,62 @@ try {
   assert.throws(() => service.openPairedLeases({ ...auth(alpha),
     reservationId: alphaIds.reservationId }), ManagedDraftPairDenied);
 
+  // Two independent SQLite connections contest a cap that admits one pair.
+  const raceAlpha = reserve(alpha, alphaDraft);
+  const raceBeta = reserve(beta, betaDraft);
+  const raceParts = () => ({ content: {
+    objectId: randomBytes(16).toString("hex"), plaintextBytes: 9 },
+  metadata: { objectId: randomBytes(16).toString("hex"),
+    plaintextBytes: 12 } });
+  service.bindIntents({ ...auth(alpha),
+    reservationId: raceAlpha.reservationId, ...raceParts() });
+  service.bindIntents({ ...auth(beta),
+    reservationId: raceBeta.reservationId, ...raceParts() });
+  const baseline = db.prepare("SELECT COALESCE(SUM(bytes),0) AS n " +
+    "FROM managed_wire_occupancy").get().n;
+  assert.equal(baseline, expectedWireBytes);
+  const pairBytes = 130 + 9 + 12;
+  const globalCap = baseline + pairBytes;
+  const contenders = [[alpha, raceAlpha], [beta, raceBeta]].map(
+    ([family, pair]) => {
+      const worker = new Worker(new URL("./managedDraftPairQuotaWorker.mjs",
+        import.meta.url), { workerData: { path: dbPath,
+        tokenSha256: family.tokenSha256, csrfToken: family.csrfToken,
+        reservationId: pair.reservationId, globalCap } });
+      workers.push(worker);
+      const ready = workerMessage(worker, "ready");
+      const result = workerMessage(worker, "result");
+      ready.catch(() => {});
+      result.catch(() => {});
+      return { worker, ready, result, family, pair };
+    });
+  assert.equal((await bounded(Promise.all(contenders.map((item) =>
+    item.ready)))).length, 2);
+  db.exec("BEGIN IMMEDIATE");
+  const attempting = contenders.map(({ worker }) =>
+    workerMessage(worker, "attempting"));
+  for (const { worker } of contenders) worker.postMessage({ type: "go" });
+  await bounded(Promise.all(attempting));
+  db.exec("COMMIT");
+  const results = await bounded(Promise.all(contenders.map((item) =>
+    item.result)));
+  assert.deepEqual(results.map((result) => result.status).sort(),
+    ["denied", "reserved"]);
+  assert.equal(results.find((result) => result.status === "reserved")
+    .reservedBytes, pairBytes);
+  assert.equal(db.prepare("SELECT COALESCE(SUM(bytes),0) AS n " +
+    "FROM managed_wire_occupancy").get().n, globalCap);
+  for (let index = 0; index < contenders.length; index++) {
+    const { family, pair } = contenders[index];
+    const rows = db.prepare("SELECT count(*) AS n FROM " +
+      "managed_non_day_staging_leases WHERE household_id=? " +
+      "AND intent_id IN (?,?)").get(family.householdId,
+      pair.contentIntentId, pair.metadataIntentId).n;
+    assert.equal(rows, results[index].status === "reserved" ? 2 : 0);
+  }
+
   const preRotation = reserve(alpha, alphaDraft);
-  for (let index = 0; index < 4; index++) reserve(alpha, alphaDraft);
+  for (let index = 0; index < 3; index++) reserve(alpha, alphaDraft);
   assert.throws(() => reserve(alpha, alphaDraft), ManagedDraftPairDenied);
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_draft_reservations " +
     "WHERE household_id=?").get(alpha.householdId).n, 8);
@@ -188,7 +260,9 @@ try {
   assert.throws(() => service.openPairedLeases({ ...auth(beta),
     reservationId: betaIds.reservationId }), ManagedDraftPairDenied);
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_non_day_staging_leases " +
-    "WHERE household_id=?").get(beta.householdId).n, 0);
+    "WHERE household_id=? AND intent_id IN (?,?)")
+    .get(beta.householdId, betaIds.contentIntentId,
+      betaIds.metadataIntentId).n, 0);
   db.prepare("UPDATE managed_sessions SET revoked_at=unixepoch('now') " +
     "WHERE household_id=? AND id=?")
     .run(alpha.householdId, alpha.session.sessionId);
@@ -199,9 +273,44 @@ try {
     if (existsSync(path)) assert.equal(readFileSync(path).includes(
       Buffer.from(marker)), false);
   }
-  console.log("Fictional v10 draft-pair reservation and atomic leases passed;");
+  console.log("Fictional v10 draft-pair reservation, atomic leases and two-worker quota outcome passed;");
   console.log("no route mounted, no migration applied, no real data used.");
-} finally { db.close(); }
+} finally {
+  try { if (db.inTransaction) db.exec("ROLLBACK"); }
+  finally { db.close(); }
+  await Promise.all(workers.map((worker) => worker.terminate()));
+}
+
+function bounded(work, milliseconds = 20_000) {
+  let timer;
+  return Promise.race([work, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Fictional pair race timed out")),
+      milliseconds);
+  })]).finally(() => clearTimeout(timer));
+}
+
+function workerMessage(worker, type) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      worker.off("message", onMessage);
+      worker.off("error", onError);
+      worker.off("exit", onExit);
+    };
+    const onMessage = (message) => {
+      if (message?.type !== type) return;
+      cleanup();
+      resolve(message);
+    };
+    const onError = (error) => { cleanup(); reject(error); };
+    const onExit = (code) => {
+      cleanup();
+      reject(new Error(`Fictional pair worker exited ${code} before ${type}`));
+    };
+    worker.on("message", onMessage);
+    worker.once("error", onError);
+    worker.once("exit", onExit);
+  });
+}
 
 function seedDraftScope(db, family, now) {
   const scopeId = randomBytes(16).toString("hex");
