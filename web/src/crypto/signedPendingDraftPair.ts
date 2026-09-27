@@ -4,6 +4,8 @@ import { decodeManagedVaultBlobV2,
   type PendingDraftPairActionContextV1 } from "@adeno/contracts";
 import { openLocalEncryptedDraft, type LocalOpenedDraft } from
   "../managed/intakeDraft";
+import { checkCiphertextUploadReceipt } from
+  "../managed/uploadReceipt";
 import { openScopeKeyEnvelopeV2, type ScopeKeyEnvelopeV2 } from
   "./scopeKeyEnvelopeV2";
 
@@ -14,7 +16,7 @@ const MAX_METADATA_WIRE_BYTES = 32 * 1024;
 
 type Claims = Omit<PendingDraftPairActionContextV1,
   "contentWireSha256" | "metadataWireSha256" | "contentWireBytes" |
-  "metadataWireBytes" | "issuerSigningKeySha256">;
+  "metadataWireBytes" | "issuerSigningKeySha256" | "pairedAt">;
 
 export class SignedPendingDraftPairError extends Error {
   constructor() {
@@ -24,11 +26,11 @@ export class SignedPendingDraftPairError extends Error {
 }
 
 /**
- * Device-only attestation of an authenticated content/metadata draft pair.
- * This does not establish current server grants, receipt durability or adult
- * approval.
- * The caller must compare both wire digests with authenticated upload receipts
- * and preserve the returned payload for later independent signature audit.
+ * Device-only attestation of an authenticated, receipt-confirmed draft pair.
+ * Receipt checks are point-in-time evidence, not proof that grants remain
+ * current or that the pair has been published or approved. The server writer
+ * must recheck committed bytes and authority in one transaction. Preserve the
+ * returned payload for later independent signature audit.
  */
 export async function signPendingDraftPair(input: {
   claims: Claims;
@@ -37,6 +39,9 @@ export async function signPendingDraftPair(input: {
   draftKeyEnvelope: ScopeKeyEnvelopeV2;
   recipientEncryptionKeys: CryptoKeyPair;
   signingKeys: CryptoKeyPair;
+  csrfToken: string;
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
 }): Promise<{ context: PendingDraftPairActionContextV1;
   payload: Uint8Array; payloadSha256: string; actionSha256: string;
   signature: Uint8Array }> {
@@ -47,6 +52,9 @@ export async function signPendingDraftPair(input: {
     const metadataWire = copyWire(input.metadataWire, MAX_METADATA_WIRE_BYTES);
     const publicKey = input.signingKeys?.publicKey;
     const privateKey = input.signingKeys?.privateKey;
+    const csrfToken = input.csrfToken;
+    const fetcher = input.fetcher;
+    const signal = input.signal;
     const draftKey = await openScopeKeyEnvelopeV2({
       householdId: claims.householdId,
       careProfileId: claims.careProfileId,
@@ -87,13 +95,30 @@ export async function signPendingDraftPair(input: {
     const rawPublic = new Uint8Array(await crypto.subtle.exportKey("raw",
       publicKey));
     if (rawPublic.byteLength !== 32) throw new SignedPendingDraftPairError();
+    const contentWireSha256 = await sha256Hex(contentWire);
+    const metadataWireSha256 = await sha256Hex(metadataWire);
+    const issuerSigningKeySha256 = await sha256Hex(rawPublic);
+    const contentReceipt = await checkCiphertextUploadReceipt({
+      saved: { intentId: claims.contentIntentId,
+        blobId: claims.contentBlobId,
+        wireSha256: contentWireSha256,
+        wireBytes: contentWire.byteLength },
+      csrfToken, fetcher, signal,
+    });
+    if (contentReceipt !== "committed") throw new SignedPendingDraftPairError();
+    const metadataReceipt = await checkCiphertextUploadReceipt({
+      saved: { intentId: claims.metadataIntentId,
+        blobId: claims.metadataBlobId,
+        wireSha256: metadataWireSha256,
+        wireBytes: metadataWire.byteLength },
+      csrfToken, fetcher, signal,
+    });
+    if (metadataReceipt !== "committed") throw new SignedPendingDraftPairError();
     const context: PendingDraftPairActionContextV1 = {
-      ...claims,
-      contentWireBytes: contentWire.byteLength,
+      ...claims, contentWireBytes: contentWire.byteLength,
       metadataWireBytes: metadataWire.byteLength,
-      contentWireSha256: await sha256Hex(contentWire),
-      metadataWireSha256: await sha256Hex(metadataWire),
-      issuerSigningKeySha256: await sha256Hex(rawPublic),
+      contentWireSha256, metadataWireSha256, issuerSigningKeySha256,
+      pairedAt: BigInt(Math.floor(Date.now() / 1000)),
     };
     const payload = encodePendingDraftPairActionPayloadV1(context);
     const signature = new Uint8Array(await crypto.subtle.sign("Ed25519",

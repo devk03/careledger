@@ -2,7 +2,7 @@ import { encodeManagedVaultBlobV2,
   encodePendingDraftPairActionPayloadV1, MANAGED_VAULT_CHUNK_BYTES,
   MANAGED_VAULT_FORMAT_V2, PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1,
   PENDING_DRAFT_PAIR_ACTION_PAYLOAD_BYTES_V1 } from "@adeno/contracts";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { prepareLocalEncryptedDraft } from "../managed/intakeDraft";
 import { generateDeviceEncryptionKeys } from "./dayKeyEnvelope";
@@ -17,6 +17,8 @@ const hex = (bytes: Uint8Array) => Array.from(bytes,
   (byte) => byte.toString(16).padStart(2, "0")).join("");
 const fromHex = (value: string) => Uint8Array.from(value.match(/../gu)!,
   (pair) => Number.parseInt(pair, 16));
+const sha256 = async (bytes: Uint8Array) => hex(new Uint8Array(
+  await crypto.subtle.digest("SHA-256", bytes)));
 
 function fictionalWire(blobId: string, ivByte: number,
   ciphertextByte: number): Uint8Array {
@@ -74,10 +76,26 @@ async function fictionalFixture(kind: "family_note" | "file" = "family_note") {
     authorLabel: "Fictional caregiver" });
   signedClaims.contentObjectId = draft.contentObjectId;
   signedClaims.metadataObjectId = draft.metadataObjectId;
+  const receipts = new Map([
+    [`/api/v3/vault/intents/${signedClaims.contentIntentId}/blobs/` +
+      `${signedClaims.contentBlobId}/receipt`,
+    { status: "committed", wireSha256: await sha256(draft.contentWire),
+      wireBytes: draft.contentWire.byteLength }],
+    [`/api/v3/vault/intents/${signedClaims.metadataIntentId}/blobs/` +
+      `${signedClaims.metadataBlobId}/receipt`,
+    { status: "committed", wireSha256: await sha256(draft.metadataWire),
+      wireBytes: draft.metadataWire.byteLength }],
+  ] as const);
+  const fetcher = vi.fn(async (path: RequestInfo | URL) => {
+    const body = receipts.get(String(path));
+    return new Response(JSON.stringify(body ?? { error: "not found" }),
+      { status: body ? 200 : 404 });
+  });
   return { claims: signedClaims, contentWire: draft.contentWire,
     metadataWire: draft.metadataWire,
     draftKeyEnvelope: created.envelopes[0]!,
-    recipientEncryptionKeys, signingKeys,
+    recipientEncryptionKeys, signingKeys, csrfToken: "fictional-csrf",
+    fetcher,
     preparationKey: draftKey };
 }
 
@@ -97,6 +115,7 @@ it("signs exact fictional v2 wires as a pending pair, not adult approval", async
     await crypto.subtle.digest("SHA-256", input.metadataWire))));
   expect(await crypto.subtle.verify("Ed25519", input.signingKeys.publicKey,
     signed.signature, signed.payload)).toBe(true);
+  expect(input.fetcher).toHaveBeenCalledTimes(2);
   const message = new Uint8Array([
     ...new TextEncoder().encode(PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1),
     ...signed.payload, ...signed.signature,
@@ -170,6 +189,46 @@ it("rejects unauthenticated wires, a wrong key, wrong AAD, and unrelated encrypt
     .rejects.toBeInstanceOf(SignedPendingDraftPairError);
 });
 
+it("refuses to sign if either exact ciphertext upload is unconfirmed or mismatched", async () => {
+  const input = await fictionalFixture();
+  const contentPath = `/api/v3/vault/intents/${input.claims.contentIntentId}/` +
+    `blobs/${input.claims.contentBlobId}/receipt`;
+  const metadataPath = `/api/v3/vault/intents/${input.claims.metadataIntentId}/` +
+    `blobs/${input.claims.metadataBlobId}/receipt`;
+  for (const [path, status, body] of [
+    [contentPath, 202, { status: "unconfirmed" }],
+    [metadataPath, 202, { status: "unconfirmed" }],
+    [contentPath, 200, { status: "committed", wireSha256: digest("ee"),
+      wireBytes: input.contentWire.byteLength }],
+    [metadataPath, 200, { status: "committed",
+      wireSha256: await sha256(input.metadataWire),
+      wireBytes: input.metadataWire.byteLength + 1 }],
+    [contentPath, 404, { error: "not found" }],
+  ] as const) {
+    const fetcher = vi.fn(async (url: RequestInfo | URL) =>
+      String(url) === path ? new Response(JSON.stringify(body), { status }) :
+        input.fetcher(url));
+    await expect(signPendingDraftPair({ ...input, fetcher }))
+      .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+  }
+});
+
+it("timestamps the pair after both receipt checks", async () => {
+  const input = await fictionalFixture();
+  let clock = 1_800_000_000_000;
+  const now = vi.spyOn(Date, "now").mockImplementation(() => clock);
+  try {
+    const fetcher = vi.fn(async (path: RequestInfo | URL) => {
+      const response = await input.fetcher(path);
+      if (String(path).includes(input.claims.metadataIntentId))
+        clock += 12_000;
+      return response;
+    });
+    const signed = await signPendingDraftPair({ ...input, fetcher });
+    expect(signed.context.pairedAt).toBe(1_800_000_012n);
+  } finally { now.mockRestore(); }
+});
+
 it("snapshots caller wires and IDs before asynchronous signing", async () => {
   const input = await fictionalFixture();
   const originalWire = input.contentWire.slice();
@@ -198,8 +257,6 @@ it("uses a fixed synthetic payload and Ed25519 key for browser/Node interoperabi
   const signedClaims = claims();
   const contentWire = fictionalWire(signedClaims.contentBlobId, 1, 3);
   const metadataWire = fictionalWire(signedClaims.metadataBlobId, 2, 4);
-  const sha256 = async (bytes: Uint8Array) => hex(new Uint8Array(
-    await crypto.subtle.digest("SHA-256", bytes)));
   const payload = encodePendingDraftPairActionPayloadV1({
     ...signedClaims,
     contentWireBytes: contentWire.byteLength,
