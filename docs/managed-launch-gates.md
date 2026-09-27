@@ -64,6 +64,14 @@ keys, verify email delivery,
 provide a manual approval UI or authorize a production mount, so the family
 identity and E2EE gates remain open.
 
+A [fresh public clone](fresh-clone-smoke-2026-09-27.md) of feature commit
+`74d99a5` built and started the community Docker edition on an isolated
+loopback port with blank inference keys; HTTP root/liveness/readiness were
+200. A second stop/start preserved the empty SQLite file's inode and SHA-256,
+and readiness returned 200 after startup. The build did not validate a
+release SHA. This is current community self-host evidence, not a fresh-clone
+managed release, independent caregiver setup, or Railway deployment proof.
+
 ## Mandatory two-family acceptance run
 
 Browser device keys are still memory-only. The
