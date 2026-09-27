@@ -1,0 +1,321 @@
+import assert from "node:assert/strict";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { chmod, copyFile, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+
+import { encodeManagedVaultBlobV2 } from "@adeno/contracts";
+import Database from "better-sqlite3";
+import express from "express";
+
+import { SESSION_COOKIE_NAME } from "../dist/auth/cookieSession.js";
+import { createManagedCiphertextAdmissionRouter } from
+  "../dist/managed/ciphertextAdmission.js";
+import { readCiphertextChunk } from
+  "../dist/managed/ciphertextObjectStore.js";
+import { SqliteDraftPairReservation } from
+  "../dist/managed/sqliteDraftPairReservation.js";
+import { assertManagedSchema } from
+  "../dist/managed/managedSchemaGuard.js";
+import { SqliteManagedSessions } from
+  "../dist/managed/sqliteManagedSessions.js";
+import { createNonDayDraftUploadComposition } from
+  "../dist/managed/nonDayDraftUploadComposition.js";
+import { SqliteNonDayDraftUploadLedger } from
+  "../dist/managed/sqliteNonDayDraftUploadLedger.js";
+import { createManagedUploadReceiptRouter } from
+  "../dist/managed/uploadReceipt.js";
+import { encryptManagedVaultBlobV2, decryptManagedVaultBlobV2 } from
+  "../../web/src/crypto/managedVaultV2.ts";
+import { seedFictionalManagedFamily } from "./fictionalManagedFamily.mjs";
+
+// Explicitly approved, empty, fictional v10 source only. This test copies it;
+// it never migrates or writes the source and never reads real case records.
+const APPROVED_DIRECTORY = "adeno-fictional-managed-fJAg4s";
+const APPROVED_EMPTY_SHA256 =
+  "2c3ee411bc91d720ffe1586badf071abe9b2ce9e1225b35a4de49a64c5ceb027";
+const sourcePath = process.argv[2];
+assert.equal(process.env.ADENO_APPROVED_FICTIONAL_MIGRATION, "1");
+assert.equal(process.env.NODE_ENV === "production", false);
+assert.equal(Object.keys(process.env).some((name) => name.startsWith("RAILWAY_")), false);
+assert.equal(typeof sourcePath, "string");
+const sourceParent = realpathSync(dirname(sourcePath));
+assert.equal(basename(sourcePath), "managed.sqlite3");
+assert.equal(basename(sourceParent), APPROVED_DIRECTORY);
+assert.equal(dirname(sourceParent), realpathSync(tmpdir()));
+assert.equal(realpathSync(sourcePath), join(sourceParent, "managed.sqlite3"));
+assert.equal(statSync(sourcePath).mode & 0o077, 0);
+assert.equal(existsSync(`${sourcePath}-wal`), false);
+assert.equal(existsSync(`${sourcePath}-shm`), false);
+assert.equal(createHash("sha256").update(readFileSync(sourcePath)).digest("hex"),
+  APPROVED_EMPTY_SHA256);
+
+const root = await mkdtemp(join(tmpdir(), "adeno-fictional-non-day-http-"));
+const dbPath = join(root, "managed.sqlite3");
+const objectRoot = await mkdtemp(join(root, "objects-"));
+await copyFile(sourcePath, dbPath);
+await chmod(dbPath, 0o600);
+const db = new Database(dbPath, { fileMustExist: true, timeout: 5_000 });
+let server;
+try {
+  db.pragma("foreign_keys = ON");
+  db.pragma("trusted_schema = OFF");
+  db.pragma("synchronous = EXTRA");
+  assertManagedSchema(db);
+  const now = Math.floor(Date.now() / 1000);
+  const [alpha, beta] = db.transaction(() => [
+    seedFictionalManagedFamily(db, "1", "2", now),
+    seedFictionalManagedFamily(db, "6", "7", now,
+      { intentByte: "c", blobByte: "d" }),
+  ]).immediate();
+  const alphaDraft = seedDraftScope(db, alpha, now);
+  const betaDraft = seedDraftScope(db, beta, now);
+  const reservation = new SqliteDraftPairReservation(db, 1024 * 1024,
+    2 * 1024 * 1024);
+  const composition = createNonDayDraftUploadComposition({ connection: db,
+    objectRoot, maxStoredBytesPerFamily: 1024 * 1024,
+    maxGlobalStoredBytes: 2 * 1024 * 1024 });
+  const sessions = new SqliteManagedSessions(db);
+  const app = express();
+  server = await new Promise((resolve) => {
+    const running = app.listen(0, "127.0.0.1", () => resolve(running));
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  app.use(createManagedCiphertextAdmissionRouter({ sessions,
+    expectedOrigin: base, store: composition.store }));
+  app.use(createManagedUploadReceiptRouter({ expectedOrigin: base,
+    reader: composition.receipts }));
+  const auth = (family) => ({ tokenSha256: family.tokenSha256,
+    csrfToken: family.csrfToken });
+  const headers = (family, contentType = true) => ({
+    cookie: `${SESSION_COOKIE_NAME}=${family.sessionToken}`,
+    origin: base, "sec-fetch-site": "same-origin",
+    "x-csrf-token": family.csrfToken,
+    ...(contentType ? { "content-type": "application/vnd.adeno.vault.v2" } : {}),
+  });
+  const url = (ids, role) => `${base}/api/v3/vault/intents/` +
+    `${ids[`${role}IntentId`]}/blobs/${ids[`${role}BlobId`]}`;
+  const receipt = (ids, role, family) => fetch(`${url(ids, role)}/receipt`, {
+    method: "POST", headers: headers(family, false),
+  });
+  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 },
+    false, ["encrypt", "decrypt"]);
+  const marker = "FICTIONAL_DRAFT_RECORD_NOT_A_REAL_PERSON";
+  const contentPlain = new TextEncoder().encode(marker);
+  async function pair(family, scope, content = contentPlain) {
+    const ids = reservation.reserve({ ...auth(family),
+      profileId: family.profileId, scopeId: scope.scopeId,
+      keyId: scope.keyId, epoch: 1 });
+    const objectIds = { content: randomBytes(16).toString("hex"),
+      metadata: randomBytes(16).toString("hex") };
+    const draftScope = (role) => ({ householdId: family.householdId,
+      careProfileId: family.profileId, opaqueScopeId: scope.scopeId,
+      objectId: objectIds[role], keyEpoch: 1,
+      purpose: "review-draft", revision: 1 });
+    const metadataBytes = new TextEncoder().encode(JSON.stringify({
+      format: "fictional-only", contentBlobId: ids.contentBlobId }));
+    const contentBlob = await encryptManagedVaultBlobV2(key, content,
+      draftScope("content"), Buffer.from(ids.contentBlobId, "hex"));
+    const metadataBlob = await encryptManagedVaultBlobV2(key, metadataBytes,
+      draftScope("metadata"), Buffer.from(ids.metadataBlobId, "hex"));
+    const wires = { content: Buffer.from(encodeManagedVaultBlobV2(contentBlob)),
+      metadata: Buffer.from(encodeManagedVaultBlobV2(metadataBlob)) };
+    reservation.bindIntents({ ...auth(family), reservationId: ids.reservationId,
+      content: { objectId: objectIds.content,
+        plaintextBytes: contentBlob.plaintextSize },
+      metadata: { objectId: objectIds.metadata,
+        plaintextBytes: metadataBlob.plaintextSize } });
+    reservation.openPairedLeases({ ...auth(family),
+      reservationId: ids.reservationId });
+    return { ids, wires, blobs: { content: contentBlob,
+      metadata: metadataBlob }, draftScope };
+  }
+
+  const alphaPair = await pair(alpha, alphaDraft);
+  const before = db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
+    "FROM managed_wire_occupancy").get().bytes;
+  assert.equal(before, alphaPair.wires.content.byteLength +
+    alphaPair.wires.metadata.byteLength);
+  assert.equal((await receipt(alphaPair.ids, "content", alpha)).status, 202);
+  assert.equal((await receipt(alphaPair.ids, "metadata", alpha)).status, 202);
+  assert.equal((await fetch(url(alphaPair.ids, "content"), {
+    method: "POST", headers: headers(beta),
+    body: alphaPair.wires.content })).status, 404);
+  assert.equal((await receipt(alphaPair.ids, "content", beta)).status, 404);
+  assert.equal((await fetch(url(alphaPair.ids, "content"), {
+    method: "POST", headers: { ...headers(alpha), "x-csrf-token": "wrong" },
+    body: alphaPair.wires.content })).status, 403);
+  assert.equal((await fetch(url(alphaPair.ids, "content"), {
+    method: "POST", headers: { ...headers(alpha),
+      origin: "https://attacker.example" },
+    body: alphaPair.wires.content })).status, 403);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_committed_blobs").get().n, 0);
+
+  for (const role of ["content", "metadata"]) {
+    const uploaded = await fetch(url(alphaPair.ids, role), {
+      method: "POST", headers: headers(alpha), body: alphaPair.wires[role],
+    });
+    const uploadBody = await uploaded.json();
+    assert.equal(uploaded.status, 201, JSON.stringify(uploadBody));
+    const response = await receipt(alphaPair.ids, role, alpha);
+    const receiptBody = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(receiptBody));
+    assert.deepEqual(receiptBody, { status: "committed",
+      wireSha256: createHash("sha256").update(alphaPair.wires[role])
+        .digest("hex"), wireBytes: alphaPair.wires[role].byteLength });
+    assert.equal(db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
+      "FROM managed_wire_occupancy").get().bytes, before);
+  }
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_committed_blobs WHERE household_id=?")
+    .get(alpha.householdId).n, 2);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_staging_leases WHERE household_id=? " +
+    "AND committed_at IS NULL").get(alpha.householdId).n, 0);
+
+  for (const role of ["content", "metadata"]) {
+    const row = db.prepare("SELECT nonce AS iv, storage_object_id AS objectId, " +
+      "ciphertext_sha256 AS digest, ciphertext_bytes AS bytes " +
+      "FROM managed_non_day_blob_chunks WHERE household_id=? AND intent_id=?")
+      .get(alpha.householdId, alphaPair.ids[`${role}IntentId`]);
+    assert.ok(row);
+    const disk = await readCiphertextChunk(objectRoot, alpha.householdId,
+      row.objectId, row.digest.toString("hex"), row.bytes);
+    assert.equal(disk.includes(contentPlain), false);
+    const stored = { ...alphaPair.blobs[role],
+      chunks: [{ iv: Uint8Array.from(row.iv), ciphertext: disk.buffer.slice(
+        disk.byteOffset, disk.byteOffset + disk.byteLength) }] };
+    assert.deepEqual(await decryptManagedVaultBlobV2(key, stored,
+      alphaPair.draftScope(role)), role === "content" ? contentPlain :
+      new TextEncoder().encode(JSON.stringify({ format: "fictional-only",
+        contentBlobId: alphaPair.ids.contentBlobId })));
+  }
+  for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`,
+    `${dbPath}-journal`]) {
+    if (existsSync(candidate))
+      assert.equal(readFileSync(candidate).includes(Buffer.from(marker)), false);
+  }
+  // A duplicate nonce across two drafts under one key must roll back both
+  // intermediate rows, even after the new ciphertext object was staged.
+  const collisionPair = await pair(alpha, alphaDraft);
+  const earlierNonce = db.prepare("SELECT nonce FROM " +
+    "managed_non_day_blob_chunks WHERE household_id=? AND intent_id=?")
+    .get(alpha.householdId, alphaPair.ids.contentIntentId).nonce;
+  const collisionWire = Buffer.from(collisionPair.wires.content);
+  earlierNonce.copy(collisionWire, 33);
+  assert.equal((await fetch(url(collisionPair.ids, "content"), {
+    method: "POST", headers: headers(alpha), body: collisionWire,
+  })).status, 409);
+  assert.equal((await receipt(collisionPair.ids, "content", alpha)).status,
+    202);
+  for (const table of ["managed_non_day_nonce_reservations",
+    "managed_non_day_blob_chunks", "managed_non_day_committed_blobs"]) {
+    assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table} ` +
+      "WHERE household_id=? AND intent_id=?")
+      .get(alpha.householdId, collisionPair.ids.contentIntentId).n, 0);
+  }
+  const reopened = new Database(dbPath, { fileMustExist: true, timeout: 5_000 });
+  try {
+    reopened.pragma("foreign_keys = ON");
+    reopened.pragma("trusted_schema = OFF");
+    reopened.pragma("synchronous = EXTRA");
+    const reader = new SqliteNonDayDraftUploadLedger(reopened,
+      1024 * 1024, 2 * 1024 * 1024);
+    assert.equal((await reader.readReceipt({ ...auth(alpha),
+      intentId: alphaPair.ids.contentIntentId,
+      blobId: alphaPair.ids.contentBlobId })).status, "committed");
+  } finally { reopened.close(); }
+
+  const badPair = await pair(beta, betaDraft);
+  const malformed = await fetch(url(badPair.ids, "content"), {
+    method: "POST", headers: headers(beta), body: Buffer.from("not a v2 wire"),
+  });
+  assert.equal(malformed.status, 422);
+  assert.equal((await receipt(badPair.ids, "content", beta)).status, 202);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_nonce_reservations WHERE household_id=?")
+    .get(beta.householdId).n, 0);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_blob_chunks WHERE household_id=?")
+    .get(beta.householdId).n, 0);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM " +
+    "managed_non_day_committed_blobs WHERE household_id=?")
+    .get(beta.householdId).n, 0);
+  db.prepare("UPDATE managed_devices SET state='revoked', " +
+    "revoked_at=unixepoch('now') WHERE household_id=? AND id=?")
+    .run(beta.householdId, beta.deviceId);
+  assert.equal((await fetch(url(badPair.ids, "metadata"), {
+    method: "POST", headers: headers(beta), body: badPair.wires.metadata,
+  })).status, 401);
+  assert.equal((await receipt(badPair.ids, "metadata", beta)).status, 401);
+  assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
+  assert.equal(db.pragma("integrity_check", { simple: true }), "ok");
+  process.stdout.write("PASS: fictional non-day draft content+metadata through Express, private ciphertext disk, v10 commit/receipt, second-connection read, cross-family and revocation denial; no migration or real records.\n");
+} finally {
+  if (server) await new Promise((resolve) => server.close(resolve));
+  db.close();
+}
+
+function seedDraftScope(db, family, now) {
+  const scopeId = randomBytes(16).toString("hex");
+  const keyId = randomBytes(16).toString("hex");
+  const commitment = randomBytes(32);
+  const latest = db.prepare("SELECT counter, action_sha256 AS digest " +
+    "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
+    "ORDER BY counter DESC LIMIT 1")
+    .get(family.householdId, family.deviceId);
+  let counter = latest.counter;
+  let predecessor = latest.digest;
+  const action = (kind) => {
+    counter += 1;
+    const digest = randomBytes(32);
+    const payload = randomBytes(32);
+    db.prepare("INSERT INTO managed_signed_actions " +
+      "(household_id,device_id,counter,action_kind,payload_sha256," +
+      "previous_action_sha256,action_sha256,signature,created_at) " +
+      "VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(family.householdId, family.deviceId, counter, kind, payload,
+        predecessor, digest, randomBytes(64), now);
+    predecessor = digest;
+    return { counter, payload };
+  };
+  db.transaction(() => {
+    db.prepare("INSERT INTO managed_scopes " +
+      "(household_id,profile_id,id,kind,state,created_by_device_id,created_at) " +
+      "VALUES (?,?,?,'draft','active',?,?)")
+      .run(family.householdId, family.profileId, scopeId, family.deviceId, now);
+    const registration = action("key");
+    db.prepare("INSERT INTO managed_key_identities " +
+      "(household_id,profile_id,scope_id,key_id,epoch,purpose," +
+      "key_commitment,signed_payload_sha256,issuer_device_id," +
+      "issuer_counter,created_at) VALUES (?,?,?,?,1,'draft',?,?,?,?,?)")
+      .run(family.householdId, family.profileId, scopeId, keyId, commitment,
+        registration.payload, family.deviceId, registration.counter, now);
+    const activation = action("key");
+    db.prepare("INSERT INTO managed_active_key_events " +
+      "(household_id,profile_id,scope_id,sequence,previous_sha256," +
+      "previous_key_id,previous_epoch,event_sha256,key_id,epoch,purpose," +
+      "key_commitment,registration_sha256,issuer_device_id,session_id," +
+      "issuer_counter,created_at) " +
+      "VALUES (?,?,?,1,NULL,NULL,NULL,?,?,1,'draft',?,?,?,?,?,?)")
+      .run(family.householdId, family.profileId, scopeId,
+        activation.payload, keyId, commitment, registration.payload,
+        family.deviceId, family.session.sessionId, activation.counter, now);
+    db.prepare("INSERT INTO managed_grant_heads " +
+      "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+      "head_sha256,capability_mask,updated_at) VALUES (?,?,?,?,0,NULL,0,?)")
+      .run(family.householdId, family.profileId, scopeId, family.deviceId, now);
+    const grant = action("grant");
+    db.prepare("INSERT INTO managed_grant_events " +
+      "(household_id,profile_id,scope_id,subject_device_id,sequence," +
+      "previous_sha256,event_sha256,capability_mask,issuer_device_id," +
+      "issuer_counter,created_at) VALUES (?,?,?,?,1,NULL,?,3,?,?,?)")
+      .run(family.householdId, family.profileId, scopeId, family.deviceId,
+        grant.payload, family.deviceId, grant.counter, now);
+  }).immediate();
+  return { scopeId, keyId };
+}
