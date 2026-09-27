@@ -18,6 +18,8 @@ import { createManagedUploadComposition } from
   "../dist/managed/managedUploadComposition.js";
 import { assertManagedSchema } from
   "../dist/managed/managedSchemaGuard.js";
+import { inspectExpiredManagedLeases } from
+  "../dist/managed/expiredLeaseReport.js";
 import { SqliteManagedSessions } from
   "../dist/managed/sqliteManagedSessions.js";
 import { createManagedUploadReceiptRouter } from
@@ -218,6 +220,19 @@ try {
     body: Buffer.from(encodeManagedVaultBlobV2(betaEncrypted)) })).status, 401);
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
     "WHERE household_id=?").get(beta.householdId).n, 0);
+  const reportReader = new Database(dbPath,
+    { fileMustExist: true, readonly: true });
+  try {
+    reportReader.pragma("foreign_keys = ON");
+    reportReader.pragma("trusted_schema = OFF");
+    const report = await inspectExpiredManagedLeases({ db: reportReader,
+      objectRoot, asOfUnixSeconds: now + 601 });
+    assert.equal(report.committedWireBytes, wire.byteLength);
+    assert.equal(report.uncommittedLeaseBytes, 65);
+    assert.equal(report.logicalOccupancyBytes, wire.byteLength + 65);
+    assert.equal(report.objectInventory.missingCommitted.length, 0);
+    assert.equal(report.objectInventory.corruptCommitted.length, 0);
+  } finally { reportReader.close(); }
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   process.stdout.write(`PASS: fictional browser-crypto module under Node → real Express upload/receipt → SQLite/private ciphertext; cross-family, origin, CSRF, malformed, device and session revocation denied. Synthetic fixture retained at ${testRoot}\n`);
 } finally {

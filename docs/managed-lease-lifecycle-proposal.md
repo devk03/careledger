@@ -28,3 +28,5 @@ Logical wire quota and physical disk capacity are separate. Retained orphan ciph
 - Signed schema checks, foreign keys, private-file modes, full TypeScript suites, privacy audit and independent adversarial review pass before a route is mounted.
 
 This proposal does not solve permanent reservation/claim metadata growth, safe PDF inspection, client key persistence, signup, recovery, MCP consent or real-record readiness. Those remain separate gates.
+
+An [unmounted read-only diagnostic](managed-expired-lease-report.md) now reports charged expired leases and object-inventory anomalies from a writer-quiesced fictional v10 copy. It never changes quota or establishes release eligibility; the migration and physical-capacity gate above remain unapproved and unimplemented.

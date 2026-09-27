@@ -17,6 +17,10 @@ import { assertManagedSchema } from
 import { ManagedDraftPairBusy, ManagedDraftPairDenied,
   SqliteDraftPairReservation } from
   "../dist/managed/sqliteDraftPairReservation.js";
+import { inspectExpiredManagedLeases } from
+  "../dist/managed/expiredLeaseReport.js";
+import { SqliteManagedUploadLedger } from
+  "../dist/managed/sqliteUploadLedger.js";
 import { encryptManagedVaultBlobV2 } from
   "../../web/src/crypto/managedVaultV2.ts";
 import { seedFictionalManagedFamily } from "./fictionalManagedFamily.mjs";
@@ -44,6 +48,7 @@ assert.equal(createHash("sha256").update(readFileSync(sourcePath)).digest("hex")
 
 const root = await mkdtemp(join(tmpdir(), "adeno-fictional-draft-pair-"));
 const dbPath = join(root, "managed.sqlite3");
+const objectRoot = await mkdtemp(join(root, "objects-"));
 await copyFile(sourcePath, dbPath);
 await chmod(dbPath, 0o600);
 const db = new Database(dbPath, { fileMustExist: true, timeout: 5_000 });
@@ -231,6 +236,13 @@ try {
       pair.contentIntentId, pair.metadataIntentId).n;
     assert.equal(rows, results[index].status === "reserved" ? 2 : 0);
   }
+  const dayLedger = new SqliteManagedUploadLedger({ connection: db },
+    4096, 8192);
+  const dayLease = await dayLedger.openForStaging({ session: beta.session,
+    tokenSha256: beta.tokenSha256, csrfToken: beta.csrfToken,
+    intentId: beta.intentId, signal: new AbortController().signal });
+  assert.ok(dayLease);
+  dayLedger.close();
 
   const preRotation = reserve(alpha, alphaDraft);
   for (let index = 0; index < 3; index++) reserve(alpha, alphaDraft);
@@ -269,6 +281,32 @@ try {
   assert.throws(() => reserve(alpha, alphaDraft), ManagedDraftPairDenied);
   assert.equal(db.pragma("integrity_check", { simple: true }), "ok");
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
+  const reportReader = new Database(dbPath,
+    { fileMustExist: true, readonly: true });
+  try {
+    reportReader.pragma("foreign_keys = ON");
+    reportReader.pragma("trusted_schema = OFF");
+    await assert.rejects(inspectExpiredManagedLeases({ db,
+      objectRoot, asOfUnixSeconds: now + 601 }));
+    const beforeExpiry = await inspectExpiredManagedLeases({
+      db: reportReader, objectRoot, asOfUnixSeconds: now + 300 });
+    assert.equal(beforeExpiry.diagnosticOnly, true);
+    assert.equal(beforeExpiry.families.reduce((sum, family) =>
+      sum + family.expiredDayCount + family.expiredNonDayCount, 0), 0);
+    const afterExpiry = await inspectExpiredManagedLeases({
+      db: reportReader, objectRoot, asOfUnixSeconds: now + 601 });
+    assert.equal(afterExpiry.families.length, 2);
+    assert.equal(afterExpiry.families.reduce((sum, family) =>
+      sum + family.expiredDayCount, 0), 1);
+    assert.equal(afterExpiry.families.reduce((sum, family) =>
+      sum + family.expiredNonDayCount, 0), 4);
+    assert.equal(afterExpiry.uncommittedLeaseBytes,
+      expectedWireBytes + pairBytes + 65);
+    assert.equal(afterExpiry.logicalOccupancyBytes,
+      afterExpiry.uncommittedLeaseBytes);
+    assert.equal(afterExpiry.objectInventory.orphanInodes, 0);
+    assert.equal(afterExpiry.objectInventory.missingCommitted.length, 0);
+  } finally { reportReader.close(); }
   for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     if (existsSync(path)) assert.equal(readFileSync(path).includes(
       Buffer.from(marker)), false);
