@@ -109,6 +109,15 @@ export async function verifyCiphertextObjectSnapshot(input: {
   return (await loadVerifiedSnapshot(input)).proof;
 }
 
+/** Return only references from a fully verified, hash-pinned object snapshot. */
+export async function readCiphertextObjectSnapshotReferences(input: {
+  backupRoot: string;
+  snapshotId: string;
+  expectedManifestSha256: string;
+}): Promise<readonly CiphertextObjectReference[]> {
+  return (await loadVerifiedSnapshot(input)).references;
+}
+
 /**
  * Create a new private object root under a trusted parent, preserving opaque
  * IDs. The caller must separately restore/verify the corresponding database
