@@ -1,6 +1,7 @@
 import { encodeDeviceEnrollmentNonceMaterialV1,
   encodeDeviceEnrollmentProofV1,
   encodeDeviceEnrollmentProofWireV1,
+  encodeDeviceApprovalCodeMaterialV1, formatDeviceApprovalCodeV1,
   parseDeviceEnrollmentChallengeWireV1,
   type DeviceEnrollmentProofWireV1 } from "@adeno/contracts";
 
@@ -41,6 +42,33 @@ export async function proposedDevicePublicKeys(input: {
       throw new BrowserDeviceEnrollmentProofError();
     return { encryptionPublicKeyHex: hex(encryption),
       signingPublicKeyHex: hex(signing) };
+  } catch { throw new BrowserDeviceEnrollmentProofError(); }
+}
+
+/**
+ * Show this on the candidate device for a human to compare and type on the
+ * owner's device. Never accept a code fetched from the server as confirmation.
+ */
+export async function candidateDeviceApprovalCode(wire: unknown, keys: {
+  encryptionKeys: CryptoKeyPair; signingKeys: CryptoKeyPair,
+}): Promise<string> {
+  try {
+    const challenge = parseDeviceEnrollmentChallengeWireV1(wire);
+    const local = await proposedDevicePublicKeys(keys);
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    if (local.encryptionPublicKeyHex !== hex(challenge.encryptionPublicKey) ||
+      local.signingPublicKeyHex !== hex(challenge.signingPublicKey) ||
+      challenge.expiresAt <= now || challenge.expiresAt > now + 660n)
+      throw new BrowserDeviceEnrollmentProofError();
+    const material = encodeDeviceApprovalCodeMaterialV1({
+      householdId: challenge.householdId, accountId: challenge.accountId,
+      deviceId: challenge.challengeId,
+      encryptionPublicKey: challenge.encryptionPublicKey,
+      signingPublicKey: challenge.signingPublicKey,
+    });
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256",
+      buffer(material)));
+    return formatDeviceApprovalCodeV1(digest);
   } catch { throw new BrowserDeviceEnrollmentProofError(); }
 }
 

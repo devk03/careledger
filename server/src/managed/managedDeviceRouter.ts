@@ -1,16 +1,19 @@
 import express, { type Request } from "express";
 import { parseDeviceEnrollmentProofWireV1,
-  parseSessionDeviceProofWireV1 } from "@adeno/contracts";
+  parseSessionDeviceProofWireV1, isDeviceApprovalCodeV1 } from
+  "@adeno/contracts";
 
 import { preflightCookieMutation } from "../auth/cookieSession.js";
 import type { SqliteDeviceEnrollmentCandidate } from
   "./sqliteDeviceEnrollment.js";
 import type { SqliteSessionDeviceBindingCandidate } from
   "./sqliteSessionDeviceBinding.js";
+import type { SqliteOwnerDeviceApprovalCandidate } from
+  "./sqliteOwnerDeviceApproval.js";
 
 type Preflight = { tokenSha256: string; csrfToken: string };
 type Action = "enrollment-challenge" | "enrollment-proof" |
-  "binding-challenge" | "binding-proof";
+  "device-approval" | "binding-challenge" | "binding-proof";
 const ID = /^[0-9a-f]{32}$/u;
 const KEY = /^[0-9a-f]{64}$/u;
 class InvalidManagedBody extends Error {}
@@ -19,6 +22,7 @@ export type ManagedDeviceRouterDependencies = {
   /** Fixed deployment configuration; never a forwarded/request host. */
   expectedOrigin: string;
   enrollment: Pick<SqliteDeviceEnrollmentCandidate, "issueWire" | "proveWire">;
+  approval: Pick<SqliteOwnerDeviceApprovalCandidate, "approve">;
   binding: Pick<SqliteSessionDeviceBindingCandidate, "issueWire" | "bindWire">;
   /** Required external/distributed abuse decision. Fail closed on errors. */
   rateLimit: (input: { tokenSha256: string; remoteAddress: string;
@@ -28,8 +32,9 @@ export type ManagedDeviceRouterDependencies = {
 
 /**
  * UNMOUNTED managed-only router. Mount under /api/managed/device only after
- * managed login, human device approval, origin/CORS and rate-limit deployment
- * review. It handles opaque IDs and key proofs, never medical content.
+ * managed login, origin/CORS and rate-limit deployment review. Approval
+ * requires owner reauth plus a code entered from the candidate device; v10
+ * does not persist an approver audit. It never handles medical content.
  */
 export function createManagedDeviceRouter(deps: ManagedDeviceRouterDependencies) {
   const origin = new URL(deps.expectedOrigin);
@@ -37,6 +42,7 @@ export function createManagedDeviceRouter(deps: ManagedDeviceRouterDependencies)
   if (origin.origin !== deps.expectedOrigin ||
     (origin.protocol !== "https:" &&
       !(origin.protocol === "http:" && local)) ||
+    typeof deps.approval?.approve !== "function" ||
     typeof deps.rateLimit !== "function")
     throw new Error("Invalid managed device router configuration");
 
@@ -60,7 +66,8 @@ export function createManagedDeviceRouter(deps: ManagedDeviceRouterDependencies)
     strict: true, inflate: false });
 
   function post(action: Action, handler: (input: Preflight,
-    body: Record<string, unknown>) => { status: 201 | 204; value?: unknown },
+    body: Record<string, unknown>) => { status: 201 | 204; value?: unknown } |
+      Promise<{ status: 201 | 204; value?: unknown }>,
   ) {
     router.post(`/${action}`, async (request, response) => {
       const preflight = preflightCookieMutation(request, deps.expectedOrigin);
@@ -92,7 +99,7 @@ export function createManagedDeviceRouter(deps: ManagedDeviceRouterDependencies)
         response.status(400).json({ error: "INVALID_REQUEST" });
         return;
       }
-      json(request, response, (error?: unknown) => {
+      json(request, response, async (error?: unknown) => {
         if (error) {
           const status = typeof error === "object" && error !== null &&
             "type" in error && error.type === "entity.too.large" ? 413 : 400;
@@ -105,7 +112,7 @@ export function createManagedDeviceRouter(deps: ManagedDeviceRouterDependencies)
           return;
         }
         try {
-          const result = handler({ tokenSha256: preflight.tokenSha256,
+          const result = await handler({ tokenSha256: preflight.tokenSha256,
             csrfToken: preflight.csrfToken }, body);
           if (result.status === 204) response.status(204).end();
           else response.status(201).json(result.value);
@@ -137,6 +144,20 @@ export function createManagedDeviceRouter(deps: ManagedDeviceRouterDependencies)
     catch { throw new InvalidManagedBody(); }
     return { status: 201, value: deps.enrollment.proveWire({ ...preflight,
       proof: body.proof }) };
+  });
+
+  post("device-approval", async (preflight, body) => {
+    if (!exactKeys(body, ["comparisonCode", "deviceId", "password"]) ||
+      typeof body.deviceId !== "string" || !ID.test(body.deviceId) ||
+      typeof body.password !== "string" || body.password.length < 12 ||
+      body.password.length > 128 || body.password.includes("\0") ||
+      Buffer.byteLength(body.password, "utf8") > 512 ||
+      !isDeviceApprovalCodeV1(body.comparisonCode))
+      throw new InvalidManagedBody();
+    await deps.approval.approve({ ok: true, ...preflight,
+      deviceId: body.deviceId, password: body.password,
+      comparisonCode: body.comparisonCode });
+    return { status: 204 };
   });
 
   post("binding-challenge", (preflight, body) => {

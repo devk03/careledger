@@ -14,6 +14,8 @@ import { createManagedDeviceRouter,
 
 const origin = "https://fictional.example";
 const id = (byte: string) => byte.repeat(32);
+const password = "fictional-owner-password";
+const comparisonCode = "a1b2-c3d4-e5f6";
 const servers: Server[] = [];
 
 afterEach(async () => {
@@ -48,6 +50,13 @@ async function endpoint(options?: { limit?: "allow" | "deny" | "fail";
         calls.push({ action: "enrollment-proof", input });
         if (options?.service === "deny") throw new Error("private family state");
         return { deviceId: id("4"), state: "pending" };
+      },
+    },
+    approval: {
+      async approve(input) {
+        calls.push({ action: "device-approval", input });
+        if (options?.service === "deny") throw new Error("private approver state");
+        return { deviceId: input.deviceId, state: "active" };
       },
     },
     binding: {
@@ -87,7 +96,7 @@ async function endpoint(options?: { limit?: "allow" | "deny" | "fail";
   return { base, headers, post, calls, rateCalls, token };
 }
 
-it("keeps all four opaque device operations behind cookie, origin, CSRF and no-store", async () => {
+it("keeps all five opaque device operations behind cookie, origin, CSRF and no-store", async () => {
   const fixture = await endpoint();
   const enrollment = await fixture.post("enrollment-challenge", {
     encryptionPublicKeyHex: "07".repeat(32),
@@ -106,6 +115,11 @@ it("keeps all four opaque device operations behind cookie, origin, CSRF and no-s
   } });
   expect(pending.status).toBe(201);
   expect(await pending.json()).toEqual({ deviceId: id("4"), state: "pending" });
+  const approved = await fixture.post("device-approval", { deviceId: id("4"),
+    password, comparisonCode });
+  expect(approved.status).toBe(204);
+  expect(await approved.text()).toBe("");
+  expect(approved.headers.get("set-cookie")).toBeNull();
   const binding = await fixture.post("binding-challenge", { deviceId: id("4") });
   expect(binding.status).toBe(201);
   expect((await binding.json()).format)
@@ -117,8 +131,8 @@ it("keeps all four opaque device operations behind cookie, origin, CSRF and no-s
   expect(confirmed.status).toBe(204);
   expect(await confirmed.text()).toBe("");
   expect(fixture.calls.map((call) => call.action)).toEqual([
-    "enrollment-challenge", "enrollment-proof", "binding-challenge",
-    "binding-proof",
+    "enrollment-challenge", "enrollment-proof", "device-approval",
+    "binding-challenge", "binding-proof",
   ]);
   expect(fixture.calls[0]?.input).toEqual({
     tokenSha256: createHash("sha256").update(fixture.token.plaintext)
@@ -126,7 +140,12 @@ it("keeps all four opaque device operations behind cookie, origin, CSRF and no-s
     encryptionPublicKeyHex: "07".repeat(32),
     signingPublicKeyHex: "08".repeat(32),
   });
-  expect(fixture.rateCalls).toHaveLength(4);
+  expect(fixture.calls[2]?.input).toEqual({ ok: true,
+    tokenSha256: fixture.token.sha256, csrfToken: "fictional-csrf",
+    deviceId: id("4"), password, comparisonCode });
+  expect(fixture.rateCalls).toHaveLength(5);
+  expect(JSON.stringify(fixture.rateCalls)).not.toContain(password);
+  expect(JSON.stringify(fixture.rateCalls)).not.toContain(comparisonCode);
   expect(fixture.rateCalls[0]).toEqual({
     tokenSha256: fixture.token.sha256,
     remoteAddress: expect.stringMatching(/127\.0\.0\.1/u),
@@ -192,6 +211,17 @@ it("rejects malformed, unknown, oversized and encoded bodies without invoking se
     expect(nested.status).toBe(400);
     expect(await nested.json()).toEqual({ error: "INVALID_REQUEST" });
   }
+  for (const body of [
+    { deviceId: id("4"), comparisonCode },
+    { deviceId: id("4"), comparisonCode, password: "short" },
+    { deviceId: id("4"), comparisonCode: "not-a-code", password },
+    { deviceId: id("4"), comparisonCode, password,
+      householdId: id("1") },
+  ]) {
+    const response = await fixture.post("device-approval", body);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "INVALID_REQUEST" });
+  }
   expect(fixture.calls).toHaveLength(0);
 });
 
@@ -204,11 +234,13 @@ it("fails closed on limiter and service denial without exposing details", async 
     expect(fixture.calls).toHaveLength(0);
   }
   const denied = await endpoint({ service: "deny" });
-  const response = await denied.post("binding-challenge", { deviceId: id("4") });
+  const response = await denied.post("device-approval", { deviceId: id("4"),
+    comparisonCode, password });
   expect(response.status).toBe(403);
   const body = await response.text();
   expect(JSON.parse(body)).toEqual({ error: "REQUEST_DENIED" });
   expect(body).not.toContain("private family state");
+  expect(body).not.toContain(password);
 });
 
 it("refuses an upstream body parser that could bypass its size limit", async () => {

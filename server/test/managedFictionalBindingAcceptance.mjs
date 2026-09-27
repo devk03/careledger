@@ -1606,6 +1606,8 @@ try {
     rateLimit: () => true });
   httpRouter = createManagedDeviceRouter({ expectedOrigin: httpOrigin,
     enrollment: new SqliteDeviceEnrollmentCandidate(db, httpOrigin),
+    // This older HTTP harness does not exercise the new approval action.
+    approval: { approve: async () => { throw new Error("not exercised"); } },
     binding: new SqliteSessionDeviceBindingCandidate(db, httpOrigin),
     rateLimit: () => true });
   const httpPost = (action, body, session = httpSession, origin = httpOrigin,
