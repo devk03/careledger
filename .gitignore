@@ -65,6 +65,7 @@
 node_modules/
 dist/
 dist-fictional/
+dist-public-shell/
 web/dist/
 .venv/
 __pycache__/

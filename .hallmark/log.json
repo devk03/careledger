@@ -1,5 +1,16 @@
 [
   {
+    "date": "2026-09-26",
+    "scope": "public-shell",
+    "genre": "modern-minimal",
+    "macrostructure": "Long Document",
+    "theme": "Coral",
+    "navigation": "N9",
+    "footer": "Ft1",
+    "enrichment": "approved notebook artwork only",
+    "brief": "Public-only, no-records shell for adult caregivers; separate React/TanStack/Vite and Express entrypoints, direct GitHub link, candid privacy and launch state"
+  },
+  {
     "date": "2026-09-07",
     "scope": "app",
     "macrostructure": "Workbench with editorial welcome",
