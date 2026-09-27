@@ -6,7 +6,8 @@ import { issueCsrfToken, issueSessionToken } from
 const id = (byte) => byte.repeat(32);
 
 // Structural invented fixture only. Signatures are not real enrollment proofs.
-export function seedFictionalManagedFamily(db, byte, accountByte, now) {
+export function seedFictionalManagedFamily(db, byte, accountByte, now,
+  { intentByte = "8", blobByte = "9", plaintextBytes = 0 } = {}) {
   const householdId = id(byte);
   const accountId = id(accountByte);
   const sessionId = id("3");
@@ -14,8 +15,8 @@ export function seedFictionalManagedFamily(db, byte, accountByte, now) {
   const profileId = id("5");
   const scopeId = id("6");
   const keyId = id("7");
-  const intentId = id("8");
-  const blobId = id("9");
+  const intentId = id(intentByte);
+  const blobId = id(blobByte);
   const token = issueSessionToken();
   const csrfSecret = randomBytes(32);
   const encryptionPublicKey = randomBytes(32);
@@ -127,10 +128,11 @@ export function seedFictionalManagedFamily(db, byte, accountByte, now) {
     "(household_id,id,profile_id,scope_id,key_id,epoch,purpose," +
     "wire_version,blob_id,writer_device_id,session_id,plaintext_bytes," +
     "chunk_count,created_at,expires_at) " +
-    "VALUES (?,?,?,?,?,1,'day',2,?,?,?,0,1,?,?)")
+    "VALUES (?,?,?,?,?,1,'day',2,?,?,?,?,1,?,?)")
     .run(householdId, intentId, profileId, scopeId, keyId, blobId,
-      deviceId, sessionId, now, now + 600);
-  return { householdId, accountId, profileId, scopeId, keyId, blobId, deviceId, tokenSha256: token.sha256,
+      deviceId, sessionId, plaintextBytes, now, now + 600);
+  return { householdId, accountId, profileId, scopeId, keyId, blobId, deviceId,
+    sessionToken: token.plaintext, tokenSha256: token.sha256,
     csrfToken: issueCsrfToken(sessionId, csrfSecret), intentId,
     session: { scope: { householdId, userId: accountId },
       sessionId, csrfSecret, expiresAt: now + 3600 } };

@@ -79,7 +79,19 @@ The SQL rows are rolled back, while synthetic private temp objects remain for
 inspection. An unmounted composition factory now exposes only the staged
 upload store and receipt reader, and rejects a non-absolute/non-private object
 root before wiring; it does not expose the raw ledger to its caller. This is
-not a mounted HTTP/browser upload or an AES-GCM proof;
+not a mounted production upload. A fictional-only localhost harness runs the
+browser AES-GCM v2 module under Node and sends its ciphertext through the real
+Express admission and receipt routers, a fresh v10 session reader, the SQLite
+ledger and private disk. Two
+families, wrong Origin/CSRF, malformed wire, and device/session revocation are
+tested. Persisted chunk bytes decrypt with the local test key; the fictional
+plaintext marker is absent from checked DB/sidecar files and the chunk. This
+is not a real browser UI test and does not inspect logs or backups. The guarded
+manual script is `server/test/managedFictionalHttpUpload.mjs`; it accepts only
+the separately approved empty fictional local v10 source DB and copies it to a
+private temporary fixture. It is not part of the ordinary `npm test` suite.
+It does not
+issue intents or publish care-day revisions;
 there is no reconciler for orphaned objects or safe retry path. The draft remains
 day-only; `0005` has no mounted non-day ledger or intent-issuance API. A ciphertext-only snapshot primitive can copy and re-hash an exact list
 of committed object references without scanning pending files; it publishes a
