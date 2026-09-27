@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, createPublicKey, diffieHellman,
   generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
-import { chmod, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -153,6 +153,49 @@ function proof(challenge, privateKey, audience = "https://fictional.example") {
 
 let httpServer;
 try {
+  // Connection-local durability policy: rollback-journal FULL is rejected;
+  // DELETE+EXTRA is accepted. A borrowed connection that later weakens its
+  // sync setting fails on the next ledger operation before reading authority.
+  assert.equal(db.pragma("main.journal_mode", { simple: true }), "delete");
+  db.pragma("main.synchronous = FULL");
+  assert.throws(() => new SqliteManagedUploadLedger({ connection: db },
+    65, 65), IncompatibleManagedLedger);
+  db.pragma("main.synchronous = EXTRA");
+  const durabilityProbe = new SqliteManagedUploadLedger({ connection: db },
+    65, 65);
+  try {
+    db.pragma("main.synchronous = FULL");
+    await assert.rejects(durabilityProbe.readReceipt({
+      tokenSha256: "0".repeat(64), csrfToken: "fictional-csrf",
+      intentId: id("0"), blobId: id("0") }), IncompatibleManagedLedger);
+  } finally {
+    db.pragma("main.synchronous = EXTRA");
+    durabilityProbe.close();
+  }
+  const ownedDurabilityProbe = new SqliteManagedUploadLedger(path, 65, 65);
+  ownedDurabilityProbe.close();
+  // A private copy of this exact empty fictional schema exercises the other
+  // accepted pair, WAL+FULL, without changing the approved source database.
+  // Keep the synthetic copy for inspection; never delete it in this script.
+  const walRoot = await mkdtemp(join(tmpdir(), "adeno-fictional-wal-policy-"));
+  const walPath = join(walRoot, "managed.sqlite3");
+  await copyFile(path, walPath);
+  await chmod(walPath, 0o600);
+  const walDb = new Database(walPath, { fileMustExist: true });
+  try {
+    walDb.pragma("foreign_keys = ON");
+    walDb.pragma("trusted_schema = OFF");
+    assert.equal(walDb.pragma("main.journal_mode = WAL", { simple: true }),
+      "wal");
+    walDb.pragma("main.synchronous = FULL");
+    const walProbe = new SqliteManagedUploadLedger({ connection: walDb },
+      65, 65);
+    walProbe.close();
+    walDb.pragma("main.synchronous = EXTRA");
+    const walExtraProbe = new SqliteManagedUploadLedger({ connection: walDb },
+      65, 65);
+    walExtraProbe.close();
+  } finally { walDb.close(); }
   db.exec("BEGIN IMMEDIATE");
   for (const family of families) {
     db.prepare("INSERT INTO managed_families VALUES (?,'active',?)")
@@ -1657,10 +1700,10 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, disk-proof ledger/receipt, tamper denial, two-family global logical quota and two-chunk rollback; cross-family, nonce replay and grant/device/session revocation denial");
+  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, disk-proof ledger/receipt, tamper denial, two-family global logical quota, DELETE sync drift denial, WAL constructor policy and two-chunk rollback; cross-family, nonce replay and grant/device/session revocation denial");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.
-  db.exec("ROLLBACK");
-  db.close();
+  try { if (db.inTransaction) db.exec("ROLLBACK"); }
+  finally { db.close(); }
 }

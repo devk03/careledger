@@ -54,6 +54,17 @@ It is an application-side check, not a database invariant: a differently
 configured or direct writer could bypass it. Every future non-day writer must
 use the same policy, and a single-writer/central configuration plus independent
 multi-connection race evidence remain release gates.
+The unmounted ledger now rejects a borrowed connection unless its initial
+journal/sync pair is WAL+FULL/EXTRA or DELETE+EXTRA, and detects changes on
+each ledger transaction; a path-owned connection sets EXTRA itself. This is
+an explicit supported-policy allowlist on this ledger connection, not a proof
+that all SQLite writers or the underlying volume are durable. The fictional run
+proves DELETE+FULL denial, DELETE+EXTRA acceptance and denial after a borrowed
+connection weakens to FULL. A retained private copy of the same empty fictional
+schema accepts WAL+FULL and WAL+EXTRA without changing the approved source DB.
+This follows [SQLite's synchronous guidance](https://www.sqlite.org/pragma.html#pragma_synchronous),
+but journal-mode drift, other writers, underlying storage sync honesty and a
+power-loss/restart drill are not verified.
 The same fictional run now composes that ledger with real private object staging:
 it re-reads invented ciphertext-shaped bytes, verifies the exact wire digest,
 commits their object IDs and hashes, and returns a matching receipt. Altering a

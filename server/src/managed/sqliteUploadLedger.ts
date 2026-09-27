@@ -65,6 +65,8 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
   private readonly ownsConnection: boolean;
   private readonly canonicalPath: string;
   private readonly schemaVersion: number;
+  private readonly journalMode: "wal" | "delete";
+  private readonly synchronousLevel: 2 | 3;
 
   /** A shared connection lets managed services compose one write transaction.
    * The caller retains ownership; close() only closes a path-opened connection. */
@@ -84,6 +86,8 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
     assertPrivateFile(`${path}-shm`, false);
     let db: Database.Database | undefined;
     let schemaVersion = -1;
+    let journalMode: "wal" | "delete" = "delete";
+    let synchronousLevel: 2 | 3 = 3;
     try {
       db = ownsConnection ?
         new Database(path, { fileMustExist: true, timeout: 5_000 }) :
@@ -91,6 +95,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       if (ownsConnection) {
         db.pragma("foreign_keys = ON");
         db.pragma("trusted_schema = OFF");
+        db.pragma("main.synchronous = EXTRA");
       }
       // SQLite can lazily instantiate an empty temp schema during integrity
       // checks. Allow that schema, but no temp objects that could shadow names
@@ -109,6 +114,12 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
         db.pragma("query_only", { simple: true }) !== 0)
         throw new IncompatibleManagedLedger();
       verifySchema(db);
+      const mode: unknown = db.pragma("main.journal_mode", { simple: true });
+      const sync: unknown = db.pragma("main.synchronous", { simple: true });
+      if (!durableJournalSettings(mode, sync))
+        throw new IncompatibleManagedLedger();
+      journalMode = mode;
+      synchronousLevel = sync as 2 | 3;
       schemaVersion = db.pragma("main.schema_version", { simple: true }) as number;
       if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0)
         throw new IncompatibleManagedLedger();
@@ -120,6 +131,8 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
     this.ownsConnection = ownsConnection;
     this.canonicalPath = realpathSync(path);
     this.schemaVersion = schemaVersion;
+    this.journalMode = journalMode;
+    this.synchronousLevel = synchronousLevel;
     this.maxStoredBytesPerFamily = maxStoredBytesPerFamily;
     this.maxGlobalStoredBytes = maxGlobalStoredBytes;
   }
@@ -304,7 +317,9 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
         databases.slice(1).some((row) => row.name !== "temp" || row.file !== "") ||
         this.db.readonly ||
         this.db.pragma("query_only", { simple: true }) !== 0 ||
-        this.db.pragma("main.schema_version", { simple: true }) !== this.schemaVersion)
+        this.db.pragma("main.schema_version", { simple: true }) !== this.schemaVersion ||
+        this.db.pragma("main.journal_mode", { simple: true }) !== this.journalMode ||
+        this.db.pragma("main.synchronous", { simple: true }) !== this.synchronousLevel)
         throw new IncompatibleManagedLedger();
       assertManagedSchema(this.db);
     } catch { throw new IncompatibleManagedLedger(); }
@@ -402,6 +417,12 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       session.boundDeviceId, session.accountId);
     return row ?? null;
   }
+}
+
+function durableJournalSettings(mode: unknown, sync: unknown):
+  mode is "wal" | "delete" {
+  return (mode === "wal" && (sync === 2 || sync === 3)) ||
+    (mode === "delete" && sync === 3);
 }
 
 function asStagingIntent(row: IntentRow, attemptId: string): ManagedStagingIntent {
