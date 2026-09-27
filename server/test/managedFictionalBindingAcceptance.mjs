@@ -14,6 +14,9 @@ import { encodeDeviceEnrollmentNonceMaterialV1,
   encodeSessionDeviceProofWireV1,
   encodeScopeEnvelopeActionPayloadV1,
   encodeScopeKeyEnvelopeV2,
+  encodeManagedVaultBlobV2,
+  MANAGED_VAULT_FORMAT_V2,
+  MANAGED_VAULT_CHUNK_BYTES,
   SCOPE_ENVELOPE_ACTION_HASH_DOMAIN_V1 } from "@adeno/contracts";
 import { issueCsrfToken, issueSessionToken } from
   "../dist/auth/cookieSession.js";
@@ -33,6 +36,13 @@ import { issueScopeEnvelopeV2 } from
   "../dist/managed/sqliteScopeEnvelopeWriter.js";
 import { readAccountScopedScopeEnvelopeCandidateV2 } from
   "../dist/managed/sqliteScopeEnvelopeReader.js";
+import { IncompatibleManagedLedger, SqliteManagedUploadLedger } from
+  "../dist/managed/sqliteUploadLedger.js";
+import { ManagedVaultUploadDeniedError, ManagedVaultUploadExistsError,
+  ManagedVaultUploadSessionError } from
+  "../dist/managed/ciphertextAdmission.js";
+import { ManagedUploadReceiptCsrfError } from
+  "../dist/managed/uploadReceipt.js";
 
 // One-time audit of the exact 2026-09-26 approved fictional database. This is
 // intentionally not a general-purpose caller-selected database test/runner.
@@ -684,6 +694,187 @@ try {
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_session_device_bindings")
     .get().n, 2);
 
+  // The ledger borrows the same already-private, integrity-checked connection
+  // as other managed services. Its nested transactions must not publish or
+  // close the outer fictional BEGIN/ROLLBACK transaction.
+  const ledger = new SqliteManagedUploadLedger({ connection: db }, 1000);
+  assert.equal(db.inTransaction, true);
+  const sessionView = (family) => ({
+    scope: { householdId: family.h, userId: family.a },
+    sessionId: family.s,
+    csrfSecret: db.prepare("SELECT csrf_secret AS value FROM managed_sessions " +
+      "WHERE household_id=? AND id=?").get(family.h, family.s).value,
+    expiresAt: now + 3600,
+  });
+  const uploadSignal = new AbortController().signal;
+  const firstReceiptInput = { tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf, intentId: id("d"), blobId: id("e") };
+  assert.deepEqual(await ledger.readReceipt(firstReceiptInput),
+    { status: "unconfirmed" });
+  await assert.rejects(ledger.readReceipt({ ...firstReceiptInput,
+    csrfToken: "fictional-wrong-csrf" }), ManagedUploadReceiptCsrfError);
+  assert.equal(await ledger.readReceipt({ ...firstReceiptInput,
+    blobId: id("9") }), null);
+  assert.equal(await ledger.readReceipt({ ...firstReceiptInput,
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf }), null);
+  assert.equal(await ledger.openForStaging({ session: sessionView(beta),
+    tokenSha256: beta.session.sha256, csrfToken: beta.session.csrf,
+    intentId: id("d"), signal: uploadSignal }), null);
+  const stagedFirst = await ledger.openForStaging({
+    session: sessionView(alpha), tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf, intentId: id("d"), signal: uploadSignal });
+  assert.ok(stagedFirst);
+  assert.equal(stagedFirst.blobId, id("e"));
+  assert.equal(db.inTransaction, true);
+  assert.deepEqual(await ledger.readReceipt(firstReceiptInput),
+    { status: "unconfirmed" });
+  const firstIv = Buffer.alloc(12, 1);
+  const firstCiphertext = new Uint8Array(16).fill(2);
+  const firstWire = encodeManagedVaultBlobV2({
+    format: MANAGED_VAULT_FORMAT_V2,
+    blobId: Buffer.from(id("e"), "hex"), plaintextSize: 0,
+    chunkSize: MANAGED_VAULT_CHUNK_BYTES,
+    chunks: [{ iv: firstIv, ciphertext: firstCiphertext.buffer }],
+  });
+  assert.equal(firstWire.byteLength, 65);
+  const firstWireSha = digest(firstWire);
+  await ledger.publishVerified({ intent: stagedFirst,
+    tokenSha256: alpha.session.sha256, csrfToken: alpha.session.csrf,
+    wireSha256: firstWireSha, wireBytes: firstWire.byteLength,
+    chunks: [{ index: 0, iv: firstIv, storageObjectId: id("5"),
+      ciphertextSha256: digest(firstCiphertext), ciphertextBytes: 16 }],
+    signal: uploadSignal });
+  assert.equal(db.inTransaction, true);
+  assert.deepEqual(await ledger.readReceipt(firstReceiptInput), {
+    status: "committed", wireSha256: firstWireSha.toString("hex"),
+    wireBytes: 65,
+  });
+  db.pragma("trusted_schema = ON");
+  try {
+    await assert.rejects(ledger.readReceipt(firstReceiptInput),
+      IncompatibleManagedLedger);
+  } finally { db.pragma("trusted_schema = OFF"); }
+  for (const [table, condition] of [
+    ["managed_staging_leases", "committed_at IS NOT NULL"],
+    ["managed_nonce_reservations", "1=1"],
+    ["managed_blob_chunks", "1=1"],
+    ["managed_committed_blobs", "1=1"],
+  ]) assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table} ` +
+    `WHERE household_id=? AND ${condition}`).get(alpha.h).n, 1);
+  assert.notEqual(db.prepare("SELECT consumed_at AS value FROM managed_upload_intents " +
+    "WHERE household_id=? AND id=?").get(alpha.h, id("d")).value, null);
+  assert.equal(db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
+    "FROM managed_wire_occupancy WHERE household_id=?")
+    .get(alpha.h).bytes, 65);
+  assert.equal(await ledger.openForStaging({
+    session: sessionView(alpha), tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf, intentId: id("d"),
+    signal: uploadSignal }), null);
+
+  const secondIntentAt = Math.floor(Date.now() / 1000);
+  insertAuthorizedIntent.run(alpha.h, id("f"), profileId, scopeId,
+    keyId, id("9"), alpha.d, alpha.s, secondIntentAt,
+    secondIntentAt + 600);
+  const strictLedger = new SqliteManagedUploadLedger({ connection: db }, 65);
+  await assert.rejects(strictLedger.openForStaging({
+    session: sessionView(alpha), tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf, intentId: id("f"),
+    signal: uploadSignal }), ManagedVaultUploadDeniedError);
+  strictLedger.close();
+  assert.equal(db.inTransaction, true);
+  const stagedSecond = await ledger.openForStaging({
+    session: sessionView(alpha), tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf, intentId: id("f"),
+    signal: uploadSignal });
+  assert.ok(stagedSecond);
+  const secondWire = encodeManagedVaultBlobV2({
+    format: MANAGED_VAULT_FORMAT_V2,
+    blobId: Buffer.from(id("9"), "hex"), plaintextSize: 0,
+    chunkSize: MANAGED_VAULT_CHUNK_BYTES,
+    chunks: [{ iv: firstIv, ciphertext: firstCiphertext.buffer }],
+  });
+  await assert.rejects(ledger.publishVerified({ intent: stagedSecond,
+    tokenSha256: alpha.session.sha256, csrfToken: alpha.session.csrf,
+    wireSha256: digest(secondWire), wireBytes: secondWire.byteLength,
+    chunks: [{ index: 0, iv: firstIv, storageObjectId: id("6"),
+      ciphertextSha256: digest(firstCiphertext), ciphertextBytes: 16 }],
+    signal: uploadSignal }), ManagedVaultUploadExistsError);
+  for (const table of ["managed_nonce_reservations", "managed_blob_chunks",
+    "managed_committed_blobs"]) assert.equal(db.prepare(
+    `SELECT count(*) AS n FROM ${table} WHERE household_id=? AND intent_id=?`)
+    .get(alpha.h, id("f")).n, 0);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
+    "WHERE household_id=? AND intent_id=? AND committed_at IS NULL")
+    .get(alpha.h, id("f")).n, 1);
+  assert.deepEqual(await ledger.readReceipt({
+    tokenSha256: alpha.session.sha256, csrfToken: alpha.session.csrf,
+    intentId: id("f"), blobId: id("9") }), { status: "unconfirmed" });
+  assert.equal(db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
+    "FROM managed_wire_occupancy WHERE household_id=?")
+    .get(alpha.h).bytes, 130); // The failed attempt's lease remains charged.
+
+  // A later-chunk nonce collision must roll back the earlier chunk's nonce
+  // and metadata inserts, while leaving the failed staging lease charged.
+  const multiIntentId = id("8");
+  const multiBlobId = id("a");
+  const multiPlaintextBytes = MANAGED_VAULT_CHUNK_BYTES + 1;
+  const multiAt = Math.floor(Date.now() / 1000);
+  db.prepare("INSERT INTO managed_upload_intents " +
+    "(household_id,id,profile_id,scope_id,key_id,epoch,purpose," +
+    "wire_version,blob_id,writer_device_id,session_id,plaintext_bytes," +
+    "chunk_count,created_at,expires_at) " +
+    "VALUES (?,?,?,?,?,1,'day',2,?,?,?,?,2,?,?)")
+    .run(alpha.h, multiIntentId, profileId, scopeId, keyId, multiBlobId,
+      alpha.d, alpha.s, multiPlaintextBytes, multiAt, multiAt + 600);
+  const multiLedger = new SqliteManagedUploadLedger({ connection: db },
+    2 * MANAGED_VAULT_CHUNK_BYTES);
+  const stagedMulti = await multiLedger.openForStaging({
+    session: sessionView(alpha), tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf, intentId: multiIntentId,
+    signal: uploadSignal });
+  assert.ok(stagedMulti);
+  const multiFirstIv = Buffer.alloc(12, 4);
+  const multiFirstCiphertext = new Uint8Array(MANAGED_VAULT_CHUNK_BYTES + 16)
+    .fill(4);
+  const multiLastCiphertext = new Uint8Array(17).fill(5);
+  const multiWire = encodeManagedVaultBlobV2({
+    format: MANAGED_VAULT_FORMAT_V2,
+    blobId: Buffer.from(multiBlobId, "hex"),
+    plaintextSize: multiPlaintextBytes,
+    chunkSize: MANAGED_VAULT_CHUNK_BYTES,
+    chunks: [
+      { iv: multiFirstIv, ciphertext: multiFirstCiphertext.buffer },
+      { iv: firstIv, ciphertext: multiLastCiphertext.buffer },
+    ],
+  });
+  await assert.rejects(multiLedger.publishVerified({ intent: stagedMulti,
+    tokenSha256: alpha.session.sha256, csrfToken: alpha.session.csrf,
+    wireSha256: digest(multiWire), wireBytes: multiWire.byteLength,
+    chunks: [
+      { index: 0, iv: multiFirstIv, storageObjectId: id("b"),
+        ciphertextSha256: digest(multiFirstCiphertext),
+        ciphertextBytes: multiFirstCiphertext.byteLength },
+      { index: 1, iv: firstIv, storageObjectId: id("c"),
+        ciphertextSha256: digest(multiLastCiphertext),
+        ciphertextBytes: multiLastCiphertext.byteLength },
+    ], signal: uploadSignal }), ManagedVaultUploadExistsError);
+  for (const table of ["managed_nonce_reservations", "managed_blob_chunks",
+    "managed_committed_blobs"]) assert.equal(db.prepare(
+    `SELECT count(*) AS n FROM ${table} WHERE household_id=? AND intent_id=?`)
+    .get(alpha.h, multiIntentId).n, 0);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
+    "WHERE household_id=? AND intent_id=? AND committed_at IS NULL")
+    .get(alpha.h, multiIntentId).n, 1);
+  assert.equal(db.prepare("SELECT COALESCE(SUM(bytes),0) AS bytes " +
+    "FROM managed_wire_occupancy WHERE household_id=?")
+    .get(alpha.h).bytes, 130 + multiWire.byteLength);
+  assert.deepEqual(await multiLedger.readReceipt({
+    tokenSha256: alpha.session.sha256, csrfToken: alpha.session.csrf,
+    intentId: multiIntentId, blobId: multiBlobId }),
+  { status: "unconfirmed" });
+  multiLedger.close();
+  assert.equal(db.inTransaction, true);
+
   const revokedIssuerSession = addSession(alpha, id("2"));
   const revokedIssuerChallenge = candidate.issueWire({
     tokenSha256: revokedIssuerSession.sha256,
@@ -892,6 +1083,23 @@ try {
       alpha.d, priorGrantAction.counter + 1, revokeGrantAt);
   assert.throws(readEnvelope,
     (error) => error?.name === "ManagedScopeEnvelopeReadDenied");
+  assert.equal(await ledger.readReceipt(firstReceiptInput), null);
+  db.prepare("UPDATE managed_sessions SET revoked_at=? " +
+    "WHERE household_id=? AND id=?").run(revokeGrantAt, alpha.h, alpha.s);
+  await assert.rejects(ledger.publishVerified({ intent: stagedSecond,
+    tokenSha256: alpha.session.sha256, csrfToken: alpha.session.csrf,
+    wireSha256: digest(secondWire), wireBytes: secondWire.byteLength,
+    chunks: [{ index: 0, iv: Buffer.alloc(12, 3),
+      storageObjectId: id("7"), ciphertextSha256: digest(firstCiphertext),
+      ciphertextBytes: 16 }], signal: uploadSignal }),
+  ManagedVaultUploadSessionError);
+  await assert.rejects(ledger.readReceipt(firstReceiptInput),
+    ManagedVaultUploadSessionError);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_committed_blobs " +
+    "WHERE household_id=? AND intent_id=?").get(alpha.h, id("f")).n, 0);
+  ledger.close(); // Borrowed connection must remain open and in the outer txn.
+  assert.equal(db.inTransaction, true);
+  assert.equal(db.prepare("SELECT 1 AS alive").get().alive, 1);
   const accountDisabledChallenge = enrollment.issueWire(enrollmentInput);
   db.prepare("UPDATE managed_accounts SET state='disabled', auth_version=2 " +
     "WHERE id=?").run(alpha.a);
@@ -916,7 +1124,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup, verified auth, two-family device binding, bound day intent, and signed envelope writer/reader; cross-family, replay, atomic rollback and grant/device/session revocation denial");
+  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, signed envelope writer/reader, one-chunk ledger/receipt and two-chunk rollback; cross-family, nonce replay, quota and grant/device/session revocation denial");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.

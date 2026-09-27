@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { lstatSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 
 import { MANAGED_VAULT_CHUNK_BYTES, MAX_MANAGED_VAULT_BYTES } from
@@ -11,6 +11,7 @@ import { ManagedVaultUploadDeniedError, ManagedVaultUploadExistsError,
   ManagedVaultUploadSessionError } from "./ciphertextAdmission.js";
 import { MANAGED_APPLICATION_ID, MANAGED_MIGRATIONS } from
   "./managedSchemaManifest.js";
+import { assertManagedSchema } from "./managedSchemaGuard.js";
 import type { ManagedStagingIntent, ManagedUploadLedger,
   VerifiedUploadChunkRow } from "./stagedUploadStore.js";
 import { ManagedUploadReceiptCsrfError, type ManagedUploadReceiptReader,
@@ -60,9 +61,18 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
   ManagedUploadReceiptReader {
   private readonly db: Database.Database;
   private readonly maxStoredBytesPerFamily: number;
+  private readonly ownsConnection: boolean;
+  private readonly canonicalPath: string;
+  private readonly schemaVersion: number;
 
-  constructor(path: string, maxStoredBytesPerFamily: number) {
-    if (!isAbsolute(path) || !Number.isSafeInteger(maxStoredBytesPerFamily) ||
+  /** A shared connection lets managed services compose one write transaction.
+   * The caller retains ownership; close() only closes a path-opened connection. */
+  constructor(source: string | { connection: Database.Database },
+    maxStoredBytesPerFamily: number) {
+    const ownsConnection = typeof source === "string";
+    const path = ownsConnection ? source : source?.connection?.name;
+    if (typeof path !== "string" || !isAbsolute(path) ||
+      !Number.isSafeInteger(maxStoredBytesPerFamily) ||
       maxStoredBytesPerFamily < 65)
       throw new IncompatibleManagedLedger();
     assertPrivateDirectory(dirname(path));
@@ -70,16 +80,43 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
     assertPrivateFile(`${path}-wal`, false);
     assertPrivateFile(`${path}-shm`, false);
     let db: Database.Database | undefined;
+    let schemaVersion = -1;
     try {
-      db = new Database(path, { fileMustExist: true, timeout: 5_000 });
-      db.pragma("foreign_keys = ON");
-      db.pragma("trusted_schema = OFF");
+      db = ownsConnection ?
+        new Database(path, { fileMustExist: true, timeout: 5_000 }) :
+        source.connection;
+      if (ownsConnection) {
+        db.pragma("foreign_keys = ON");
+        db.pragma("trusted_schema = OFF");
+      }
+      // SQLite can lazily instantiate an empty temp schema during integrity
+      // checks. Allow that schema, but no temp objects that could shadow names
+      // and no attached database under any other name.
+      const tempObjects = db.prepare<[], { n: number }>(
+        "SELECT count(*) AS n FROM sqlite_temp_master").get()?.n;
+      const databases = db.prepare<[], { name: string; file: string }>(
+        "PRAGMA database_list").all();
+      if (tempObjects !== 0 || databases.length < 1 || databases.length > 2 ||
+        databases[0]?.name !== "main" ||
+        realpathSync(databases[0].file) !== realpathSync(path) ||
+        databases.slice(1).some((row) => row.name !== "temp" || row.file !== "") ||
+        db.readonly ||
+        db.pragma("foreign_keys", { simple: true }) !== 1 ||
+        db.pragma("trusted_schema", { simple: true }) !== 0 ||
+        db.pragma("query_only", { simple: true }) !== 0)
+        throw new IncompatibleManagedLedger();
       verifySchema(db);
+      schemaVersion = db.pragma("main.schema_version", { simple: true }) as number;
+      if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0)
+        throw new IncompatibleManagedLedger();
     } catch {
-      db?.close();
+      if (ownsConnection) db?.close();
       throw new IncompatibleManagedLedger();
     }
     this.db = db;
+    this.ownsConnection = ownsConnection;
+    this.canonicalPath = realpathSync(path);
+    this.schemaVersion = schemaVersion;
     this.maxStoredBytesPerFamily = maxStoredBytesPerFamily;
   }
 
@@ -92,6 +129,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       session.sessionId !== input.session.sessionId)
       throw new ManagedVaultUploadSessionError();
     const reserve = this.db.transaction(() => {
+      this.assertOperationalState();
       if (input.signal.aborted) throw new ManagedVaultUploadDeniedError();
       const currentSession = this.currentSession(input.tokenSha256, input.csrfToken);
       if (!currentSession || currentSession.householdId !== session.householdId ||
@@ -130,6 +168,7 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
       throw new ManagedVaultUploadDeniedError();
 
     const publish = this.db.transaction(() => {
+      this.assertOperationalState();
       if (input.signal.aborted) throw new ManagedVaultUploadDeniedError();
       const session = this.currentSession(input.tokenSha256, input.csrfToken);
       if (!session || session.householdId !== input.intent.householdId ||
@@ -199,11 +238,12 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
     }
   }
 
-  close(): void { this.db.close(); }
+  close(): void { if (this.ownsConnection) this.db.close(); }
 
   async readReceipt(input: Parameters<ManagedUploadReceiptReader["readReceipt"]>[0]):
     Promise<ManagedUploadReceipt | null> {
     const read = this.db.transaction((): ManagedUploadReceipt | null => {
+      this.assertOperationalState();
       const session = this.sessionByToken(input.tokenSha256);
       if (!session) throw new ManagedVaultUploadSessionError();
       if (!verifyCsrfToken(input.csrfToken, session.sessionId, session.csrfSecret))
@@ -241,6 +281,29 @@ export class SqliteManagedUploadLedger implements ManagedUploadLedger,
         wireBytes: row.wireBytes };
     });
     return read.deferred();
+  }
+
+  /** Recheck shared-connection identity and schema inside every ledger transaction. */
+  private assertOperationalState(): void {
+    try {
+      assertPrivateDirectory(dirname(this.canonicalPath));
+      assertPrivateFile(this.canonicalPath, true);
+      assertPrivateFile(`${this.canonicalPath}-wal`, false);
+      assertPrivateFile(`${this.canonicalPath}-shm`, false);
+      const tempObjects = this.db.prepare<[], { n: number }>(
+        "SELECT count(*) AS n FROM sqlite_temp_master").get()?.n;
+      const databases = this.db.prepare<[], { name: string; file: string }>(
+        "PRAGMA database_list").all();
+      if (tempObjects !== 0 || databases.length < 1 || databases.length > 2 ||
+        databases[0]?.name !== "main" ||
+        realpathSync(databases[0].file) !== this.canonicalPath ||
+        databases.slice(1).some((row) => row.name !== "temp" || row.file !== "") ||
+        this.db.readonly ||
+        this.db.pragma("query_only", { simple: true }) !== 0 ||
+        this.db.pragma("main.schema_version", { simple: true }) !== this.schemaVersion)
+        throw new IncompatibleManagedLedger();
+      assertManagedSchema(this.db);
+    } catch { throw new IncompatibleManagedLedger(); }
   }
 
   /** Count committed wires plus every uncommitted physical reservation. */

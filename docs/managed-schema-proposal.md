@@ -43,7 +43,10 @@ exact received wire bytes to an unmounted staging adapter. That adapter writes
 private chunks, re-reads each object through the commit-proof helper, checks
 the complete wire digest, and converts SHA-256 hex to 32-byte database values.
 An unmounted managed ledger now drafts an atomic current-grant/session/nonce
-commit and per-family lease quota, but it has not run against an applied schema;
+commit and per-family lease quota. A borrowed private managed connection let
+the rollback-only fictional v10 run prove a one-chunk commit, receipt transition,
+quota denial, nonce-reuse rollback, revocation denial and lease accounting.
+This tests ledger metadata, not exact disk-object proof or a mounted upload;
 there is no reconciler for orphaned objects or safe retry path. The draft remains
 day-only; `0005` has no mounted non-day ledger or intent-issuance API. A ciphertext-only snapshot primitive can copy and re-hash an exact list
 of committed object references without scanning pending files; it publishes a
