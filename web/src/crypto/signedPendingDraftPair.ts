@@ -2,6 +2,10 @@ import { decodeManagedVaultBlobV2,
   encodePendingDraftPairActionPayloadV1,
   PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1,
   type PendingDraftPairActionContextV1 } from "@adeno/contracts";
+import { openLocalEncryptedDraft, type LocalOpenedDraft } from
+  "../managed/intakeDraft";
+import { openScopeKeyEnvelopeV2, type ScopeKeyEnvelopeV2 } from
+  "./scopeKeyEnvelopeV2";
 
 const BYTE_TAG = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag)?.get;
@@ -20,8 +24,9 @@ export class SignedPendingDraftPairError extends Error {
 }
 
 /**
- * Device-only attestation of two exact v2 ciphertext wires. This does not
- * establish current server grants, receipt durability or adult approval.
+ * Device-only attestation of an authenticated content/metadata draft pair.
+ * This does not establish current server grants, receipt durability or adult
+ * approval.
  * The caller must compare both wire digests with authenticated upload receipts
  * and preserve the returned payload for later independent signature audit.
  */
@@ -29,21 +34,49 @@ export async function signPendingDraftPair(input: {
   claims: Claims;
   contentWire: Uint8Array;
   metadataWire: Uint8Array;
+  draftKeyEnvelope: ScopeKeyEnvelopeV2;
+  recipientEncryptionKeys: CryptoKeyPair;
   signingKeys: CryptoKeyPair;
 }): Promise<{ context: PendingDraftPairActionContextV1;
   payload: Uint8Array; payloadSha256: string; actionSha256: string;
   signature: Uint8Array }> {
+  let opened: LocalOpenedDraft | null = null;
   try {
     const claims = { ...input.claims };
     const contentWire = copyWire(input.contentWire, MAX_CONTENT_WIRE_BYTES);
     const metadataWire = copyWire(input.metadataWire, MAX_METADATA_WIRE_BYTES);
+    const publicKey = input.signingKeys?.publicKey;
+    const privateKey = input.signingKeys?.privateKey;
+    const draftKey = await openScopeKeyEnvelopeV2({
+      householdId: claims.householdId,
+      careProfileId: claims.careProfileId,
+      opaqueScopeId: claims.opaqueDraftScopeId,
+      keyId: claims.keyId,
+      keyEpoch: claims.keyEpoch,
+      purpose: "draft",
+      recipientDeviceId: claims.authorDeviceId,
+      keyCommitmentSha256: claims.keyCommitmentSha256,
+    }, input.draftKeyEnvelope, input.recipientEncryptionKeys);
     const content = decodeManagedVaultBlobV2(contentWire);
     const metadata = decodeManagedVaultBlobV2(metadataWire);
     if (hex(content.blobId) !== claims.contentBlobId ||
       hex(metadata.blobId) !== claims.metadataBlobId)
       throw new SignedPendingDraftPairError();
-    const publicKey = input.signingKeys?.publicKey;
-    const privateKey = input.signingKeys?.privateKey;
+    opened = await openLocalEncryptedDraft({
+      identity: { householdId: claims.householdId,
+        careProfileId: claims.careProfileId,
+        opaqueDraftId: claims.opaqueDraftScopeId,
+        keyEpoch: claims.keyEpoch },
+      key: draftKey,
+      draft: { opaqueDraftId: claims.opaqueDraftScopeId,
+        contentObjectId: claims.contentObjectId,
+        metadataObjectId: claims.metadataObjectId,
+        contentBlobId: claims.contentBlobId,
+        metadataBlobId: claims.metadataBlobId,
+        contentWire, metadataWire },
+    });
+    if (opened.kind === "file") opened.content.fill(0);
+    opened = null;
     if (!privateKey || privateKey.type !== "private" ||
       privateKey.algorithm.name !== "Ed25519" || privateKey.extractable ||
       !privateKey.usages.includes("sign") || !publicKey ||
@@ -74,6 +107,7 @@ export async function signPendingDraftPair(input: {
       actionSha256: await sha256Hex(actionHashMessage(payload, signature)),
       signature };
   } catch { throw new SignedPendingDraftPairError(); }
+  finally { if (opened?.kind === "file") opened.content.fill(0); }
 }
 
 function actionHashMessage(payload: Uint8Array,

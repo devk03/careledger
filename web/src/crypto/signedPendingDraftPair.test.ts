@@ -1,8 +1,12 @@
-import { encodeManagedVaultBlobV2, MANAGED_VAULT_CHUNK_BYTES,
+import { encodeManagedVaultBlobV2,
+  encodePendingDraftPairActionPayloadV1, MANAGED_VAULT_CHUNK_BYTES,
   MANAGED_VAULT_FORMAT_V2, PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1,
   PENDING_DRAFT_PAIR_ACTION_PAYLOAD_BYTES_V1 } from "@adeno/contracts";
 import { expect, it } from "vitest";
 
+import { prepareLocalEncryptedDraft } from "../managed/intakeDraft";
+import { generateDeviceEncryptionKeys } from "./dayKeyEnvelope";
+import { createScopeKeyEnvelopesV2 } from "./scopeKeyEnvelopeV2";
 import { generateIndexSigningKeys } from "./signedIndexHead";
 import { signPendingDraftPair, SignedPendingDraftPairError } from
   "./signedPendingDraftPair";
@@ -36,13 +40,45 @@ function claims() {
     previousActionSha256: digest("44") };
 }
 
-async function fictionalFixture() {
+async function fictionalFixture(kind: "family_note" | "file" = "family_note") {
   const signingKeys = await generateIndexSigningKeys();
   const signedClaims = claims();
-  return { claims: signedClaims,
-    contentWire: fictionalWire(signedClaims.contentBlobId, 1, 3),
-    metadataWire: fictionalWire(signedClaims.metadataBlobId, 2, 4),
-    signingKeys };
+  const recipientEncryptionKeys = await generateDeviceEncryptionKeys();
+  const created = await createScopeKeyEnvelopesV2({
+    householdId: signedClaims.householdId,
+    careProfileId: signedClaims.careProfileId,
+    opaqueScopeId: signedClaims.opaqueDraftScopeId,
+    keyId: signedClaims.keyId, keyEpoch: signedClaims.keyEpoch,
+    purpose: "draft",
+  }, [{ deviceId: signedClaims.authorDeviceId,
+    publicKey: recipientEncryptionKeys.publicKey }]);
+  signedClaims.keyCommitmentSha256 = created.keyCommitmentSha256;
+  const draftKey = created.key;
+  const identity = { householdId: signedClaims.householdId,
+    careProfileId: signedClaims.careProfileId,
+    opaqueDraftId: signedClaims.opaqueDraftScopeId,
+    keyEpoch: signedClaims.keyEpoch };
+  const common = { key: draftKey, identity,
+    reservedBlobIds: { content: signedClaims.contentBlobId,
+      metadata: signedClaims.metadataBlobId },
+    clientSelectedAt: "2026-04-09T12:00:00.000Z",
+    candidateCareDays: ["2026-04-07"] };
+  const fictionalPdf = new TextEncoder().encode(
+    "%PDF-1.4\nFICTIONAL_DOCUMENT_NOT_A_REAL_RECORD\n");
+  const draft = kind === "file" ? await prepareLocalEncryptedDraft({
+    ...common, kind: "file",
+    file: { name: "fictional-visit.pdf", size: fictionalPdf.byteLength,
+      arrayBuffer: async () => fictionalPdf.buffer.slice(0) },
+  }) : await prepareLocalEncryptedDraft({ ...common, kind: "family_note",
+    body: "Fictional note about an imaginary appointment.",
+    authorLabel: "Fictional caregiver" });
+  signedClaims.contentObjectId = draft.contentObjectId;
+  signedClaims.metadataObjectId = draft.metadataObjectId;
+  return { claims: signedClaims, contentWire: draft.contentWire,
+    metadataWire: draft.metadataWire,
+    draftKeyEnvelope: created.envelopes[0]!,
+    recipientEncryptionKeys, signingKeys,
+    preparationKey: draftKey };
 }
 
 it("signs exact fictional v2 wires as a pending pair, not adult approval", async () => {
@@ -69,6 +105,14 @@ it("signs exact fictional v2 wires as a pending pair, not adult approval", async
     await crypto.subtle.digest("SHA-256", message))));
 });
 
+it("also authenticates an encrypted fictional PDF pair before signing", async () => {
+  const input = await fictionalFixture("file");
+  const signed = await signPendingDraftPair(input);
+  expect(signed.context.contentWireBytes).toBe(input.contentWire.byteLength);
+  expect(await crypto.subtle.verify("Ed25519", input.signingKeys.publicKey,
+    signed.signature, signed.payload)).toBe(true);
+});
+
 it("rejects swapped blob IDs, invalid predecessor, and mismatched signing keys", async () => {
   const input = await fictionalFixture();
   await expect(signPendingDraftPair({ ...input,
@@ -86,6 +130,46 @@ it("rejects swapped blob IDs, invalid predecessor, and mismatched signing keys",
     .rejects.toBeInstanceOf(SignedPendingDraftPairError);
 });
 
+it("rejects unauthenticated wires, a wrong key, wrong AAD, and unrelated encrypted metadata", async () => {
+  const input = await fictionalFixture();
+  await expect(signPendingDraftPair({ ...input,
+    contentWire: fictionalWire(input.claims.contentBlobId, 1, 3) }))
+    .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+  const other = await fictionalFixture();
+  await expect(signPendingDraftPair({ ...input,
+    draftKeyEnvelope: other.draftKeyEnvelope }))
+    .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+  await expect(signPendingDraftPair({ ...input,
+    claims: { ...input.claims, keyCommitmentSha256: digest("fe") } }))
+    .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+  await expect(signPendingDraftPair({ ...input,
+    claims: { ...input.claims, keyId: id("fe") } }))
+    .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+  await expect(signPendingDraftPair({ ...input,
+    claims: { ...input.claims, contentObjectId: id("fe") } }))
+    .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+  const changed = input.contentWire.slice();
+  changed[changed.length - 1]! ^= 1;
+  await expect(signPendingDraftPair({ ...input, contentWire: changed }))
+    .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+  const second = await prepareLocalEncryptedDraft({ kind: "family_note",
+    key: input.preparationKey,
+    identity: { householdId: input.claims.householdId,
+      careProfileId: input.claims.careProfileId,
+      opaqueDraftId: input.claims.opaqueDraftScopeId,
+      keyEpoch: input.claims.keyEpoch },
+    reservedBlobIds: { content: id("91"),
+      metadata: input.claims.metadataBlobId },
+    body: "A different fictional note", authorLabel: "Fictional caregiver",
+    clientSelectedAt: "2026-04-09T12:00:00.000Z",
+    candidateCareDays: [] });
+  await expect(signPendingDraftPair({ ...input,
+    metadataWire: second.metadataWire,
+    claims: { ...input.claims,
+      metadataObjectId: second.metadataObjectId } }))
+    .rejects.toBeInstanceOf(SignedPendingDraftPairError);
+});
+
 it("snapshots caller wires and IDs before asynchronous signing", async () => {
   const input = await fictionalFixture();
   const originalWire = input.contentWire.slice();
@@ -99,7 +183,7 @@ it("snapshots caller wires and IDs before asynchronous signing", async () => {
     await crypto.subtle.digest("SHA-256", originalWire))));
 });
 
-it("uses a fixed synthetic Ed25519 key for browser/Node interoperability", async () => {
+it("uses a fixed synthetic payload and Ed25519 key for browser/Node interoperability", async () => {
   const seed = new Uint8Array(32).fill(0x42);
   const pkcs8 = new Uint8Array([
     0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b,
@@ -112,15 +196,28 @@ it("uses a fixed synthetic Ed25519 key for browser/Node interoperability", async
   publicKey: await crypto.subtle.importKey("raw", publicRaw,
     "Ed25519", true, ["verify"]) };
   const signedClaims = claims();
-  const signed = await signPendingDraftPair({ claims: signedClaims,
-    contentWire: fictionalWire(signedClaims.contentBlobId, 1, 3),
-    metadataWire: fictionalWire(signedClaims.metadataBlobId, 2, 4),
-    signingKeys });
-  expect(signed.payloadSha256)
+  const contentWire = fictionalWire(signedClaims.contentBlobId, 1, 3);
+  const metadataWire = fictionalWire(signedClaims.metadataBlobId, 2, 4);
+  const sha256 = async (bytes: Uint8Array) => hex(new Uint8Array(
+    await crypto.subtle.digest("SHA-256", bytes)));
+  const payload = encodePendingDraftPairActionPayloadV1({
+    ...signedClaims,
+    contentWireBytes: contentWire.byteLength,
+    metadataWireBytes: metadataWire.byteLength,
+    contentWireSha256: await sha256(contentWire),
+    metadataWireSha256: await sha256(metadataWire),
+    issuerSigningKeySha256: await sha256(publicRaw),
+  });
+  const signature = new Uint8Array(await crypto.subtle.sign("Ed25519",
+    signingKeys.privateKey, payload));
+  const actionSha256 = await sha256(new Uint8Array([
+    ...new TextEncoder().encode(PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1),
+    ...payload, ...signature]));
+  expect(await sha256(payload))
     .toBe("4ee78b2fad67798e772bd7d3673e2a9efd248c76d62bc588e5a07f987269cca7");
-  expect(hex(signed.signature)).toBe(
+  expect(hex(signature)).toBe(
     "d624e141ba8484266d022ab512e39fe295e732aabfb90d917ccbe27da2b4aa" +
     "7b08d446cac897790c8279470bf2bbf6f74cea832fc3fd0dc32c74717f9429ac08");
-  expect(signed.actionSha256)
+  expect(actionSha256)
     .toBe("5b6028020594a7e132725ad8b072f9b1a83fb3d1b9dcf48b4f7a32a6e6e80249");
 });
