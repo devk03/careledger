@@ -19,6 +19,8 @@ import { readCiphertextChunk } from
   "../dist/managed/ciphertextObjectStore.js";
 import { createManagedDraftPairRouter } from
   "../dist/managed/managedDraftPairRouter.js";
+import { createManagedPendingDraftPairRouter } from
+  "../dist/managed/managedPendingDraftPairRouter.js";
 import { SqliteDraftPairReservation } from
   "../dist/managed/sqliteDraftPairReservation.js";
 import { assertManagedSchema } from
@@ -98,6 +100,14 @@ try {
   const base = `http://127.0.0.1:${address.port}`;
   app.use("/api/managed/draft-pairs", createManagedDraftPairRouter({
     expectedOrigin: base, service: reservation,
+    rateLimit: () => {
+      if (limitMode === "error") throw new Error("fictional limiter unavailable");
+      return limitMode === "allow";
+    },
+  }));
+  app.use("/api/managed/pending-pairs", createManagedPendingDraftPairRouter({
+    expectedOrigin: base,
+    submit: (submission) => submitPendingDraftPair(db, submission),
     rateLimit: () => {
       if (limitMode === "error") throw new Error("fictional limiter unavailable");
       return limitMode === "allow";
@@ -363,10 +373,48 @@ try {
     "WHERE household_id=?").get(alpha.householdId).n, beforePairAction);
   assert.equal(db.prepare("SELECT count(*) AS n FROM " +
     "managed_pending_draft_pairs").get().n, 0);
-  const pending = submit();
+  const signedBody = { context: { ...context,
+    authorCounter: context.authorCounter.toString(),
+    pairedAt: context.pairedAt.toString() },
+    signature: signature.toString("base64") };
+  const pairPost = (family, body, overrides = {}) =>
+    fetch(`${base}/api/managed/pending-pairs/submit`, {
+      method: "POST", headers: { ...headers(family),
+        "content-type": "application/json", ...overrides },
+      body: JSON.stringify(body),
+    });
+  assert.equal((await pairPost(alpha, signedBody,
+    { "x-csrf-token": "wrong" })).status, 404);
+  assert.equal((await pairPost(alpha, signedBody,
+    { origin: "https://unrelated.invalid" })).status, 403);
+  assert.equal((await pairPost(beta, signedBody)).status, 404);
+  assert.equal((await pairPost(alpha, { ...signedBody,
+    context: { ...signedBody.context,
+      metadataWireSha256: "00".repeat(32) } })).status, 404);
+  assert.equal((await pairPost(alpha, { ...signedBody,
+    signature: Buffer.alloc(64).toString("base64") })).status, 404);
+  assert.equal((await pairPost(alpha, { ...signedBody,
+    unexpected: true })).status, 400);
+  const lockHolder = new Database(dbPath, { fileMustExist: true });
+  lockHolder.exec("BEGIN IMMEDIATE");
+  db.pragma("busy_timeout = 50");
+  try {
+    const busy = await pairPost(alpha, signedBody);
+    assert.equal(busy.status, 503);
+    assert.deepEqual(await busy.json(), { error: "RETRY_SAME_SUBMISSION" });
+  } finally {
+    lockHolder.exec("ROLLBACK");
+    lockHolder.close();
+    db.pragma("busy_timeout = 5000");
+  }
+  const posted = await pairPost(alpha, signedBody);
+  assert.equal(posted.status, 201);
+  const pending = await posted.json();
   assert.deepEqual(pending, { status: "pending",
     reservationId: context.reservationId, pairSha256: action.payloadSha256 });
-  assert.deepEqual(submit(), pending);
+  const postedRetry = await pairPost(alpha, signedBody);
+  assert.equal(postedRetry.status, 201);
+  assert.deepEqual(await postedRetry.json(), pending);
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_signed_actions " +
     "WHERE household_id=?").get(alpha.householdId).n,
   beforePairAction + 1);
@@ -378,6 +426,9 @@ try {
     .get(alpha.householdId).n, 2);
   assert.throws(() => submit({ action: { ...action,
     signature: Buffer.alloc(64) } }), ManagedPendingDraftPairDenied);
+  limitMode = "deny";
+  assert.equal((await pairPost(alpha, signedBody)).status, 429);
+  limitMode = "allow";
 
   for (const role of ["content", "metadata"]) {
     const row = db.prepare("SELECT nonce AS iv, storage_object_id AS objectId, " +
@@ -456,7 +507,7 @@ try {
   assert.equal((await receipt(badPair.ids, "metadata", beta)).status, 401);
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.pragma("integrity_check", { simple: true }), "ok");
-  process.stdout.write("PASS: fictional non-day draft upload/receipt through Express, private ciphertext disk, unmounted signed pending-pair writer, exact retry, cross-family and revocation denial; no migration or real records.\n");
+  process.stdout.write("PASS: fictional non-day draft upload/receipt and signed pending-pair submission through unmounted Express routes, private ciphertext disk, exact retry, cross-family and revocation denial; no migration or real records.\n");
 } finally {
   if (server) await new Promise((resolve) => server.close(resolve));
   db.close();

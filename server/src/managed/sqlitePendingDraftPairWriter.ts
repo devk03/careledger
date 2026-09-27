@@ -6,7 +6,7 @@ import type Database from "better-sqlite3";
 
 import { verifyCsrfToken } from "../auth/cookieSession.js";
 import { assertManagedSchema } from "./managedSchemaGuard.js";
-import { verifyPendingDraftPairAction,
+import { PendingDraftPairActionDenied, verifyPendingDraftPairAction,
   type SignedPendingDraftPairActionRow } from
   "./verifyPendingDraftPairAction.js";
 
@@ -38,6 +38,9 @@ type Existing = { profileId: string; scopeId: string; keyId: string;
 
 export class ManagedPendingDraftPairDenied extends Error {
   constructor() { super("The signed pending draft pair was denied."); }
+}
+export class ManagedPendingDraftPairUnavailable extends Error {
+  constructor() { super("The signed pending draft pair is unavailable."); }
 }
 
 /**
@@ -332,7 +335,17 @@ export function submitPendingDraftPair(db: Database.Database, input: {
         pairSha256: action.payloadSha256 };
     });
     return submit.immediate();
-  } catch { throw new ManagedPendingDraftPairDenied(); }
+  } catch (error) {
+    if (error instanceof ManagedPendingDraftPairDenied ||
+      error instanceof PendingDraftPairActionDenied ||
+      (typeof error === "object" && error !== null &&
+        "code" in error && typeof error.code === "string" &&
+        error.code.startsWith("SQLITE_CONSTRAINT")))
+      throw new ManagedPendingDraftPairDenied();
+    // Busy, I/O and unexpected failures may have an ambiguous outcome.
+    // The caller must retry the exact signed request, never mint a new ID.
+    throw new ManagedPendingDraftPairUnavailable();
+  }
 }
 
 function copySignature(value: Uint8Array): Uint8Array {
@@ -386,7 +399,10 @@ function assertOperational(db: Database.Database): void {
         "SELECT count(*) AS n FROM sqlite_temp_master").get()?.n !== 0)
       throw new ManagedPendingDraftPairDenied();
     assertManagedSchema(db);
-  } catch { throw new ManagedPendingDraftPairDenied(); }
+  } catch (error) {
+    if (error instanceof ManagedPendingDraftPairDenied) throw error;
+    throw new ManagedPendingDraftPairUnavailable();
+  }
 }
 
 function privateOptionalSidecar(path: string): void {
