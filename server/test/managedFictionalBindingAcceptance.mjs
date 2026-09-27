@@ -1625,9 +1625,14 @@ try {
     body: JSON.stringify(body),
   });
   const signupResponse = await httpSignup(signupBody);
-  assert.equal(signupResponse.status, 202);
-  assert.deepEqual(await signupResponse.json(), { accepted: true });
+  assert.equal(signupResponse.status, 404);
+  assert.deepEqual(await signupResponse.json(), { error: "REQUEST_DENIED" });
   assert.equal(signupResponse.headers.get("set-cookie"), null);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_accounts " +
+    "WHERE login_email=?").get(httpEmail).n, 0);
+  // Preserve the v10 identity candidate regression as a test-only fixture.
+  // Public signup must not reserve an immutable email before proof-first v11.
+  await identity.registerPendingOwner(signupBody);
   const httpOwner = db.prepare("SELECT a.id AS accountId, " +
     "m.household_id AS householdId, a.state AS accountState, " +
     "m.state AS memberState, f.state AS familyState " +
@@ -1644,9 +1649,11 @@ try {
   (error) => error?.name === "ManagedIdentityDenied");
   const repeatSignup = await httpSignup({ ...signupBody,
     email: httpEmail.toUpperCase() });
-  assert.equal(repeatSignup.status, 202);
-  assert.deepEqual(await repeatSignup.json(), { accepted: true });
+  assert.equal(repeatSignup.status, 404);
+  assert.deepEqual(await repeatSignup.json(), { error: "REQUEST_DENIED" });
   assert.equal(repeatSignup.headers.get("set-cookie"), null);
+  await identity.registerPendingOwner({ ...signupBody,
+    email: httpEmail.toUpperCase() });
   assert.equal(db.prepare("SELECT count(*) AS n FROM managed_accounts " +
     "WHERE login_email=?").get(httpEmail).n, 1);
   // Test-only direct SQL simulates a future one-use email verification
@@ -1811,7 +1818,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, disk-proof ledger/receipt, tamper denial, two-family global logical quota, DELETE sync drift denial, WAL constructor policy and two-chunk rollback; cross-family, nonce replay and grant/device/session revocation denial");
+  console.log("PASS: legacy HTTP signup denied, direct fictional pending-owner fixture, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, disk-proof ledger/receipt, tamper denial, two-family global logical quota, DELETE sync drift denial, WAL constructor policy and two-chunk rollback; cross-family, nonce replay and grant/device/session revocation denial");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.

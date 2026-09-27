@@ -8,19 +8,18 @@ import type { SqliteManagedIdentityCandidate } from
   "./sqliteManagedIdentity.js";
 import { normalizeManagedEmail } from "./sqliteManagedIdentity.js";
 
-type Action = "login-ip" | "login-credential" |
-  "signup-ip" | "signup-credential";
+type Action = "login-ip" | "login-credential";
 type ManagedIdentity = Pick<SqliteManagedIdentityCandidate,
-  "registerPendingOwner" | "login" | "readSession" | "logout">;
+  "login" | "readSession" | "logout">;
 type LimiterInput = { action: Action; remoteAddress: string;
   tokenSha256?: string; credentialBucket?: string };
 const ID = /^[0-9a-f]{32}$/u;
 
 /**
- * UNMOUNTED managed-v10 auth router. Signup only records a pending request;
- * it cannot verify email or activate a family. Mount only after a real shared
- * limiter, verified-email/expiry lifecycle, secure origin/reverse-proxy policy,
- * and human device approval are reviewed.
+ * UNMOUNTED managed auth router. The legacy v10 pending-owner signup path is
+ * explicitly denied because it permanently reserves an unverified email.
+ * A separately reviewed proof-first signup service is required. Do not mount
+ * even login until shared limits, origin/proxy policy and device approval pass.
  */
 export function createManagedAuthRouter(input: {
   expectedOrigin: string;
@@ -51,7 +50,7 @@ export function createManagedAuthRouter(input: {
     response.removeHeader("Access-Control-Allow-Origin");
     response.removeHeader("Access-Control-Allow-Credentials");
     const methods: Record<string, string> = {
-      "/signup": "POST", "/login": "POST", "/session": "GET",
+      "/login": "POST", "/session": "GET",
       "/logout": "POST",
     };
     if (methods[request.path] && methods[request.path] !== request.method) {
@@ -76,65 +75,8 @@ export function createManagedAuthRouter(input: {
   const json = express.json({ limit: "2kb", type: "application/json",
     strict: true, inflate: false });
 
-  router.post("/signup", async (request, response) => {
-    if (!sameOrigin(request, input.expectedOrigin)) {
-      response.status(403).json({ error: "REQUEST_DENIED" });
-      return;
-    }
-    const limit = await limited(request, "signup-ip");
-    if (limit !== "allow") {
-      response.status(limit === "deny" ? 429 : 503)
-        .json({ error: "REQUEST_DENIED" });
-      return;
-    }
-    if (!request.is("application/json") ||
-      ![undefined, "identity"].includes(request.get("content-encoding")) ||
-      request.body !== undefined) {
-      response.status(400).json({ error: "INVALID_REQUEST" });
-      return;
-    }
-    json(request, response, async (error?: unknown) => {
-      if (error) {
-        const status = typeof error === "object" && error !== null &&
-          "type" in error && error.type === "entity.too.large" ? 413 : 400;
-        response.status(status).json({ error: "INVALID_REQUEST" });
-        return;
-      }
-      const body: unknown = request.body;
-      if (!plainRecord(body) || !exactKeys(body, ["email", "password"]) ||
-        typeof body.email !== "string" || body.email.length > 254 ||
-        typeof body.password !== "string" || body.password.length < 12 ||
-        body.password.length > 128 || body.password.includes("\0") ||
-        Buffer.byteLength(body.password, "utf8") > 512) {
-        response.status(400).json({ error: "INVALID_REQUEST" });
-        return;
-      }
-      let credentialBucket: string;
-      try {
-        const normalized = normalizeManagedEmail(body.email);
-        credentialBucket = createHmac("sha256", bucketKey)
-          .update(normalized, "utf8").digest("hex");
-      } catch {
-        response.status(400).json({ error: "INVALID_REQUEST" });
-        return;
-      }
-      const credentialLimit = await limited(request, "signup-credential",
-        undefined, credentialBucket);
-      if (credentialLimit !== "allow") {
-        response.status(credentialLimit === "deny" ? 429 : 503)
-          .json({ error: "REQUEST_DENIED" });
-        return;
-      }
-      try {
-        await input.identity.registerPendingOwner({ email: body.email,
-          password: body.password });
-        // The same acknowledgment is returned for new and existing emails.
-        // Never issue a session, household ID, or "check email" instruction.
-        response.status(202).json({ accepted: true });
-      } catch {
-        response.status(503).json({ error: "REQUEST_DENIED" });
-      }
-    });
+  router.all("/signup", (_request, response) => {
+    response.status(404).json({ error: "REQUEST_DENIED" });
   });
 
   router.post("/login", async (request, response) => {
