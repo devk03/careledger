@@ -87,16 +87,25 @@ completed snapshot only after staged files and its read-only manifest are synced
 Failures before rename leave private, unpublished in-progress directories; a
 failure syncing the parent after rename can leave a complete directory that
 must be inspected before retry. Snapshot IDs are create-only reservations; a
-failed attempt uses a fresh ID rather than reusing the previous one. No consistent
-database-snapshot provider or full backup encryption/retention is implemented.
+failed attempt uses a fresh ID rather than reusing the previous one.
 An unmounted read-only extractor now lists chunk references belonging to
 committed day and source/draft blobs in an already-migrated managed database.
 A separate offline inventory compares an explicitly supplied committed reference set with a
 quiesced private object root, verifies committed hashes, and counts pending and
 unreferenced final objects by inode so hard-linked aliases are not double-counted.
 Its byte totals are unique-inode file lengths, not allocated disk usage.
-It never removes files or releases leases. These pieces do not yet create or
-pin a matching database/object backup, prove quiescence, or repair an orphan.
+It never removes files or releases leases. A separate, unmounted offline pair
+primitive now uses SQLite's online backup API, normalizes the copied DB to a
+single-file DELETE snapshot, extracts committed day and source/draft references
+from that copy, and binds it to an exact ciphertext-only object snapshot with
+an externally pinnable SHA-256 manifest. Fictional DELETE/WAL tests restore a
+fresh private DB/object pair for two families, exclude an orphan, and reject
+altered DB, object, manifest and pin. This does not enforce quiescence, prove a
+crash/restart at each boundary, authenticate against a same-host attacker,
+encrypt an off-host copy, define retention, or repair an orphan.
+The paired DB also retains abandoned staging leases while their uncommitted
+objects are excluded; a fictional restore confirms such a lease remains charged.
+Reconciliation is required before serving new uploads from a restored instance.
 A separate, unmounted restore primitive can verify the pinned object manifest
 and copy those ciphertext objects with their original IDs into a newly created
 private, offline root. It publishes that root only after its objects are
@@ -109,6 +118,8 @@ must not be mounted even if a marker was linked before the crash; a failure
 syncing the parent after rename may leave a complete `restored-*` directory
 that requires inspection before reuse. A process with the same storage UID can
 still alter local files, so backup/restore roots require offline operator control.
+Paired restore is also unmounted and does not establish independently witnessed
+latest-head freshness or make the restored instance safe to serve.
 Therefore no managed upload or read route may be enabled yet.
 Do not apply these drafts to an existing, family, or production database. The first
 execution target, if separately approved, is a fresh database containing only
