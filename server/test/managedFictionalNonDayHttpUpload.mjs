@@ -6,7 +6,7 @@ import { chmod, copyFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { encodeManagedVaultBlobV2,
+import { decodeManagedVaultBlobV2, encodeManagedVaultBlobV2,
   encodePendingDraftPairActionPayloadV1,
   PENDING_DRAFT_PAIR_ACTION_HASH_DOMAIN_V1 } from "@adeno/contracts";
 import Database from "better-sqlite3";
@@ -37,6 +37,14 @@ import { createManagedUploadReceiptRouter } from
   "../dist/managed/uploadReceipt.js";
 import { encryptManagedVaultBlobV2, decryptManagedVaultBlobV2 } from
   "../../web/src/crypto/managedVaultV2.ts";
+import { prepareLocalEncryptedDraft } from
+  "../../web/src/managed/intakeDraft.ts";
+import { signPendingDraftPair } from
+  "../../web/src/crypto/signedPendingDraftPair.ts";
+import { generateDeviceEncryptionKeys } from
+  "../../web/src/crypto/dayKeyEnvelope.ts";
+import { createScopeKeyEnvelopesV2 } from
+  "../../web/src/crypto/scopeKeyEnvelopeV2.ts";
 import { seedFictionalManagedFamily } from "./fictionalManagedFamily.mjs";
 
 // Explicitly approved, empty, fictional v10 source only. This test copies it;
@@ -161,20 +169,42 @@ try {
     assert.equal(Object.keys(ids).sort().join(), ["reservationId",
       "contentIntentId", "metadataIntentId", "contentBlobId",
       "metadataBlobId", "expiresAt"].sort().join());
-    const objectIds = { content: randomBytes(16).toString("hex"),
+    let objectIds = { content: randomBytes(16).toString("hex"),
       metadata: randomBytes(16).toString("hex") };
     const draftScope = (role) => ({ householdId: family.householdId,
       careProfileId: family.profileId, opaqueScopeId: scope.scopeId,
       objectId: objectIds[role], keyEpoch: 1,
       purpose: "review-draft", revision: 1 });
-    const metadataBytes = new TextEncoder().encode(JSON.stringify({
-      format: "fictional-only", contentBlobId: ids.contentBlobId }));
-    const contentBlob = await encryptManagedVaultBlobV2(key, content,
-      draftScope("content"), Buffer.from(ids.contentBlobId, "hex"));
-    const metadataBlob = await encryptManagedVaultBlobV2(key, metadataBytes,
-      draftScope("metadata"), Buffer.from(ids.metadataBlobId, "hex"));
-    const wires = { content: Buffer.from(encodeManagedVaultBlobV2(contentBlob)),
-      metadata: Buffer.from(encodeManagedVaultBlobV2(metadataBlob)) };
+    let contentBlob;
+    let metadataBlob;
+    let wires;
+    if (scope.browserDraftKey) {
+      const prepared = await prepareLocalEncryptedDraft({
+        identity: { householdId: family.householdId,
+          careProfileId: family.profileId, opaqueDraftId: scope.scopeId,
+          keyEpoch: 1 }, key: scope.browserDraftKey,
+        reservedBlobIds: { content: ids.contentBlobId,
+          metadata: ids.metadataBlobId },
+        clientSelectedAt: "2026-09-01T12:00:00.000Z",
+        candidateCareDays: ["2026-09-01"],
+        kind: "family_note", body: new TextDecoder().decode(content),
+        authorLabel: "Fictional caregiver" });
+      objectIds = { content: prepared.contentObjectId,
+        metadata: prepared.metadataObjectId };
+      wires = { content: Buffer.from(prepared.contentWire),
+        metadata: Buffer.from(prepared.metadataWire) };
+      contentBlob = decodeManagedVaultBlobV2(wires.content);
+      metadataBlob = decodeManagedVaultBlobV2(wires.metadata);
+    } else {
+      const metadataBytes = new TextEncoder().encode(JSON.stringify({
+        format: "fictional-only", contentBlobId: ids.contentBlobId }));
+      contentBlob = await encryptManagedVaultBlobV2(key, content,
+        draftScope("content"), Buffer.from(ids.contentBlobId, "hex"));
+      metadataBlob = await encryptManagedVaultBlobV2(key, metadataBytes,
+        draftScope("metadata"), Buffer.from(ids.metadataBlobId, "hex"));
+      wires = { content: Buffer.from(encodeManagedVaultBlobV2(contentBlob)),
+        metadata: Buffer.from(encodeManagedVaultBlobV2(metadataBlob)) };
+    }
     const bindBody = {
       reservationId: ids.reservationId,
       content: { objectId: objectIds.content,
@@ -505,18 +535,106 @@ try {
     method: "POST", headers: headers(beta), body: badPair.wires.metadata,
   })).status, 401);
   assert.equal((await receipt(badPair.ids, "metadata", beta)).status, 401);
+  const recipientEncryptionKeys = await generateDeviceEncryptionKeys();
+  const browserScopeId = randomBytes(16).toString("hex");
+  const browserKeyId = randomBytes(16).toString("hex");
+  const browserKey = await createScopeKeyEnvelopesV2({
+    householdId: alpha.householdId, careProfileId: alpha.profileId,
+    opaqueScopeId: browserScopeId, keyId: browserKeyId, keyEpoch: 1,
+    purpose: "draft" }, [{ deviceId: alpha.deviceId,
+    publicKey: recipientEncryptionKeys.publicKey }]);
+  const browserScope = seedDraftScope(db, alpha, now, {
+    scopeId: browserScopeId, keyId: browserKeyId,
+    commitment: Buffer.from(browserKey.keyCommitmentSha256, "hex") });
+  browserScope.browserDraftKey = browserKey.key;
+  const browserPair = await pair(alpha, browserScope);
+  for (const role of ["content", "metadata"]) {
+    const uploaded = await fetch(url(browserPair.ids, role), {
+      method: "POST", headers: headers(alpha), body: browserPair.wires[role],
+    });
+    assert.equal(uploaded.status, 201);
+  }
+  const signingPrivate = await crypto.subtle.importKey("pkcs8",
+    signingKeys.privateKey.export({ format: "der", type: "pkcs8" }),
+    { name: "Ed25519" }, false, ["sign"]);
+  const signingPublic = await crypto.subtle.importKey("raw",
+    enrolledSigningPublicKey, { name: "Ed25519" }, true, ["verify"]);
+  const browserPredecessor = db.prepare("SELECT counter, " +
+    "action_sha256 AS digest FROM managed_signed_actions " +
+    "WHERE household_id=? AND device_id=? ORDER BY counter DESC LIMIT 1")
+    .get(alpha.householdId, alpha.deviceId);
+  const browserHead = db.prepare("SELECT head_sha256 AS digest FROM " +
+    "managed_current_scope_keys WHERE household_id=? AND profile_id=? " +
+    "AND scope_id=?").get(alpha.householdId, alpha.profileId,
+      browserScope.scopeId);
+  const browserGrant = db.prepare("SELECT head_sha256 AS digest FROM " +
+    "managed_grant_heads WHERE household_id=? AND profile_id=? " +
+    "AND scope_id=? AND subject_device_id=?")
+    .get(alpha.householdId, alpha.profileId, browserScope.scopeId,
+      alpha.deviceId);
+  const signedBrowserPair = await signPendingDraftPair({
+    claims: { householdId: alpha.householdId,
+      careProfileId: alpha.profileId,
+      opaqueDraftScopeId: browserScope.scopeId,
+      keyId: browserScope.keyId,
+      reservationId: browserPair.ids.reservationId,
+      contentIntentId: browserPair.ids.contentIntentId,
+      metadataIntentId: browserPair.ids.metadataIntentId,
+      contentBlobId: browserPair.ids.contentBlobId,
+      metadataBlobId: browserPair.ids.metadataBlobId,
+      contentObjectId: browserPair.draftScope("content").objectId,
+      metadataObjectId: browserPair.draftScope("metadata").objectId,
+      authorDeviceId: alpha.deviceId, sessionId: alpha.session.sessionId,
+      keyEpoch: 1, authorCounter: BigInt(browserPredecessor.counter + 1),
+      keyCommitmentSha256: browserKey.keyCommitmentSha256,
+      activeKeyHeadSha256: browserHead.digest.toString("hex"),
+      grantHeadSha256: browserGrant.digest.toString("hex"),
+      previousActionSha256: browserPredecessor.digest.toString("hex") },
+    contentWire: browserPair.wires.content,
+    metadataWire: browserPair.wires.metadata,
+    draftKeyEnvelope: browserKey.envelopes[0],
+    recipientEncryptionKeys,
+    signingKeys: { privateKey: signingPrivate, publicKey: signingPublic },
+    csrfToken: alpha.csrfToken,
+    fetcher: (path, options) => fetch(new URL(String(path), base), {
+      ...options, headers: { ...headers(alpha, false),
+        ...options.headers } }),
+  });
+  const browserPosted = await pairPost(alpha, { context: {
+    ...signedBrowserPair.context,
+    authorCounter: signedBrowserPair.context.authorCounter.toString(),
+    pairedAt: signedBrowserPair.context.pairedAt.toString() },
+    signature: Buffer.from(signedBrowserPair.signature).toString("base64") });
+  assert.equal(browserPosted.status, 201);
+  assert.deepEqual(await browserPosted.json(), { status: "pending",
+    reservationId: browserPair.ids.reservationId,
+    pairSha256: signedBrowserPair.payloadSha256 });
+  for (const role of ["content", "metadata"]) {
+    const row = db.prepare("SELECT storage_object_id AS objectId, " +
+      "ciphertext_sha256 AS digest, ciphertext_bytes AS bytes FROM " +
+      "managed_non_day_blob_chunks WHERE household_id=? AND intent_id=?")
+      .get(alpha.householdId, browserPair.ids[`${role}IntentId`]);
+    const disk = await readCiphertextChunk(objectRoot, alpha.householdId,
+      row.objectId, row.digest.toString("hex"), row.bytes);
+    assert.equal(disk.includes(contentPlain), false);
+  }
+  for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`,
+    `${dbPath}-journal`]) {
+    if (existsSync(candidate))
+      assert.equal(readFileSync(candidate).includes(Buffer.from(marker)), false);
+  }
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.pragma("integrity_check", { simple: true }), "ok");
-  process.stdout.write("PASS: fictional non-day draft upload/receipt and signed pending-pair submission through unmounted Express routes, private ciphertext disk, exact retry, cross-family and revocation denial; no migration or real records.\n");
+  process.stdout.write("PASS: fictional non-day draft upload/receipt, browser signer code and signed pending-pair submission through unmounted Express routes; private ciphertext, exact retry, cross-family/revocation denial; no migration or real records.\n");
 } finally {
   if (server) await new Promise((resolve) => server.close(resolve));
   db.close();
 }
 
-function seedDraftScope(db, family, now) {
-  const scopeId = randomBytes(16).toString("hex");
-  const keyId = randomBytes(16).toString("hex");
-  const commitment = randomBytes(32);
+function seedDraftScope(db, family, now, options = {}) {
+  const scopeId = options.scopeId ?? randomBytes(16).toString("hex");
+  const keyId = options.keyId ?? randomBytes(16).toString("hex");
+  const commitment = options.commitment ?? randomBytes(32);
   const latest = db.prepare("SELECT counter, action_sha256 AS digest " +
     "FROM managed_signed_actions WHERE household_id=? AND device_id=? " +
     "ORDER BY counter DESC LIMIT 1")
