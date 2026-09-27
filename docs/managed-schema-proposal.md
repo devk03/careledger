@@ -46,7 +46,12 @@ An unmounted managed ledger now drafts an atomic current-grant/session/nonce
 commit and per-family lease quota. A borrowed private managed connection let
 the rollback-only fictional v10 run prove a one-chunk commit, receipt transition,
 quota denial, nonce-reuse rollback, revocation denial and lease accounting.
-This tests ledger metadata, not exact disk-object proof or a mounted upload;
+The same fictional run now composes that ledger with real private object staging:
+it re-reads invented ciphertext-shaped bytes, verifies the exact wire digest,
+commits their object IDs and hashes, and returns a matching receipt. Altering a
+staged object's bytes before commit leaves no committed blob/chunk/nonce rows.
+The SQL rows are rolled back, while synthetic private temp objects remain for
+inspection. This is not a mounted HTTP/browser upload or an AES-GCM proof;
 there is no reconciler for orphaned objects or safe retry path. The draft remains
 day-only; `0005` has no mounted non-day ledger or intent-issuance API. A ciphertext-only snapshot primitive can copy and re-hash an exact list
 of committed object references without scanning pending files; it publishes a
@@ -303,9 +308,10 @@ device to a different granted device, cross-family and unbound-issuer denial,
 duplicate-action rollback, and current-grant revocation denial. The
 rotation/key/grant setup is structural test data, not
 proof of the full signed key-rotation ceremony; a backfill-specific revoked
-recipient-device case remains untested. Ledger metadata commit and
-nonce-collision rollback are tested separately; exact disk-object proof joined
-to that commit, concurrent races and complete authorized flows remain untested.
+recipient-device case remains untested. Ledger nonce-collision rollback and a
+one-chunk exact disk-object proof joined to metadata commit are tested in
+separate fictional paths. HTTP/browser upload, concurrent races and complete
+authorized flows remain untested.
 This lineage is new-only: the runner creates a fresh empty managed database and
 does not migrate a database that already contains pre-binding v2 envelopes.
 Such a database must be rejected, not silently made unreadable or backfilled

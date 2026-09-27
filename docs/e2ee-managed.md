@@ -72,7 +72,8 @@ the exact blob ID and scope, v2 framing, and a store callback whose commit must
 atomically recheck grants and nonce reservations. Its timer bounds incoming
 bytes only; future session, intent and storage operations need their own
 cooperative deadlines. Fictional HTTP tests cover the seam; an unmounted
-durable-ledger draft exists but has not run against an applied managed schema.
+durable ledger and one-chunk disk-proof composition now pass rollback-only
+tests against the separately approved fictional managed schema.
 There is still no route in the running app. It is not connected to real grants, nonce reservation, signed
 manifests, backup or MCP. V1 ciphertext is never treated as a per-day private
 record.

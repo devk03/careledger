@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, createPublicKey, diffieHellman,
   generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
+import { chmod, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -47,6 +48,10 @@ import { ManagedVaultUploadDeniedError, ManagedVaultUploadExistsError,
   "../dist/managed/ciphertextAdmission.js";
 import { ManagedUploadReceiptCsrfError } from
   "../dist/managed/uploadReceipt.js";
+import { createStagedManagedVaultUploadStore } from
+  "../dist/managed/stagedUploadStore.js";
+import { CiphertextObjectIntegrityError, readCiphertextChunk } from
+  "../dist/managed/ciphertextObjectStore.js";
 
 // One-time audit of the exact 2026-09-26 approved fictional database. This is
 // intentionally not a general-purpose caller-selected database test/runner.
@@ -879,6 +884,112 @@ try {
   multiLedger.close();
   assert.equal(db.inTransaction, true);
 
+  // Compose the real disk staging/proof adapter with the real borrowed ledger.
+  // These are ciphertext-shaped invented bytes, not clinical content or a
+  // demonstration of successful AES-GCM decryption. Temp objects are retained
+  // for inspection; this script never deletes them or commits its SQL rows.
+  const composedLedger = new SqliteManagedUploadLedger({ connection: db },
+    2 * MANAGED_VAULT_CHUNK_BYTES);
+  const composedIntentId = id("0");
+  const composedBlobId = id("2");
+  const composedAt = Math.floor(Date.now() / 1000);
+  insertAuthorizedIntent.run(alpha.h, composedIntentId, profileId, scopeId,
+    keyId, composedBlobId, alpha.d, alpha.s, composedAt, composedAt + 600);
+  const composedObjectRoot = await mkdtemp(join(tmpdir(),
+    "adeno-fictional-composed-"));
+  const composedStore = createStagedManagedVaultUploadStore({
+    objectRoot: composedObjectRoot, ledger: composedLedger });
+  const uploadPreflight = { tokenSha256: alpha.session.sha256,
+    csrfToken: alpha.session.csrf };
+  const composedIv = Buffer.alloc(12, 6);
+  const composedCiphertext = new Uint8Array(16).fill(7);
+  const composedWire = encodeManagedVaultBlobV2({
+    format: MANAGED_VAULT_FORMAT_V2,
+    blobId: Buffer.from(composedBlobId, "hex"), plaintextSize: 0,
+    chunkSize: MANAGED_VAULT_CHUNK_BYTES,
+    chunks: [{ iv: composedIv, ciphertext: composedCiphertext.buffer }],
+  });
+  const composedHeader = { wireVersion: 2, blobId: composedBlobId,
+    plaintextSize: 0, chunkCount: 1,
+    expectedWireBytes: composedWire.byteLength };
+  const composedOpened = await composedStore.open({
+    session: sessionView(alpha), preflight: uploadPreflight,
+    intentId: composedIntentId, signal: uploadSignal });
+  assert.ok(composedOpened);
+  assert.equal(composedOpened.expectedBlobId, composedBlobId);
+  await composedOpened.sink.begin(composedHeader);
+  await composedOpened.sink.append({ index: 0, iv: composedIv,
+    ciphertext: composedCiphertext });
+  await composedOpened.sink.commit(composedHeader,
+    sha256Hex(composedWire), uploadSignal);
+  assert.equal(db.inTransaction, true);
+  const composedChunk = db.prepare("SELECT storage_object_id AS objectId, " +
+    "ciphertext_sha256 AS sha256, ciphertext_bytes AS byteSize " +
+    "FROM managed_blob_chunks WHERE household_id=? AND intent_id=? " +
+    "AND chunk_index=0").get(alpha.h, composedIntentId);
+  assert.ok(composedChunk);
+  assert.deepEqual(await readCiphertextChunk(composedObjectRoot, alpha.h,
+    composedChunk.objectId, composedChunk.sha256.toString("hex"),
+    composedChunk.byteSize), Buffer.from(composedCiphertext));
+  assert.deepEqual(await composedLedger.readReceipt({
+    ...uploadPreflight, intentId: composedIntentId, blobId: composedBlobId }), {
+    status: "committed", wireSha256: sha256Hex(composedWire),
+    wireBytes: composedWire.byteLength,
+  });
+
+  const alteredIntentId = id("1");
+  const alteredBlobId = id("6");
+  const alteredAt = Math.floor(Date.now() / 1000);
+  insertAuthorizedIntent.run(alpha.h, alteredIntentId, profileId, scopeId,
+    keyId, alteredBlobId, alpha.d, alpha.s, alteredAt, alteredAt + 600);
+  const alteredObjectRoot = await mkdtemp(join(tmpdir(),
+    "adeno-fictional-altered-"));
+  const alteredStore = createStagedManagedVaultUploadStore({
+    objectRoot: alteredObjectRoot, ledger: composedLedger });
+  const alteredIv = Buffer.alloc(12, 7);
+  const alteredCiphertext = new Uint8Array(16).fill(8);
+  const alteredWire = encodeManagedVaultBlobV2({
+    format: MANAGED_VAULT_FORMAT_V2,
+    blobId: Buffer.from(alteredBlobId, "hex"), plaintextSize: 0,
+    chunkSize: MANAGED_VAULT_CHUNK_BYTES,
+    chunks: [{ iv: alteredIv, ciphertext: alteredCiphertext.buffer }],
+  });
+  const alteredHeader = { wireVersion: 2, blobId: alteredBlobId,
+    plaintextSize: 0, chunkCount: 1,
+    expectedWireBytes: alteredWire.byteLength };
+  const alteredOpened = await alteredStore.open({
+    session: sessionView(alpha), preflight: uploadPreflight,
+    intentId: alteredIntentId, signal: uploadSignal });
+  assert.ok(alteredOpened);
+  await alteredOpened.sink.begin(alteredHeader);
+  await alteredOpened.sink.append({ index: 0, iv: alteredIv,
+    ciphertext: alteredCiphertext });
+  const householdHash = sha256Hex(Buffer.from(alpha.h, "utf8"));
+  const alteredDirectory = join(alteredObjectRoot,
+    householdHash.slice(0, 2), householdHash.slice(2, 4), householdHash);
+  const alteredObjectId = (await readdir(alteredDirectory))
+    .find((entry) => /^[0-9a-f]{32}$/u.test(entry));
+  assert.ok(alteredObjectId);
+  const alteredPath = join(alteredDirectory, alteredObjectId);
+  await chmod(alteredPath, 0o600);
+  await writeFile(alteredPath, Buffer.alloc(16, 9));
+  await chmod(alteredPath, 0o400);
+  await assert.rejects(alteredOpened.sink.commit(alteredHeader,
+    sha256Hex(alteredWire), uploadSignal), CiphertextObjectIntegrityError);
+  await alteredOpened.sink.abort();
+  for (const table of ["managed_nonce_reservations", "managed_blob_chunks",
+    "managed_committed_blobs"]) assert.equal(db.prepare(
+    `SELECT count(*) AS n FROM ${table} WHERE household_id=? AND intent_id=?`)
+    .get(alpha.h, alteredIntentId).n, 0);
+  assert.deepEqual(await composedLedger.readReceipt({
+    ...uploadPreflight, intentId: alteredIntentId, blobId: alteredBlobId }),
+  { status: "unconfirmed" });
+  assert.equal(db.prepare("SELECT count(*) AS n FROM managed_staging_leases " +
+    "WHERE household_id=? AND intent_id=? AND committed_at IS NULL")
+    .get(alpha.h, alteredIntentId).n, 1);
+  composedLedger.close();
+  assert.equal(db.inTransaction, true);
+
   // Separate historical-key backfill fixture. These old key/grant actions are
   // invented structural SQL rows; the backfill action itself is freshly
   // Ed25519-signed and checked by the unmounted writer in one transaction.
@@ -1405,7 +1516,7 @@ try {
   }));
   assert.equal(db.prepare("PRAGMA foreign_key_check").get(), undefined);
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
-  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, one-chunk ledger/receipt and two-chunk rollback; cross-family, nonce replay, quota and grant/device/session revocation denial");
+  console.log("PASS: fictional pending signup, verified auth, two-family binding, bound day intent, ordinary/historical signed envelopes, disk-proof ledger/receipt, tamper denial and two-chunk rollback; cross-family, nonce replay, quota and grant/device/session revocation denial");
 } finally {
   if (httpServer) await new Promise((resolve) => httpServer.close(resolve));
   // Preserve the approved empty database; never delete it or any records.
