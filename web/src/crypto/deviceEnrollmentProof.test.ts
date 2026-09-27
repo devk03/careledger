@@ -31,14 +31,24 @@ it("computes the human comparison code from locally held keys, not server-only c
   const prefix = createHash("sha256").update(expectedMaterial)
     .digest("hex").slice(0, 12);
   const expectedCode = `${prefix.slice(0, 4)}-${prefix.slice(4, 8)}-${prefix.slice(8)}`;
-  expect(await candidateDeviceApprovalCode(wire, keys)).toBe(expectedCode);
+  const session = { householdId: wire.householdId,
+    accountId: wire.accountId, sessionId: wire.sessionId,
+    origin: globalThis.location.origin };
+  expect(await candidateDeviceApprovalCode(wire, keys, session))
+    .toBe(expectedCode);
   await expect(candidateDeviceApprovalCode({ ...wire,
-    signingPublicKeyHex: "00".repeat(32) }, keys))
+    signingPublicKeyHex: "00".repeat(32) }, keys, session))
     .rejects.toBeInstanceOf(BrowserDeviceEnrollmentProofError);
   await expect(candidateDeviceApprovalCode(wire,
-    await generateProposedDeviceKeys()))
+    await generateProposedDeviceKeys(), session))
     .rejects.toBeInstanceOf(BrowserDeviceEnrollmentProofError);
   await expect(candidateDeviceApprovalCode({ ...wire,
-    expiresAt: Math.floor(Date.now() / 1000) - 1 }, keys))
+    expiresAt: Math.floor(Date.now() / 1000) - 1 }, keys, session))
+    .rejects.toBeInstanceOf(BrowserDeviceEnrollmentProofError);
+  await expect(candidateDeviceApprovalCode(wire, keys,
+    { ...session, accountId: id("5") }))
+    .rejects.toBeInstanceOf(BrowserDeviceEnrollmentProofError);
+  await expect(candidateDeviceApprovalCode(wire, keys,
+    { ...session, origin: "https://attacker.example" }))
     .rejects.toBeInstanceOf(BrowserDeviceEnrollmentProofError);
 });

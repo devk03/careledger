@@ -29,31 +29,69 @@ test("Chromium signs only its own fictional enrollment keys and origin", async (
       ephemeralPublicKeyHex, expiresAt: 1_800_000_300,
       ...publicKeys,
     };
-    const proof = await signDeviceEnrollmentChallengeWire(challenge, keys);
+    const session = { householdId: challenge.householdId,
+      accountId: challenge.accountId, sessionId: challenge.sessionId,
+      origin: location.origin };
+    const proof = await signDeviceEnrollmentChallengeWire(
+      challenge, keys, session);
     const wrongKeyDenied = await signDeviceEnrollmentChallengeWire({
       ...challenge, encryptionPublicKeyHex: "11".repeat(32),
-    }, keys).then(() => false, () => true);
+    }, keys, session).then(() => false, () => true);
     const expiredDenied = await signDeviceEnrollmentChallengeWire({
       ...challenge, expiresAt: 1_799_999_939,
-    }, keys).then(() => false, () => true);
+    }, keys, session).then(() => false, () => true);
+    const behindClockAccepted = await signDeviceEnrollmentChallengeWire({
+      ...challenge, expiresAt: 1_800_000_660,
+    }, keys, session).then(() => true, () => false);
+    const aheadClockAccepted = await signDeviceEnrollmentChallengeWire({
+      ...challenge, expiresAt: 1_799_999_941,
+    }, keys, session).then(() => true, () => false);
     const extraFieldDenied = await signDeviceEnrollmentChallengeWire({
       ...challenge, extra: true,
-    }, keys).then(() => false, () => true);
+    }, keys, session).then(() => false, () => true);
     const lowOrderDenied = await signDeviceEnrollmentChallengeWire({
       ...challenge, ephemeralPublicKeyHex: "00".repeat(32),
-    }, keys).then(() => false, () => true);
+    }, keys, session).then(() => false, () => true);
+    const wrongHouseholdDenied = await signDeviceEnrollmentChallengeWire(
+      challenge, keys, { ...session, householdId: "e5".repeat(16) })
+      .then(() => false, () => true);
+    const wrongAccountDenied = await signDeviceEnrollmentChallengeWire(
+      challenge, keys, { ...session, accountId: "e5".repeat(16) })
+      .then(() => false, () => true);
+    const wrongSessionDenied = await signDeviceEnrollmentChallengeWire(
+      challenge, keys, { ...session, sessionId: "e5".repeat(16) })
+      .then(() => false, () => true);
+    const wrongOriginDenied = await signDeviceEnrollmentChallengeWire(
+      challenge, keys, { ...session, origin: "https://attacker.example" })
+      .then(() => false, () => true);
+    const unrelatedKeys = await generateProposedDeviceKeys();
+    const mixedKeyPairDenied = await signDeviceEnrollmentChallengeWire(
+      challenge, { encryptionKeys: { privateKey: unrelatedKeys.encryptionKeys.privateKey,
+        publicKey: keys.encryptionKeys.publicKey },
+      signingKeys: keys.signingKeys }, session)
+      .then(() => false, () => true);
     return { challenge, proof, ephemeralPrivatePkcs8Hex,
       origin: location.origin,
       encryptionPrivateExtractable: keys.encryptionKeys.privateKey.extractable,
       signingPrivateExtractable: keys.signingKeys.privateKey.extractable,
-      wrongKeyDenied, expiredDenied, extraFieldDenied, lowOrderDenied };
+      wrongKeyDenied, expiredDenied, behindClockAccepted,
+      aheadClockAccepted, extraFieldDenied, lowOrderDenied,
+      wrongHouseholdDenied, wrongAccountDenied, wrongSessionDenied,
+      wrongOriginDenied, mixedKeyPairDenied };
   });
   expect(result.encryptionPrivateExtractable).toBe(false);
   expect(result.signingPrivateExtractable).toBe(false);
   expect(result.wrongKeyDenied).toBe(true);
   expect(result.expiredDenied).toBe(true);
+  expect(result.behindClockAccepted).toBe(true);
+  expect(result.aheadClockAccepted).toBe(true);
   expect(result.extraFieldDenied).toBe(true);
   expect(result.lowOrderDenied).toBe(true);
+  expect(result.wrongHouseholdDenied).toBe(true);
+  expect(result.wrongAccountDenied).toBe(true);
+  expect(result.wrongSessionDenied).toBe(true);
+  expect(result.wrongOriginDenied).toBe(true);
+  expect(result.mixedKeyPairDenied).toBe(true);
   expect(result.proof.format).toBe("adeno:device-enrollment-proof:v1");
   const hash = (value: Buffer) => createHash("sha256").update(value).digest("hex");
   const ephemeralPrivateKey = createPrivateKey({ key: Buffer.from(

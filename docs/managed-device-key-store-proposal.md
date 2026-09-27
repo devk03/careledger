@@ -3,6 +3,14 @@
 Status: design only. No IndexedDB database/object store has been created or
 upgraded by this proposal. Do not use real family data to test it.
 
+The browser now has a migration-free pre-save validator for the exact
+challenge/session/origin, both local public keys and both private-key
+operations, with a bounded 60-second clock-skew allowance. The enrollment
+and session-binding wire signers require a separately supplied authenticated
+session/device expectation and reject conflicting wire claims. This does not
+establish that a caller actually obtained that expectation from a live session;
+the managed UI and durable key store are still absent.
+
 ## Why it is needed
 
 The browser can generate non-extractable X25519 and Ed25519 device keys and

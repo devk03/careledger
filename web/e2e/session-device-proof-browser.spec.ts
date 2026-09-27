@@ -40,8 +40,12 @@ test("Chromium signs the fixed fictional device-binding challenge on-device", as
       challengeId: input.challengeId, nonceHex: hex(nonce),
       expiresAt: Number(input.expiresAt),
     })) as unknown;
+    const expected = { householdId: input.householdId,
+      accountId: input.accountId, sessionId: input.sessionId,
+      deviceId: input.deviceId, signingPublicKeyHex: hex(publicRaw),
+      origin: location.origin };
     const proofWire = await signSessionDeviceBindingChallengeWire(
-      challengeWire, signingKeys);
+      challengeWire, signingKeys, expected);
     const behindClockAccepted = await signSessionDeviceBindingProof({
       ...input, expiresAt: 1_800_000_360n }).then(() => true, () => false);
     const aheadClockAccepted = await signSessionDeviceBindingProof({
@@ -52,8 +56,28 @@ test("Chromium signs the fixed fictional device-binding challenge on-device", as
     catch { expiredDenied = true; }
     let malformedDenied = false;
     try { await signSessionDeviceBindingChallengeWire({
-      ...(challengeWire as object), nonceHex: "00" }, signingKeys); }
+      ...(challengeWire as object), nonceHex: "00" }, signingKeys, expected); }
     catch { malformedDenied = true; }
+    const wrongHouseholdDenied = await signSessionDeviceBindingChallengeWire(
+      challengeWire, signingKeys, { ...expected, householdId: "f6".repeat(16) })
+      .then(() => false, () => true);
+    const wrongAccountDenied = await signSessionDeviceBindingChallengeWire(
+      challengeWire, signingKeys, { ...expected, accountId: "f6".repeat(16) })
+      .then(() => false, () => true);
+    const wrongSessionDenied = await signSessionDeviceBindingChallengeWire(
+      challengeWire, signingKeys, { ...expected, sessionId: "f6".repeat(16) })
+      .then(() => false, () => true);
+    const wrongDeviceDenied = await signSessionDeviceBindingChallengeWire(
+      challengeWire, signingKeys, { ...expected, deviceId: "f6".repeat(16) })
+      .then(() => false, () => true);
+    const wrongKeyDenied = await signSessionDeviceBindingChallengeWire(
+      challengeWire, signingKeys,
+      { ...expected, signingPublicKeyHex: "00".repeat(32) })
+      .then(() => false, () => true);
+    const wrongOriginDenied = await signSessionDeviceBindingChallengeWire(
+      challengeWire, signingKeys,
+      { ...expected, origin: "https://attacker.example" })
+      .then(() => false, () => true);
     return { nonceHash: signed.context.nonceSha256,
       audienceHash: signed.context.audienceSha256,
       origin: location.origin, signature: hex(signed.signature),
@@ -62,7 +86,9 @@ test("Chromium signs the fixed fictional device-binding challenge on-device", as
       noncePreserved: signed.nonce.every(byte => byte === 0x91),
       privateExtractable: signingKeys.privateKey.extractable,
       behindClockAccepted, aheadClockAccepted,
-      expiredDenied, malformedDenied };
+      expiredDenied, malformedDenied, wrongHouseholdDenied,
+      wrongAccountDenied, wrongSessionDenied, wrongDeviceDenied,
+      wrongKeyDenied, wrongOriginDenied };
   });
   expect(result).toEqual({
     nonceHash: "182a7e592cafca805e6ef488103a26ea8900787edfba367e6b5749b7104bc33c",
@@ -74,5 +100,8 @@ test("Chromium signs the fixed fictional device-binding challenge on-device", as
     noncePreserved: true,
     privateExtractable: false, behindClockAccepted: true,
     aheadClockAccepted: true, expiredDenied: true, malformedDenied: true,
+    wrongHouseholdDenied: true, wrongAccountDenied: true,
+    wrongSessionDenied: true, wrongDeviceDenied: true,
+    wrongKeyDenied: true, wrongOriginDenied: true,
   });
 });

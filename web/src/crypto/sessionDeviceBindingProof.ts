@@ -11,15 +11,38 @@ export class BrowserDeviceBindingProofError extends Error {
   }
 }
 
+export type ExpectedManagedDeviceBinding = {
+  householdId: string; accountId: string; sessionId: string;
+  deviceId: string; signingPublicKeyHex: string; origin: string;
+};
+
 /** Browser transport boundary: parse exact JSON before signing and return
- * ordinary JSON rather than a BigInt or typed-array object. */
+ * ordinary JSON rather than a BigInt or typed-array object. The expected
+ * identity must come from the authenticated session and saved device, not
+ * from the challenge wire. */
 export async function signSessionDeviceBindingChallengeWire(
   wire: unknown, signingKeys: CryptoKeyPair,
+  expected: ExpectedManagedDeviceBinding,
 ): Promise<SessionDeviceProofWireV1> {
   try {
     const challenge = parseSessionDeviceChallengeWireV1(wire);
+    const privateKey = signingKeys?.privateKey;
+    const publicKey = signingKeys?.publicKey;
+    if (!expected || challenge.householdId !== expected.householdId ||
+      challenge.accountId !== expected.accountId ||
+      challenge.sessionId !== expected.sessionId ||
+      challenge.deviceId !== expected.deviceId ||
+      globalThis.location?.origin !== expected.origin ||
+      !/^[0-9a-f]{64}$/u.test(expected.signingPublicKeyHex) ||
+      !privateKey || !publicKey)
+      throw new BrowserDeviceBindingProofError();
+    const publicHex = [...new Uint8Array(await crypto.subtle.exportKey(
+      "raw", publicKey))]
+      .map(byte => byte.toString(16).padStart(2, "0")).join("");
+    if (publicHex !== expected.signingPublicKeyHex)
+      throw new BrowserDeviceBindingProofError();
     const signed = await signSessionDeviceBindingProof({ ...challenge,
-      signingKeys });
+      signingKeys: { privateKey, publicKey } });
     return encodeSessionDeviceProofWireV1({
       challengeId: signed.context.challengeId, nonce: signed.nonce,
       signature: signed.signature,
