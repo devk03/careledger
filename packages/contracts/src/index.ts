@@ -17,6 +17,7 @@ export type SourceReference = {
   displayName: string;
   uploadedAt: string;
   sourceSha256: string;
+  mediaType?: "application/pdf" | "image/png" | "image/jpeg";
   pageNumbers: number[];
 };
 

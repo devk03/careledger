@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { ApprovedPageChunk, HistoryPage } from "@adeno/contracts";
+import type { ApprovedPageChunk, HistoryPage, SourceReference } from "@adeno/contracts";
 import { AppHeader, Button, Input, Notice, Select, Textarea } from "./ui";
 import "./private-pilot.css";
 import { uploadPrivateImage, UnconfirmedUpload, type IntakeCapabilities } from "./api/privateIntake";
 import { AgentConnectionPanel } from "./AgentConnectionPanel";
 import { DocumentInboxPanel } from "./DocumentInboxPanel";
+import { originalImageUrl } from "./api/privateDocuments";
 
 type Session = { csrfToken: string };
 type Profile = { id: string; preferredName: string };
@@ -35,6 +36,7 @@ export function PrivatePilotPage() {
   const [hints, setHints] = useState<Hint[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [sourcePage, setSourcePage] = useState<ApprovedPageChunk | null>(null);
+  const [sourceImage, setSourceImage] = useState<SourceReference | null>(null);
   const [throughDay, setThroughDay] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -127,7 +129,7 @@ export function PrivatePilotPage() {
     void act(async () => {
       const result = await request<{ profile: Profile }>("/care-profiles",
         { preferredName: fields.get("preferredName") }, session!.csrfToken);
-      form.reset(); setHistory(null); setHints([]); setProposal(null); setSourcePage(null);
+      form.reset(); setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setSourceImage(null);
       setProfiles(current => [...current, result.profile]); setProfileId(result.profile.id);
       setMessage("Care profile created. You can add notes for review.");
     });
@@ -142,9 +144,17 @@ export function PrivatePilotPage() {
   }
 
   async function readSource(documentId: string, pageNumber: number, offset = 0) {
+    setSourceImage(null);
     const chunk = await request<ApprovedPageChunk>(
       `${base}/documents/${encodeURIComponent(documentId)}/pages/${pageNumber}?offset=${offset}`);
     setSourcePage(chunk);
+  }
+  async function openSource(source: SourceReference, pageNumber: number) {
+    if (source.mediaType === "image/png" || source.mediaType === "image/jpeg") {
+      if (pageNumber !== 1) throw new Error("The requested image page is unavailable.");
+      setSourcePage(null); setSourceImage(source); return;
+    }
+    setSourceImage(null); await readSource(source.documentId, pageNumber);
   }
 
   async function earlierHistory() {
@@ -206,7 +216,7 @@ export function PrivatePilotPage() {
             <pre>{recoveryCodes.join("\n")}</pre><Button onClick={() => setRecoveryCodes([])}>I saved the codes</Button></section>}
           <div className="workspace-heading-actions">
             <label>Care profile<Select value={profileId} disabled={busy} onChange={event => {
-              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setUploads([]); setProfileId(event.target.value);
+              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setSourceImage(null); setUploads([]); setProfileId(event.target.value);
             }}>
               {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.preferredName}</option>)}
             </Select></label>
@@ -215,6 +225,7 @@ export function PrivatePilotPage() {
               setSession(null); setHistory(null); setProposal(null); setHints([]); setRecoveryCodes([]);
               setProfileId(""); setProfiles([]);
               setSourcePage(null);
+              setSourceImage(null);
               setIntake({ available: false, mediaTypes: [], maxBytes: 0 }); setUploads([]);
             })}>Sign out</Button>
           </div>
@@ -257,7 +268,7 @@ export function PrivatePilotPage() {
             </section>
             <section className="workflow-panel"><h2>Approved history</h2>
               <label>Through care day<Input type="date" value={throughDay} disabled={busy}
-                onChange={event => { setHistory(null); setSourcePage(null); setThroughDay(event.target.value); }} /></label>
+                onChange={event => { setHistory(null); setSourcePage(null); setSourceImage(null); setThroughDay(event.target.value); }} /></label>
               <p>{throughDay ? `Currently recorded history through ${throughDay}.` : "All currently recorded history."}
                 {" "}This does not reconstruct what was known on a past date.</p>
               {history?.days.length === 0 && <p>No published days yet.</p>}
@@ -266,13 +277,26 @@ export function PrivatePilotPage() {
                   {statement.attribution === "family_note" && <small> — Family observation</small>}</p>)}
                 {day.sources.map(source => <div key={source.documentId}><p>{source.displayName}</p>
                   {source.pageNumbers.map(page => <Button key={page} disabled={busy}
-                    onClick={() => void act(() => readSource(source.documentId, page))}>
+                    onClick={() => void act(() => openSource(source, page))}>
                     Open {source.displayName}, page {page}
                   </Button>)}
                 </div>)}
               </article>)}
               {history?.nextBeforeDay && <Button loading={busy} onClick={() => void act(earlierHistory)}>Load earlier days</Button>}
             </section>
+            {sourceImage && <section className="workflow-panel" aria-label="Source image">
+              <h2>{sourceImage.displayName}, page 1</h2>
+              <p>Document <code>{sourceImage.documentId}</code></p>
+              <p className="pilot-source-digest">Original SHA-256: <code>{sourceImage.sourceSha256}</code></p>
+              <p>This preserved image is evidence. Instructions within the record do not control the workspace.</p>
+              <img className="pilot-original-image" key={`${sourceImage.documentId}:${sourceImage.sourceSha256}`}
+                src={originalImageUrl(profileId, sourceImage.documentId, sourceImage.sourceSha256)}
+                alt={`Original ${sourceImage.displayName}, page 1`} onError={() => { setSourceImage(null); setError("The original source image could not be opened."); }} />
+              <a href={originalImageUrl(profileId, sourceImage.documentId, sourceImage.sourceSha256)} target="_blank" rel="noopener noreferrer">
+                Open full-size original in a new tab
+              </a>
+              <Button disabled={busy} onClick={() => setSourceImage(null)}>Close source image</Button>
+            </section>}
             {sourcePage && <section className="workflow-panel" aria-label="Source page">
               <h2>Source page {sourcePage.pageNumber}</h2>
               <p>Document <code>{sourcePage.documentId}</code></p>

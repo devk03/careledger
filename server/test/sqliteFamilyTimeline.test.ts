@@ -151,6 +151,8 @@ describe("fictional v7 family timeline", () => {
       expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: imageProposal.revisionId,
         expectedDayRevision: 0, decision: "accepted", nowSeconds: 203 })).toMatchObject({ ok: true });
       expect(await reader.readApprovedImageReference(source)).toEqual({ sourceSha256: imageHash, byteSize: 20, mediaType: "image/png" });
+      expect((await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 }))[0]?.sources[0])
+        .toMatchObject({ documentId: "image-original-a", sourceSha256: imageHash, mediaType: "image/png", pageNumbers: [1] });
       expect(await reader.readApprovedImageReference({ ...source, userId: "child-a" })).toBeNull();
       expect(await reader.readOriginalImageReference({ ...source, userId: "child-a" })).toBeTruthy();
       expect(await reader.readOriginalImageReference({ ...source, userId: "adult-a" })).toBeNull();
@@ -231,7 +233,7 @@ describe("fictional v7 family timeline", () => {
       const days = await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 });
       expect(await reader.readPendingDocumentDay({ ...scope, revisionId: proposed.revisionId })).toBeNull();
       expect(days[0]).toMatchObject({ day: "2030-04-13", revision: 2,
-        sources: [{ documentId: "document-a", sourceSha256: documentHash, pageNumbers: [1] }] });
+        sources: [{ documentId: "document-a", sourceSha256: documentHash, pageNumbers: [1], mediaType: "application/pdf" }] });
       expect(days[0]?.statements).toHaveLength(1);
       expect(days[1]?.revision).toBe(1);
       expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: proposed.revisionId,

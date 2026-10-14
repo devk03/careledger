@@ -28,6 +28,7 @@ type EntryRow = {
 };
 type DocumentRow = {
   documentId: string; displayName: string; uploadedAt: number; sourceSha256: string; pageNumber: number | null;
+  mediaType: "application/pdf" | "image/png" | "image/jpeg";
 };
 type StatementRow = { id: string; text: string; authorLabel: string | null };
 type PageRow = { sourceSha256: string; text: string; textSha256: string };
@@ -171,10 +172,11 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       if (entry.placementRevisionId) {
         const documents = this.db.prepare<[string, string, string, string], DocumentRow>(
           "SELECT d.id documentId, d.original_display_name displayName, d.uploaded_at uploadedAt, " +
-          "d.source_sha256 sourceSha256, pg.page_number pageNumber " +
+          "d.source_sha256 sourceSha256, pg.page_number pageNumber, object.media_type mediaType " +
           "FROM document_day_placement_revisions r " +
           "JOIN document_day_placements pl ON pl.id = r.placement_id " +
           "JOIN documents d ON d.id = pl.document_id AND d.care_profile_id = pl.care_profile_id " +
+          "JOIN source_objects object ON object.sha256 = d.source_sha256 " +
           "LEFT JOIN document_pages pg ON pg.document_id = d.id " +
           "JOIN users u ON u.id = ? AND u.status = 'active' AND u.household_id = ? " +
           "WHERE r.id = ? AND pl.care_profile_id = ? AND d.archived_at IS NULL " +
@@ -191,6 +193,7 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
               documentId: document.documentId, displayName: document.displayName,
               uploadedAt: new Date(document.uploadedAt * 1000).toISOString(),
               sourceSha256: document.sourceSha256,
+              mediaType: document.mediaType,
               pageNumbers: document.pageNumber === null ? [] : [document.pageNumber],
             });
           }

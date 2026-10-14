@@ -6,6 +6,58 @@ afterEach(() => vi.unstubAllGlobals());
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status,
   headers: { "content-type": "application/json" } });
 
+it.each(["image/png", "image/jpeg"])("opens an approved %s citation as a hash-pinned original despite its filename", async mediaType => {
+  const paths: string[] = [];
+  const source = { documentId: "image-a", displayName: "Invented source.pdf", mediaType,
+    uploadedAt: "2030-04-13T12:00:00Z", sourceSha256: "c".repeat(64), pageNumbers: [1] };
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    paths.push(path);
+    if (path.endsWith("/auth/session")) return json({ csrfToken: "fictional-csrf" });
+    if (path.endsWith("/care-profiles")) return json({ profiles: [{ id: "profile-a", preferredName: "Invented person" }] });
+    if (path.endsWith("/capabilities")) return json({ available: false, mediaTypes: [], maxBytes: 0 });
+    if (path.endsWith("/notes/pending")) return json({ pending: [] });
+    if (path.includes("/timeline/history")) return json({ days: [{ id: "day-a", careProfileId: "profile-a", day: "2030-04-12",
+      revision: 1, statements: [], sources: [source] }], nextBeforeDay: null });
+    throw new Error("Text reader must not receive an image citation");
+  }));
+  render(<PrivatePilotPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Invented source.pdf, page 1" }));
+  const image = await screen.findByRole("img", { name: "Original Invented source.pdf, page 1" });
+  expect(image.getAttribute("src")).toBe(`/api/v2/care-profiles/profile-a/documents/image-a/original-image?expectedSha256=${source.sourceSha256}`);
+  expect(screen.getByText(source.sourceSha256)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open full-size original in a new tab" }).getAttribute("href")).toBe(image.getAttribute("src"));
+  expect(paths.some(path => path.includes("/pages/"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Close source image" }));
+  expect(screen.queryByRole("region", { name: "Source image" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open Invented source.pdf, page 1" }));
+  await screen.findByRole("img");
+  fireEvent.change(screen.getByLabelText("Through care day"), { target: { value: "2030-04-10" } });
+  expect(screen.queryByRole("region", { name: "Source image" })).toBeNull();
+});
+
+it("clears a failed source image and removes the selected source when changing profiles", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    if (path.endsWith("/auth/session")) return json({ csrfToken: "fictional-csrf" });
+    if (path.endsWith("/care-profiles")) return json({ profiles: [{ id: "profile-a", preferredName: "Invented first" }, { id: "profile-b", preferredName: "Invented second" }] });
+    if (path.endsWith("/capabilities")) return json({ available: false, mediaTypes: [], maxBytes: 0 });
+    if (path.endsWith("/notes/pending")) return json({ pending: [] });
+    if (path.includes("/timeline/history")) return json({ days: path.includes("profile-b") ? [] : [{ id: "day-a", careProfileId: "profile-a", day: "2030-04-12",
+      revision: 1, statements: [], sources: [{ documentId: "image-a", displayName: "Invented image", mediaType: "image/png",
+        uploadedAt: "2030-04-13T12:00:00Z", sourceSha256: "c".repeat(64), pageNumbers: [1] }] }], nextBeforeDay: null });
+    throw new Error("Unexpected synthetic read");
+  }));
+  render(<PrivatePilotPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open Invented image, page 1" }));
+  fireEvent.error(await screen.findByRole("img"));
+  await screen.findByText("The original source image could not be opened.");
+  expect(screen.queryByRole("img")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open Invented image, page 1" }));
+  await screen.findByRole("img");
+  await waitFor(() => expect(screen.getByLabelText("Care profile")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Care profile"), { target: { value: "profile-b" } });
+  expect(screen.queryByRole("region", { name: "Source image" })).toBeNull();
+});
+
 it("requires explicit sign-in and keeps credentials in a POST body", async () => {
   const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
     if (path === "/api/v2/auth/session") return json({}, 401);

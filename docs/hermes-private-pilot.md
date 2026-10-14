@@ -435,3 +435,18 @@ browser/database and deployed acceptance remain unverified.
 Server typecheck/build and 23 focused MCP/authorized-source/real-stdio tests
 passed for this composition. The MCP fixture is a protocol client, not proof of
 a configured AI application or a production database-backed source policy.
+
+Approved history now carries the stored source media type as an optional wire
+field. The private browser opens PNG/JPEG citations as hash-pinned preserved
+images instead of asking the text-page reader for absent OCR. It shows the
+document/page/original digest and full-size link, preserves text reading for
+legacy/other sources, and clears selected images on close, source failure,
+profile/cutoff changes and sign-out. Synthetic UI tests verify media-type
+selection independently of filenames, image failures and state clearing.
+The SQL metadata assertion is updated but remains unrun pending migration
+approval; no database schema or migration has changed.
+The focused browser/unit suite passed 14 tests. A Chrome Playwright check also
+decoded an independently generated PNG through mocked API responses, verified
+the pinned digest and full-size link, and captured desktop/390px screenshots
+with no horizontal overflow. Server typecheck passed. This is browser evidence,
+not a database-backed deployment or actual AI-client acceptance check.
