@@ -132,3 +132,27 @@ it("clears previously displayed sources when the care-day cutoff changes", async
   await waitFor(() => expect(requests).toContain("/api/v2/care-profiles/profile-a/timeline/history?through=2030-04-12"));
   expect(screen.getByText(/Currently recorded history through 2030-04-12/)).toBeInTheDocument();
 });
+
+it("stops a batch after an unconfirmed upload and leaves the remaining file unattempted", async () => {
+  let attempted = 0;
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    if (path === "/api/v2/auth/session") return json({ csrfToken: "fictional-csrf" });
+    if (path === "/api/v2/care-profiles") return json({ profiles: [{ id: "profile-a", preferredName: "Invented person" }] });
+    if (path === "/api/v2/intake/capabilities") return json({ available: true,
+      mediaTypes: ["image/png", "image/jpeg"], maxBytes: 1024 });
+    if (path.endsWith("reviews/notes/pending")) return json({ pending: [] });
+    if (path.includes("timeline/history")) return json({ days: [], nextBeforeDay: null });
+    if (path.endsWith("/documents")) { attempted++; throw new TypeError("lost response"); }
+    throw new Error(`Unexpected API: ${path}`);
+  }));
+  render(<PrivatePilotPage />);
+  const picker = await screen.findByLabelText("PNG or JPEG images");
+  await waitFor(() => expect(picker).not.toBeDisabled());
+  fireEvent.change(picker, { target: { files: [
+    new File(["invented first"], "first.png", { type: "image/png" }),
+    new File(["invented second"], "second.png", { type: "image/png" }),
+  ] } });
+  fireEvent.submit(picker.closest("form")!);
+  await screen.findByText("second.png: Not attempted after an unconfirmed upload");
+  expect(attempted).toBe(1);
+});

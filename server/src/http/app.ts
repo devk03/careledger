@@ -22,6 +22,7 @@ import type { ApprovedPageRepository, AuthorizedScope, CareProfileRepository,
   TimelineRepository } from "../timeline/types.js";
 import type { NoteReviewRepository } from "../timeline/types.js";
 import type { SqliteFamilyMutations } from "../storage/sqliteFamilyMutations.js";
+import { MAX_UPLOAD_BYTES } from "../ingest/admission.js";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthorizedScope | null>;
 export type DayAccessWriter = {
@@ -66,6 +67,7 @@ export function createHttpApp(dependencies: {
   reviews?: PendingReviewRepository;
   noteReviews?: NoteReviewRepository;
   allowInvitations?: boolean;
+  intakeAvailable?: boolean;
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
   readiness?: () => boolean;
@@ -89,6 +91,15 @@ export function createHttpApp(dependencies: {
   app.get("/health/ready", (_request, response) => {
     const ready = dependencies.readiness?.() ?? false;
     response.status(ready ? 200 : 503).json({ status: ready ? "ready" : "unavailable" });
+  });
+
+  app.get("/api/v2/intake/capabilities", async (request, response) => {
+    if (!await dependencies.authenticate(request)) {
+      response.status(401).json({ error: "AUTH_REQUIRED" }); return;
+    }
+    const available = dependencies.intakeAvailable === true;
+    response.json({ available, mediaTypes: available ? ["image/png", "image/jpeg"] : [],
+      maxBytes: MAX_UPLOAD_BYTES });
   });
 
   if (dependencies.profiles !== undefined) {

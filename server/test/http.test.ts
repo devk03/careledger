@@ -33,6 +33,17 @@ async function endpoint(
 }
 
 describe("Express history route", () => {
+  it("keeps intake unavailable by default and reveals capabilities only after authentication", async () => {
+    const repository: TimelineRepository = { profileBelongsToHousehold: async () => false,
+      listApprovedDays: async () => [] };
+    const historyUrl = await endpoint(repository);
+    const url = `${new URL(historyUrl).origin}/api/v2/intake/capabilities`;
+    expect((await fetch(url)).status).toBe(401);
+    const response = await fetch(url, { headers: { authorization: "Bearer fictional-member" } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ available: false, mediaTypes: [], maxBytes: 30 * 1024 * 1024 });
+  });
+
   it("requires authentication and hides other families", async () => {
     const repository: TimelineRepository = {
       profileBelongsToHousehold: async () => false,

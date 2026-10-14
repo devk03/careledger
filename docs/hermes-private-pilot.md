@@ -82,6 +82,26 @@ separately as the worker user, whose health socket is private. Neither accepts
 source documents. Hermes verification must run with network disabled, private
 socket-only mounts, non-root users and a worker lifetime under ten minutes.
 
+On October 14, feature `9e3a0c8` built on Hermes into parser image
+`sha256:6e20b632d535a0b7ad41a1e312b10bd17c208fbb70e9a23e52376dc9d4524bff`.
+The worker's inspected configuration used UID/GID 10002:10003, no network,
+read-only root, a 512 MiB memory limit and only a synthetic socket volume. It ran
+under a 480-second lifetime with a 15-second forced-exit bound. Its private health
+probe passed. A separate UID/GID 10001:10003 client, with the socket volume
+read-only, generated PNG/JPEG bytes and received acceptance for both, rejection
+for truncation and rejection for PDF. The client exited 0; after its identity,
+image, synthetic label and mount were rechecked, the worker was stopped and
+confirmed exited 143. Both stopped containers and the volume remain recoverable.
+This is tiny-fixture target-host transport evidence, not a malware scan, resource
+exhaustion test or production upload approval.
+
+The private UI now discovers authenticated intake capabilities and keeps its
+image picker disabled when intake is unavailable. It submits original file
+bytes with CSRF/name headers, shows per-item results and stops a batch on an
+unconfirmed response. Client and UI tests cover type/size rejection, exact file
+transfer, server/network uncertainty and leaving later files unattempted.
+No production upload route is enabled by this UI work.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.

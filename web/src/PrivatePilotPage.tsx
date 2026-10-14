@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { ApprovedPageChunk, HistoryPage } from "@adeno/contracts";
 import { AppHeader, Button, Input, Notice, Select, Textarea } from "./ui";
 import "./private-pilot.css";
+import { uploadPrivateImage, UnconfirmedUpload, type IntakeCapabilities } from "./api/privateIntake";
 
 type Session = { csrfToken: string };
 type Profile = { id: string; preferredName: string };
@@ -38,6 +39,8 @@ export function PrivatePilotPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [intake, setIntake] = useState<IntakeCapabilities>({ available: false, mediaTypes: [], maxBytes: 0 });
+  const [uploads, setUploads] = useState<{ name: string; status: string }[]>([]);
   const base = `/care-profiles/${encodeURIComponent(profileId)}`;
 
   useEffect(() => {
@@ -71,6 +74,15 @@ export function PrivatePilotPage() {
       .catch(() => { if (!controller.signal.aborted) setError("The timeline could not be loaded."); });
     return () => controller.abort();
   }, [session, profileId, base, refresh, throughDay]);
+
+  useEffect(() => {
+    if (!session) return;
+    const controller = new AbortController();
+    request<IntakeCapabilities>("/intake/capabilities", undefined, undefined, controller.signal)
+      .then(result => { if (!controller.signal.aborted) setIntake(result); })
+      .catch(() => { /* Intake stays disabled when capability discovery fails. */ });
+    return () => controller.abort();
+  }, [session]);
 
   async function act(operation: () => Promise<void>) {
     if (busy) return;
@@ -140,6 +152,33 @@ export function PrivatePilotPage() {
     setHistory(current => current ? { ...page, days: [...current.days, ...page.days] } : page);
   }
 
+  function uploadFiles(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const files = Array.from((event.currentTarget.elements.namedItem("images") as HTMLInputElement).files ?? []);
+    if (!files.length || files.length > 16 || !session || !profileId) {
+      setError("Choose between one and sixteen images."); return;
+    }
+    void act(async () => {
+      setUploads(files.map(file => ({ name: file.name, status: "Waiting" })));
+      for (const [index, file] of files.entries()) {
+        const update = (status: string) => setUploads(current => current.map((item, position) =>
+          position === index ? { ...item, status } : item));
+        update("Uploading and inspecting…");
+        try {
+          const receipt = await uploadPrivateImage({ profileId, csrfToken: session.csrfToken, file, capabilities: intake });
+          update(receipt.alreadyExisted ? "Already recorded" : "Recorded for review");
+        } catch (failure) {
+          update(failure instanceof Error ? failure.message : "Upload failed.");
+          if (failure instanceof UnconfirmedUpload) {
+            setUploads(current => current.map((item, position) => position > index
+              ? { ...item, status: "Not attempted after an unconfirmed upload" } : item));
+            setError(failure.message); break;
+          }
+        }
+      }
+    });
+  }
+
   return <div className="workspace-page">
     <AppHeader context="Private Hermes workspace" />
     <main className="workspace-layout">
@@ -164,7 +203,7 @@ export function PrivatePilotPage() {
             <pre>{recoveryCodes.join("\n")}</pre><Button onClick={() => setRecoveryCodes([])}>I saved the codes</Button></section>}
           <div className="workspace-heading-actions">
             <label>Care profile<Select value={profileId} disabled={busy} onChange={event => {
-              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setProfileId(event.target.value);
+              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setUploads([]); setProfileId(event.target.value);
             }}>
               {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.preferredName}</option>)}
             </Select></label>
@@ -173,6 +212,7 @@ export function PrivatePilotPage() {
               setSession(null); setHistory(null); setProposal(null); setHints([]); setRecoveryCodes([]);
               setProfileId(""); setProfiles([]);
               setSourcePage(null);
+              setIntake({ available: false, mediaTypes: [], maxBytes: 0 }); setUploads([]);
             })}>Sign out</Button>
           </div>
           <section className="workflow-panel"><h2>Create a care profile</h2>
@@ -182,6 +222,16 @@ export function PrivatePilotPage() {
             </form>
           </section>
           {!profileId ? <Notice>Create a care profile before adding notes.</Notice> : <>
+            <section className="workflow-panel"><h2>Add record images</h2>
+              <p>Images are preserved as originals and require manual review. PDFs are not supported yet.</p>
+              {!intake.available && <Notice>Image intake is unavailable on this installation.</Notice>}
+              <form onSubmit={uploadFiles}>
+                <label>PNG or JPEG images<Input name="images" type="file" multiple accept="image/png,image/jpeg"
+                  disabled={!intake.available || busy} required /></label>
+                <Button type="submit" disabled={!intake.available} loading={busy}>Upload for review</Button>
+              </form>
+              <ul aria-live="polite">{uploads.map((upload, index) => <li key={index}>{upload.name}: {upload.status}</li>)}</ul>
+            </section>
             <section className="workflow-panel"><h2>Add a family note</h2><form onSubmit={propose}>
               <label>Care day<Input name="careDay" type="date" required /></label>
               <label>What you observed<Textarea name="body" required maxLength={10000} /></label>
