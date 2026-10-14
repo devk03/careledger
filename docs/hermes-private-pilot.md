@@ -176,6 +176,14 @@ Focused image/parser tests pass and both production dependency audits report
 zero vulnerabilities. The patched parser still needs a fresh Hermes image smoke
 before production intake is enabled.
 
+The private bundle codec uses fixed database/recovery/object member types rather
+than archive-supplied paths. It verifies exact lengths and digests, rejects trailing
+data, preserves existing destinations and writes restored files into a private
+pending tree. Only a successful required application-state verifier permits
+publication as `restore-root/data`; originals are restored read-only. Filesystem
+tests use explicitly non-SQLite synthetic database bytes, so they prove archive
+framing/path/digest behavior, not application restore or database compatibility.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.
