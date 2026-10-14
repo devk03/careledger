@@ -450,3 +450,21 @@ decoded an independently generated PNG through mocked API responses, verified
 the pinned digest and full-size link, and captured desktop/390px screenshots
 with no horizontal overflow. Server typecheck passed. This is browser evidence,
 not a database-backed deployment or actual AI-client acceptance check.
+
+Release `008d50fd8057b1b73587edb85dac38f0aae2eb26` built successfully on Hermes
+as `adeno-private:008d50f`, manifest
+`sha256:d0e759044ba7c426842182c93f30771e62717dd687fbf22a1b2711ebbe187e4d`.
+Both server and browser production builds passed in the image build. Its
+healthcheck is `NONE`. A 60-second-bounded packaging probe ran as `adeno` with
+network disabled, read-only root, no mounts, dropped capabilities and a 256 MiB
+memory limit. It confirmed native SQLite version retrieval in memory (no schema
+or migration), an independently invented Argon2 hash/verify roundtrip, loading
+the authorized MCP server, and disabled record/agent defaults. The retained
+container `adeno-runtime-probe-008d50f-2` is
+`d7a1289cfcee3c70659486821d16aecc77443cdc3586f39065809262d24aea71`;
+inspection confirmed exited 0 without OOM and no running containers afterward.
+The first retained probe exited 1 because its probe script imported `argon2`
+instead of the application's actual `@node-rs/argon2` dependency; correcting the
+probe required no product change. No app data was mounted, no listener was
+started and no production database was created. This validates current release
+packaging, not the remaining composed workflow or deployment acceptance.
