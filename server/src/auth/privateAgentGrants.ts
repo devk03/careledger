@@ -16,6 +16,8 @@ const schema = z.object({ version: z.literal(1), id: z.string().regex(grantIdPat
 }).strict().refine(record => record.expiresAt > record.issuedAt && record.expiresAt - record.issuedAt <= 3600);
 type Grant = z.infer<typeof schema>;
 export type AgentGrantOwner = AuthorizedScope & { sessionId: string; sessionTokenSha256: string; expiresAt: number };
+export type AgentGrantView = { grantId: string; issuedAt: number; expiresAt: number;
+  state: "active" | "revoked" | "expired" | "inactive" };
 
 /** Private metadata only. Browser approval belongs to the caller, never an MCP tool. */
 export class PrivateAgentGrantStore {
@@ -100,5 +102,22 @@ export class PrivateAgentGrantStore {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST") return true;
       throw new Error("Agent revocation unavailable");
     }
+  }
+
+  async listOwned(owner: AuthorizedScope, sessions: SessionRepository, now = Math.floor(Date.now() / 1000)):
+    Promise<AgentGrantView[]> {
+    this.checkRoot();
+    const names = readdirSync(this.root);
+    if (names.length > 1024) throw new Error("Agent grant inventory unavailable");
+    const result: AgentGrantView[] = [];
+    for (const name of names) {
+      if (!/^[0-9a-f]{32}\.json$/.test(name)) continue;
+      const grant = await this.read(name.slice(0, 32));
+      if (!grant || grant.userId !== owner.userId || grant.householdId !== owner.householdId) continue;
+      const state = this.revoked(grant.id) ? "revoked" : grant.expiresAt <= now ? "expired"
+        : await this.authorize(grant.id, sessions, now) ? "active" : "inactive";
+      result.push({ grantId: grant.id, issuedAt: grant.issuedAt, expiresAt: grant.expiresAt, state });
+    }
+    return result.sort((a, b) => b.issuedAt - a.issuedAt);
   }
 }

@@ -8,6 +8,9 @@ import { cookieAuthenticator } from "./auth/cookieSession.js";
 import { SqliteFamilyAccounts } from "./auth/familyAccounts.js";
 import { createHttpApp } from "./http/app.js";
 import { privatePilotHeaders } from "./http/privatePilotHeaders.js";
+import { createPrivateAgentRouter } from "./http/privateAgentRouter.js";
+import { PrivateAgentGrantStore } from "./auth/privateAgentGrants.js";
+import { provisionPrivateDirectory } from "./ingest/privateDirectory.js";
 import { privatePilotConfig } from "./privatePilotConfig.js";
 import { SqliteFamilyMutations } from "./storage/sqliteFamilyMutations.js";
 import { SqliteFamilyTimeline } from "./storage/sqliteFamilyTimeline.js";
@@ -38,11 +41,16 @@ if (!accounts.isSetupComplete()) bootstrap.initialize();
 const app = express();
 app.disable("x-powered-by");
 app.use(privatePilotHeaders);
+const agentGrants = config.agentConnectionsAvailable ? new PrivateAgentGrantStore(
+  await provisionPrivateDirectory(config.secretsDirectory, "agent-grants")) : null;
 app.use(createHttpApp({ authenticate: cookieAuthenticator(timeline), timeline, pages: timeline,
   profiles: timeline, reviews: timeline, noteReviews: timeline, versions: timeline,
   sessions: timeline, mutations, profileWriter: mutations, accounts, expectedOrigin: config.origin,
   ownerSetup: { bootstrap, recoveryPepper }, allowInvitations: false,
+  agentConnectionsAvailable: agentGrants !== null,
   readiness: () => timeline.ready() }));
+if (agentGrants) app.use(createPrivateAgentRouter({ expectedOrigin: config.origin,
+  authority: mutations, grants: agentGrants, inventory: { grants: agentGrants, sessions: timeline } }));
 app.use(express.static(config.webRoot, { index: false, dotfiles: "deny", redirect: false }));
 app.get("/", (_request, response) => { response.redirect(302, "/pilot"); });
 app.get("/pilot", (_request, response) => {

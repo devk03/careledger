@@ -12,8 +12,10 @@ const headers = { origin: "https://adeno.example.invalid", "content-type": "appl
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve())))); });
 async function endpoint(authority: Pick<SqliteFamilyMutations, "authorizeAgentConnection">,
-  grants: Pick<PrivateAgentGrantStore, "issue" | "revoke">) {
-  const app = express(); app.use(createPrivateAgentRouter({ expectedOrigin: headers.origin, authority, grants }));
+  grants: Pick<PrivateAgentGrantStore, "issue" | "revoke">,
+  inventory?: Parameters<typeof createPrivateAgentRouter>[0]["inventory"]) {
+  const app = express(); app.use(createPrivateAgentRouter({ expectedOrigin: headers.origin, authority, grants,
+    ...(inventory ? { inventory } : {}) }));
   const server = await new Promise<Server>(resolve => { const started = app.listen(0, "127.0.0.1", () => resolve(started)); });
   servers.push(server);
   const address = server.address(); if (!address || typeof address === "string") throw new Error("Test port unavailable");
@@ -81,4 +83,17 @@ it("redacts a failed final authority lookup and revokes the file already issued"
   const response = await fetch(url, { method: "POST", headers, body: JSON.stringify({ consent: AGENT_CONSENT }) });
   expect(response.status).toBe(503); expect(revoked).toBe(true);
   expect(await response.json()).toEqual({ error: "CONNECTION_UNAVAILABLE" });
+});
+
+it("lists approvals for the verified account rather than a requested account ID", async () => {
+  const url = await endpoint({ authorizeAgentConnection: () => ({ ok: true, owner }) },
+    { issue: async () => ({ grantId, expiresAt: 4000000000 }), revoke: async () => true },
+    { grants: { listOwned: async received => {
+      expect(received).toEqual(owner);
+      return [{ grantId, expiresAt: 4000000000, issuedAt: 2000, state: "active" }];
+    } }, sessions: { findByTokenSha256: async () => null } });
+  const response = await fetch(`${url}/list?userId=other-adult`, { method: "POST", headers });
+  expect(response.status).toBe(200);
+  const body = await response.json(); expect(body.connections).toHaveLength(1);
+  expect(JSON.stringify(body)).not.toContain(owner.sessionTokenSha256);
 });

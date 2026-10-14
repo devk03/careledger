@@ -8,6 +8,8 @@ export function privatePilotConfig(env: NodeJS.ProcessEnv) {
   const webRoot = env.ADENO_PRIVATE_WEB_ROOT;
   const portText = env.PORT ?? "8080";
   const port = Number(portText);
+  if (![undefined, "disabled", "verified"].includes(env.ADENO_PRIVATE_AGENT_CONNECTIONS))
+    throw new Error("Private agent connection configuration is invalid");
   if (env.ADENO_EDITION !== "trusted-private" || !origin || !databasePath ||
     !secretsDirectory || !webRoot || ![databasePath, secretsDirectory, webRoot].every(isAbsolute) ||
     !/^\d+$/.test(portText) || !Number.isInteger(port) || port < 1024 || port > 65535) {
@@ -20,5 +22,6 @@ export function privatePilotConfig(env: NodeJS.ProcessEnv) {
     ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
     throw new Error("Private pilot requires an exact public HTTPS origin");
   }
-  return { origin, databasePath, secretsDirectory, webRoot, port };
+  return { origin, databasePath, secretsDirectory, webRoot, port,
+    agentConnectionsAvailable: env.ADENO_PRIVATE_AGENT_CONNECTIONS === "verified" };
 }

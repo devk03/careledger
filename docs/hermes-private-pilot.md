@@ -144,6 +144,17 @@ spoofed ownership, revocation during issuance and disconnect. The adult/session
 SQLite regression is written but remains unrun pending migration approval.
 These routes are not yet mounted in production.
 
+The runtime can compose these routes only with
+`ADENO_PRIVATE_AGENT_CONNECTIONS=verified`; the default is `disabled`, and this
+flag must remain disabled until the database-backed approval checks pass. Compose
+names the sole private runtime `adeno-private` for the supported SSH instruction.
+The UI requires explicit read-only sharing consent, labels grant validity as an
+approval rather than a verified connection, lists only the account's grants, and
+provides a nonsecret setup instruction plus disconnect. It explains that the AI
+client/provider receives selected plaintext and revocation cannot erase received
+copies. UI tests cover disabled state, consent, credential-free instructions and
+disconnect. It does not auto-configure or approve an assistant.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.

@@ -1,5 +1,6 @@
 services:
   adeno-private:
+    container_name: adeno-private
     image: adeno-private:${ADENO_RELEASE_TAG:?Set a reviewed release tag}
     build:
       context: .
@@ -13,6 +14,7 @@ services:
     ports: ["127.0.0.1:8091:8080"]
     environment:
       ADENO_PRIVATE_ORIGIN: https://adeno.kunjadia.dev
+      ADENO_PRIVATE_AGENT_CONNECTIONS: ${ADENO_PRIVATE_AGENT_CONNECTIONS:-disabled}
     volumes:
       - ${ADENO_PRIVATE_DATA_DIR:?Set an approved private data directory}:/data
     tmpfs:

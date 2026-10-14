@@ -6,6 +6,11 @@ const valid = { ADENO_EDITION: "trusted-private", ADENO_PRIVATE_ORIGIN: "https:/
   ADENO_PRIVATE_WEB_ROOT: "/app/web", PORT: "8080" };
 
 describe("trusted private runtime configuration", () => {
+  it("keeps browser agent approvals disabled unless explicitly marked verified", () => {
+    expect(privatePilotConfig(valid).agentConnectionsAvailable).toBe(false);
+    expect(privatePilotConfig({ ...valid, ADENO_PRIVATE_AGENT_CONNECTIONS: "verified" }).agentConnectionsAvailable).toBe(true);
+    expect(() => privatePilotConfig({ ...valid, ADENO_PRIVATE_AGENT_CONNECTIONS: "1" })).toThrow();
+  });
   it("requires an explicit server-readable edition and exact HTTPS origin", () => {
     expect(privatePilotConfig(valid)).toMatchObject({ port: 8080,
       origin: "https://adeno.example.invalid", databasePath: "/data/case.sqlite" });

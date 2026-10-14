@@ -1,5 +1,5 @@
 import express from "express";
-import { preflightCookieMutation } from "../auth/cookieSession.js";
+import { preflightCookieMutation, type SessionRepository } from "../auth/cookieSession.js";
 import type { PrivateAgentGrantStore } from "../auth/privateAgentGrants.js";
 import type { SqliteFamilyMutations } from "../storage/sqliteFamilyMutations.js";
 
@@ -9,10 +9,22 @@ export const AGENT_CONSENT = "approved_history_and_sources_v1";
 export function createPrivateAgentRouter(input: {
   expectedOrigin: string; authority: Pick<SqliteFamilyMutations, "authorizeAgentConnection">;
   grants: Pick<PrivateAgentGrantStore, "issue" | "revoke">;
+  inventory?: { grants: Pick<PrivateAgentGrantStore, "listOwned">; sessions: SessionRepository };
 }) {
   const router = express.Router();
   router.use((_request, response, next) => { response.setHeader("Cache-Control", "no-store"); next(); });
   const json = express.json({ limit: "4kb", inflate: false, type: "application/json" });
+  if (input.inventory) {
+    router.post("/api/v2/agent-connections/list", async (request, response) => {
+      const preflight = preflightCookieMutation(request, input.expectedOrigin);
+      if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+      const owner = input.authority.authorizeAgentConnection(preflight);
+      if (!owner.ok) { response.status(owner.status).json({ error: owner.error }); return; }
+      try {
+        response.json({ connections: await input.inventory!.grants.listOwned(owner.owner, input.inventory!.sessions) });
+      } catch { response.status(503).json({ error: "CONNECTION_UNAVAILABLE" }); }
+    });
+  }
   router.post("/api/v2/agent-connections", json, async (request, response) => {
     const preflight = preflightCookieMutation(request, input.expectedOrigin);
     if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }

@@ -83,3 +83,15 @@ it("caps a connection at session expiry and rejects expired approval without wed
   expect(await store.authorize(grant.grantId, sessions, now + 29)).not.toBeNull();
   expect(await store.authorize(grant.grantId, sessions, now + 30)).toBeNull();
 });
+
+it("lists only the verified account's approval states without credential bindings", async () => {
+  const { store } = await fixture();
+  const grant = await store.issue(owner, now);
+  await store.issue({ ...owner, userId: "other-adult" }, now);
+  const sessions = { findByTokenSha256: async () => active };
+  expect(await store.listOwned(owner, sessions, now)).toEqual([
+    { grantId: grant.grantId, issuedAt: now, expiresAt: now + 3600, state: "active" },
+  ]);
+  await store.revoke(grant.grantId, owner);
+  expect((await store.listOwned(owner, sessions, now))[0]?.state).toBe("revoked");
+});

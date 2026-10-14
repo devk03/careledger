@@ -3,6 +3,7 @@ import type { ApprovedPageChunk, HistoryPage } from "@adeno/contracts";
 import { AppHeader, Button, Input, Notice, Select, Textarea } from "./ui";
 import "./private-pilot.css";
 import { uploadPrivateImage, UnconfirmedUpload, type IntakeCapabilities } from "./api/privateIntake";
+import { AgentConnectionPanel } from "./AgentConnectionPanel";
 
 type Session = { csrfToken: string };
 type Profile = { id: string; preferredName: string };
@@ -221,6 +222,7 @@ export function PrivatePilotPage() {
               <Button type="submit" loading={busy}>Create profile</Button>
             </form>
           </section>
+          <AgentConnectionPanel csrfToken={session.csrfToken} />
           {!profileId ? <Notice>Create a care profile before adding notes.</Notice> : <>
             <section className="workflow-panel"><h2>Add record images</h2>
               <p>Images are preserved as originals and require manual review. PDFs are not supported yet.</p>

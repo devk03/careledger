@@ -68,6 +68,7 @@ export function createHttpApp(dependencies: {
   noteReviews?: NoteReviewRepository;
   allowInvitations?: boolean;
   intakeAvailable?: boolean;
+  agentConnectionsAvailable?: boolean;
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
   readiness?: () => boolean;
@@ -100,6 +101,10 @@ export function createHttpApp(dependencies: {
     const available = dependencies.intakeAvailable === true;
     response.json({ available, mediaTypes: available ? ["image/png", "image/jpeg"] : [],
       maxBytes: MAX_UPLOAD_BYTES });
+  });
+  app.get("/api/v2/agent-connections/capabilities", async (request, response) => {
+    if (!await dependencies.authenticate(request)) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+    response.json({ available: dependencies.agentConnectionsAvailable === true, transport: "ssh_stdio" });
   });
 
   if (dependencies.profiles !== undefined) {
