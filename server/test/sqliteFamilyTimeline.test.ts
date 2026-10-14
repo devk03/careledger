@@ -76,6 +76,31 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("authorizes only a current adult session for an agent approval", () => {
+    const { path, writer } = database();
+    const secret = Buffer.alloc(32, 8);
+    for (const [user, token] of [["owner-a", "a".repeat(43)], ["child-a", "c".repeat(43)]]) {
+      writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, " +
+        "created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, 1, 100, 4000000000, 100)")
+        .run(`agent-${user}`, user, sessionTokenSha256(token!), secret);
+    }
+    const mutations = new SqliteFamilyMutations(path);
+    const preflight = { ok: true as const, tokenSha256: sessionTokenSha256("a".repeat(43)),
+      csrfToken: issueCsrfToken("agent-owner-a", secret) };
+    try {
+      expect(mutations.authorizeAgentConnection(preflight)).toMatchObject({ ok: true, owner: {
+        userId: "owner-a", householdId: "family-a", sessionId: "agent-owner-a",
+        sessionTokenSha256: preflight.tokenSha256,
+      } });
+      expect(mutations.authorizeAgentConnection({ ...preflight, csrfToken: "wrong" }))
+        .toMatchObject({ ok: false, error: "INVALID_CSRF" });
+      expect(mutations.authorizeAgentConnection({ ok: true, tokenSha256: sessionTokenSha256("c".repeat(43)),
+        csrfToken: issueCsrfToken("agent-child-a", secret) })).toMatchObject({ ok: false, error: "FORBIDDEN" });
+      writer.prepare("UPDATE sessions SET revoked_at = 200 WHERE id = 'agent-owner-a'").run();
+      expect(mutations.authorizeAgentConnection(preflight)).toMatchObject({ ok: false, error: "AUTH_REQUIRED" });
+    } finally { mutations.close(); writer.close(); }
+  });
+
   it("records inspected images for review, deduplicates per profile and denies a revoked upload", async () => {
     const { path, writer } = database();
     const token = "i".repeat(43);

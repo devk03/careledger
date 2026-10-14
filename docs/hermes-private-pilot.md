@@ -135,6 +135,15 @@ durable revocation marker written by another process context. Its session reader
 is still a fictional repository double, so this is grant-file/stdio evidence,
 not the missing SQLite/browser acceptance run.
 
+The candidate browser agent router requires the exact history/source consent
+revision, same-origin cookie/CSRF preflight and a current adult account derived
+inside a database transaction. It rechecks identity after the private grant file
+is written and revokes on a failed authority recheck. Disconnect is account-bound;
+other users' connection IDs receive generic not-found. HTTP tests cover consent,
+spoofed ownership, revocation during issuance and disconnect. The adult/session
+SQLite regression is written but remains unrun pending migration approval.
+These routes are not yet mounted in production.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.

@@ -7,6 +7,7 @@ import { parseISODate } from "../timeline/history.js";
 import { IncompatibleFamilyTimelineDatabase, privateFile, verifySchema } from "./sqliteFamilyTimeline.js";
 import { isInspectedOriginal } from "../ingest/inspection.js";
 import type { TrustedIntakeRepository, IntakeDenial, IntakeReceipt } from "../ingest/trustedIntake.js";
+import type { AgentGrantOwner } from "../auth/privateAgentGrants.js";
 
 type SessionRow = {
   sessionId: string; householdId: string; userId: string;
@@ -18,7 +19,7 @@ type SubjectRow = { memberKind: "adult" | "child" };
 type CountRow = { nextEventNo: number };
 type AuditRow = { event_hash: string };
 type AuthorizedActor = { ok: true; userId: string; householdId: string;
-  role: "owner" | "caregiver"; memberKind: "adult" | "child" };
+  role: "owner" | "caregiver"; memberKind: "adult" | "child"; sessionId: string; expiresAt: number };
 
 export type GrantResult =
   | { ok: true; eventId: string; eventNo: number }
@@ -61,6 +62,17 @@ export class SqliteFamilyMutations implements TrustedIntakeRepository {
   }
 
   close(): void { this.db.close(); }
+
+  authorizeAgentConnection(preflight: Extract<MutationPreflight, { ok: true }>):
+    { ok: true; owner: AgentGrantOwner } | Extract<GrantResult, { ok: false }> {
+    return this.db.transaction(() => {
+      const actor = this.authorizeSession(preflight);
+      if (!actor.ok) return actor;
+      if (actor.memberKind !== "adult") return { ok: false as const, status: 403 as const, error: "FORBIDDEN" as const };
+      return { ok: true as const, owner: { userId: actor.userId, householdId: actor.householdId,
+        sessionId: actor.sessionId, expiresAt: actor.expiresAt, sessionTokenSha256: preflight.tokenSha256 } };
+    }).immediate();
+  }
 
   checkDocumentIntake(input: Parameters<TrustedIntakeRepository["checkDocumentIntake"]>[0]):
     { ok: true } | IntakeDenial {
@@ -409,7 +421,8 @@ export class SqliteFamilyMutations implements TrustedIntakeRepository {
     if (!actor) return { ok: false, status: 401, error: "AUTH_REQUIRED" };
     return { ok: true, userId: decision.session.scope.userId,
       householdId: decision.session.scope.householdId,
-      role: actor.role, memberKind: actor.memberKind };
+      role: actor.role, memberKind: actor.memberKind,
+      sessionId: decision.session.sessionId, expiresAt: decision.session.expiresAt };
   }
 
   private audit(householdId: string, userId: string, action: string,
