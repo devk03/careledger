@@ -403,6 +403,9 @@ describe("fictional v7 family timeline", () => {
 
   it("reveals pending note text only to a current authorized adult reviewer", async () => {
     const { path, writer } = database();
+    writer.prepare("INSERT INTO profile_intake_events (id, care_profile_id, subject_user_id, " +
+      "event_no, allowed, actor_user_id, occurred_at) " +
+      "VALUES ('pending-child-intake', 'profile-a', 'child-a', 1, 1, 'owner-a', 199)").run();
     writer.prepare("INSERT INTO family_notes (id, care_profile_id, created_by, created_at) " +
       "VALUES ('pending-note', 'profile-a', 'child-a', 200)").run();
     writer.prepare("INSERT INTO family_note_revisions (id, note_id, revision_no, care_day, " +

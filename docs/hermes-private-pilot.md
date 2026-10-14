@@ -4,6 +4,45 @@ Target origin: `https://adeno.kunjadia.dev`. This is a trusted, server-readable
 private deployment, with public signup and invitations disabled. It makes no
 managed E2EE claim. Do not import real case records into the repository.
 
+## October 14 synthetic integration result
+
+The user approved existing migrations 0001–0007 for new synthetic test databases.
+The full server suite passed 348 tests (three Linux-only cases skipped on macOS).
+The pending-note fixture needed an explicit child intake grant before insertion;
+the database's denial was correct and no schema change was required.
+
+On Hermes, `adeno-private:008d50f` with the real parser `bd86dc3` and scanner
+`a021cd0` passed the HTTP upload, proposed document-day exclusion, explicit
+publication, note review, cited original-hash verification, app restart,
+session persistence, fresh sign-in and logout-denial scenarios. Public signup
+and invitation routes returned 404. The isolated data root was
+`/home/devkunjadia/adeno/synthetic-20261014-0902`, never production storage.
+`server/test/createPrivateSyntheticDatabase.mjs` requires explicit approval opt-in
+and refuses existing directories; `privateRuntimeScenario.mjs` requires its
+synthetic marker. All requests use independently invented data. The first run's
+script failures (missing worker health-socket setting, note response envelope,
+and startup readiness race) were corrected without product changes; prior data
+and containers remain retained.
+
+The SDK scenario `privateRuntimeMcpScenario.mjs` connected through real SSH stdio,
+read the database-authorized history and source image, verified original and
+rendition hashes, denied an outside profile, then observed denial on the same
+connection after HTTP disconnect. This remains SDK integration evidence; actual
+Codex application acceptance and human browser review remain outstanding.
+All app/parser/scanner containers were explicitly stopped and inspected with no
+OOM. They also had 15-minute lifetime bounds. No recurring monitor was started.
+
+An offline synthetic snapshot was encrypted on Hermes using only the public age
+recipient. Its 1,074,575-byte ciphertext was copied off-host and checked against
+the pinned SHA-256 `1ff8de4d7e7bb1e120678224c003b565c542177edb9fd524cb44da784f997c57`.
+The private identity stayed off-host. Restore CLI verification passed, followed
+by independent checks of approved revision 2, the source citation/hash, decoded
+240×160 original pixels and zero active sessions. Recovery artifacts remain in
+private storage outside Git. This proves the synthetic generation, not future
+production backups. Production database approval, HTTPS/DNS and actual client
+acceptance are still required. Historical verification limits below describe
+the state at their respective commits.
+
 The candidate entrypoint is `server/src/runPrivatePilot.ts`. It requires an
 existing private v7 database and never initializes or migrates one. The
 container binds to Hermes loopback port 8091 through Compose; Nginx supplies

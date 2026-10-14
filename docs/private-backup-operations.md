@@ -2,8 +2,9 @@
 
 Candidate tooling for the trusted Hermes MVP. These commands do not initialize
 or migrate a database, stop services, install a schedule, promote restored data,
-delete files or overwrite outputs. The full application restore test is still
-gated on migration approval. File-encryption tests alone do not prove recovery.
+delete files or overwrite outputs. The application-level paired restore test
+and Hermes-to-off-host synthetic generation now pass; see the October 14 result
+in `hermes-private-pilot.md`. Production recovery remains unverified.
 
 Build the server, then run `node server/dist/runPrivateBackup.js CONFIG_PATH`.
 The only argument is an absolute private JSON configuration path. Its directory
