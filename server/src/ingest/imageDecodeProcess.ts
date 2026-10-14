@@ -7,6 +7,7 @@ import { z } from "zod";
 import { MAX_UPLOAD_BYTES } from "./admission.js";
 import type { ImageDecodeResult, ImageMediaType } from "./imageDecoder.js";
 import { MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS } from "./policy.js";
+import { MAX_RENDITION_REPLY_BYTES, parseImageRendition, type ImageRenditionResult } from "./imageRenditionProtocol.js";
 
 const MAX_CHILD_REPLY_BYTES = 512;
 const rejected = Object.freeze({ verdict: "rejected" as const, code: "MALFORMED" as const });
@@ -32,25 +33,23 @@ async function trustedScript(path: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** The server process can SIGKILL a native decode blocked in this child. */
-export async function decodeImageInSubprocess(
-  input: Uint8Array, mediaType: ImageMediaType, options: ImageDecodeProcessOptions,
-): Promise<ImageDecodeResult> {
+/** Parser-worker use only. A child forked by HTTP/MCP would not create an OS sandbox. */
+async function runImageChild(input: Uint8Array, mediaType: ImageMediaType, options: ImageDecodeProcessOptions,
+  purpose: "inspect" | "rendition"): Promise<{ value: unknown; sha256: string } | null> {
   if ((mediaType !== "image/png" && mediaType !== "image/jpeg") ||
     input.byteLength < 1 || input.byteLength > MAX_UPLOAD_BYTES ||
     !Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1 ||
-    options.timeoutMs > 120_000 || options.signal?.aborted ||
-    !await trustedScript(options.scriptPath)) return rejected;
-  if (options.signal?.aborted) return rejected;
-
+    options.timeoutMs > 120_000 || options.signal?.aborted) return null;
   const bytes = Buffer.from(input);
+  if (!await trustedScript(options.scriptPath) || options.signal?.aborted) return null;
   const digest = createHash("sha256").update(bytes).digest("hex");
+  const maxReplyBytes = purpose === "inspect" ? MAX_CHILD_REPLY_BYTES : MAX_RENDITION_REPLY_BYTES;
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [options.scriptPath, mediaType, digest], {
+    const child = spawn(process.execPath, [options.scriptPath, mediaType, digest, ...(purpose === "rendition" ? [purpose] : [])], {
       stdio: ["pipe", "pipe", "ignore"], env: { NODE_ENV: "production" }, shell: false,
       windowsHide: true,
     });
-    let output = Buffer.alloc(0);
+    const chunks: Buffer[] = []; let total = 0;
     let failed = false;
     const kill = () => {
       if (failed) return;
@@ -63,21 +62,19 @@ export async function decodeImageInSubprocess(
     child.stdin.on("error", kill);
     child.stdout.on("error", kill);
     child.stdout.on("data", (chunk: Buffer) => {
-      if (output.length + chunk.length > MAX_CHILD_REPLY_BYTES) return kill();
-      output = Buffer.concat([output, chunk]);
+      total += chunk.length;
+      if (total > maxReplyBytes) return kill();
+      chunks.push(chunk);
     });
     child.on("error", () => { failed = true; });
     child.on("close", (code) => {
       clearTimeout(deadline);
       options.signal?.removeEventListener("abort", kill);
-      if (failed || code !== 0 || output.length < 2) return resolve(rejected);
+      if (failed || code !== 0 || total < 2) return resolve(null);
       try {
-        const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(output));
-        const parsed = resultSchema.safeParse(value);
-        if (!parsed.success || (parsed.data.verdict === "safe" &&
-          parsed.data.width * parsed.data.height > MAX_IMAGE_PIXELS)) return resolve(rejected);
-        resolve(Object.freeze(parsed.data));
-      } catch { resolve(rejected); }
+        const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, total)));
+        resolve({ value, sha256: digest });
+      } catch { resolve(null); }
     });
     void (async () => {
       try {
@@ -91,4 +88,19 @@ export async function decodeImageInSubprocess(
       } catch { kill(); }
     })();
   });
+}
+
+export async function decodeImageInSubprocess(input: Uint8Array, mediaType: ImageMediaType,
+  options: ImageDecodeProcessOptions): Promise<ImageDecodeResult> {
+  const result = await runImageChild(input, mediaType, options, "inspect");
+  if (!result) return rejected;
+  const parsed = resultSchema.safeParse(result.value);
+  if (!parsed.success || (parsed.data.verdict === "safe" && parsed.data.width * parsed.data.height > MAX_IMAGE_PIXELS)) return rejected;
+  return Object.freeze(parsed.data);
+}
+
+export async function renderImageInSubprocess(input: Uint8Array, mediaType: ImageMediaType,
+  options: ImageDecodeProcessOptions): Promise<ImageRenditionResult> {
+  const result = await runImageChild(input, mediaType, options, "rendition");
+  return result ? parseImageRendition(result.value, result.sha256) : rejected;
 }

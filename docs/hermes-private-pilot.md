@@ -377,3 +377,19 @@ MCP repository calls also recheck their pinned authorization after a read
 completes, withholding results if consent/session identity changed during the
 operation. Server build/typecheck and 25 focused decoder/MCP/real-stdio tests
 passed; those tests do not replace the pending v7 database permission checks.
+
+The rendition helper now has a bounded subprocess entrypoint. Inspection retains
+its 512-byte child reply limit; rendering permits at most 8 MiB plus a small
+metadata envelope. The supervisor snapshots input before asynchronous checks,
+uses a trusted executable file, sends only bytes/type/digest, ignores decoder
+stderr, kills a stalled/cancelled child, and validates source binding, geometry,
+canonical base64 and rendition digest before accepting output. It imports no
+native decoder. Native decode/render runs only in the short-lived child, which
+must still be launched by the isolated parser worker. Generated real-process
+tests cover result tampering, caller mutation, corruption, deadline and abort.
+The never-exit test fixture also has an independent one-minute safety deadline.
+Parser-socket and MCP image integration remain unfinished and disabled.
+Server typecheck/build and 30 focused decoder/process/parser tests passed after
+this bridge change. A fresh supervisor-only process loaded its module without
+Sharp/libvips native libraries. This is local IPC evidence, not target-host
+image-rendering or database-backed source authorization acceptance.

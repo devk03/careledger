@@ -5,6 +5,8 @@ import { MAX_UPLOAD_BYTES } from "./admission.js";
 import { checkJpegContainer } from "./jpegPreflight.js";
 import { checkPngContainer } from "./pngPreflight.js";
 import { MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS } from "./policy.js";
+import { MAX_RENDITION_BYTES, MAX_RENDITION_DIMENSION, type ImageRenditionResult } from "./imageRenditionProtocol.js";
+export { MAX_RENDITION_BYTES, MAX_RENDITION_DIMENSION, type ImageRenditionResult } from "./imageRenditionProtocol.js";
 
 export type ImageMediaType = "image/jpeg" | "image/png";
 export type ImageDecodeResult = Readonly<{
@@ -16,13 +18,6 @@ export type ImageDecodeResult = Readonly<{
 }> | Readonly<{ verdict: "rejected"; code: "MALFORMED" }>;
 
 const rejected = Object.freeze({ verdict: "rejected" as const, code: "MALFORMED" as const });
-export const MAX_RENDITION_DIMENSION = 1600;
-export const MAX_RENDITION_BYTES = 6 * 1024 * 1024;
-export type ImageRenditionResult = Readonly<{
-  verdict: "safe"; sourceSha256: string; sourceWidth: number; sourceHeight: number;
-  rendition: Readonly<{ mimeType: "image/jpeg"; width: number; height: number;
-    sha256: string; data: string; autoOriented: true; background: "white" }>;
-}> | Readonly<{ verdict: "rejected"; code: "MALFORMED" }>;
 
 /**
  * Decoder implementation for a future OS-isolated parser helper only. Running
