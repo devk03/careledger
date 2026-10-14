@@ -4,6 +4,47 @@ Target origin: `https://adeno.kunjadia.dev`. This is a trusted, server-readable
 private deployment, with public signup and invitations disabled. It makes no
 managed E2EE claim. Do not import real case records into the repository.
 
+## Production preparation, October 14
+
+The user separately approved migrations 0001–0007 for the new empty production
+database `/home/devkunjadia/adeno/private-mvp-20261014/case.sqlite`. They were
+applied once in an isolated, network-disabled `adeno-private:008d50f` container,
+in one transaction with independently calculated ledger hashes. The production
+schema verifier, integrity/FK checks and empty audit-chain verification passed.
+Households, users, sessions, profiles, documents and audit events are all empty.
+The directory is 0700 and database 0600, both UID/GID 10001. The retained schema
+initializer container is
+`9b4e5427bd9a1c667fa93acc5853facafb86db844cab407b6af486f2db7a20a1`,
+exited 0 without OOM. No existing database was modified.
+
+Dedicated production socket volumes `adeno-private-parser-socket-v1` and
+`adeno-private-scanner-socket-v1` have owner/group 10002:10003 and 10004:10005,
+respectively, with directory mode 0710. Their initializer exited 0; no production
+worker was started. These are separate from all synthetic socket volumes.
+
+The private operator configuration is
+`/home/devkunjadia/adeno/production-20261014/release.env`, mode 0600 under a 0700
+directory. Compose configuration was parsed with project `adeno-private-mvp`,
+both private pilot/record files from release `008d50fd8057b1b73587edb85dac38f0aae2eb26`,
+the approved production data root and dedicated volumes. It pins app `008d50f`,
+parser `bd86dc3`, scanner `a021cd0`, a 512 MiB storage quota and the existing
+official signature volume `adeno-signatures-20261014`. Application access remains
+loopback-only and workers have no network. Enabling the verified agent/record
+flags is now supported by the synthetic integration evidence below.
+
+`deploy/nginx/adeno-private.conf` is prepared but not installed. Its configuration
+passed Hermes Nginx 1.24's `-t` check in an isolated config using a private test
+certificate; this does not establish real certificate readiness. It disables
+access/error request logging and upstream request/response disk buffering, and
+limits uploads to 30 MiB. No Nginx configuration was reloaded or site enabled.
+
+Activation still requires the user's deferred DNS change, a valid hostname
+certificate, a fresh-signature check (run a bounded updater if needed), owner
+setup and actual browser/Codex acceptance. Do not initialize the time-limited
+bootstrap token until the owner is ready. No account, password, record or
+bootstrap token has been seeded. No production service is running. The private
+test certificate remains outside Git and must never serve the public hostname.
+
 ## October 14 synthetic integration result
 
 The user approved existing migrations 0001–0007 for new synthetic test databases.
