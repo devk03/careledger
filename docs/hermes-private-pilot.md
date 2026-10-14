@@ -349,3 +349,12 @@ passed an in-memory SQLite version read, synthetic Argon2 verification and an
 ephemeral age roundtrip. Record and agent capabilities were disabled by default.
 It exited 0 without OOM and remains stopped/recoverable. No schema, migration,
 application startup or record workflow was exercised by this packaging check.
+
+The [finite backup CLI and offline procedure](private-backup-operations.md) now
+provide private JSON-configured key generation, snapshot and restore commands.
+Server build/typecheck and twelve command/file-encryption/bundle/preflight tests
+passed. The command tests create only independently invented files and test keys;
+they apply no database migrations. An off-host identity and public-recipient
+receipt have been provisioned on the maintainer's trusted device, outside Git;
+the private identity has not been transferred to Hermes. No production database
+snapshot, off-host record generation or full application restoration has run.
