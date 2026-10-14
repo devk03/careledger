@@ -14,6 +14,7 @@ import { SqliteFamilyAccounts } from "../src/auth/familyAccounts.js";
 import { createHttpApp } from "../src/http/app.js";
 import { SqliteFamilyTimeline, IncompatibleFamilyTimelineDatabase } from "../src/storage/sqliteFamilyTimeline.js";
 import { SqliteFamilyMutations } from "../src/storage/sqliteFamilyMutations.js";
+import { createTrustedIntake } from "../src/ingest/trustedIntake.js";
 
 const directory = fileURLToPath(new URL("../../app/storage/migrations/", import.meta.url));
 const files = [
@@ -75,6 +76,49 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("records inspected images for review, deduplicates per profile and denies a revoked upload", async () => {
+    const { path, writer } = database();
+    const token = "i".repeat(43);
+    const secret = Buffer.alloc(32, 5);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, " +
+      "auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('intake-session', 'owner-a', ?, ?, 1, 100, 4000000000, 100)")
+      .run(sessionTokenSha256(token), secret);
+    const mutations = new SqliteFamilyMutations(path);
+    const reader = new SqliteFamilyTimeline(path);
+    const bytes = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.from("independently invented database intake")]);
+    let revoke = false;
+    const intake = createTrustedIntake({ repository: mutations,
+      quarantineRoot: mkdtempSync(join(tmpdir(), "adeno-fictional-db-intake-stage-")),
+      objectRoot: mkdtempSync(join(tmpdir(), "adeno-fictional-db-intake-objects-")),
+      storageAvailable: async () => true,
+      scanner: { scan: async () => {
+        if (revoke) writer.prepare("UPDATE sessions SET revoked_at = ? WHERE id = 'intake-session'")
+          .run(Math.floor(Date.now() / 1000));
+        return { verdict: "clean", engine: "fictional-test-double" };
+      } }, parser: { inspect: async () => ({ status: "safe", pageCount: 1 }) } });
+    const upload = { preflight: { ok: true as const, tokenSha256: sessionTokenSha256(token),
+      csrfToken: issueCsrfToken("intake-session", secret) }, careProfileId: "profile-a",
+      bytes, originalName: "invented.png", claimedMediaType: "image/png" };
+    try {
+      const first = await intake(upload);
+      expect(first).toMatchObject({ ok: true, alreadyExisted: false });
+      if (!first.ok) throw new Error("Expected fictional image metadata receipt");
+      expect(writer.prepare("SELECT status, record_date, uploaded_by FROM documents WHERE id = ?").get(first.documentId))
+        .toEqual({ status: "needs_review", record_date: null, uploaded_by: "owner-a" });
+      const count = writer.prepare("SELECT count(*) total FROM documents").get();
+      expect(await intake(upload)).toEqual({ ok: true, documentId: first.documentId, alreadyExisted: true });
+      expect(writer.prepare("SELECT count(*) total FROM documents").get()).toEqual(count);
+      expect(writer.prepare("SELECT count(*) total FROM day_nodes").get()).toEqual({ total: 1 });
+      expect(reader.ready()).toBe(true);
+      revoke = true;
+      expect(await intake({ ...upload, bytes: Buffer.concat([bytes, Buffer.from("another invented image")]) }))
+        .toMatchObject({ ok: false, status: 401, error: "AUTH_REQUIRED" });
+      expect(writer.prepare("SELECT count(*) total FROM documents").get()).toEqual(count);
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
   it("creates profiles only for a live adult owner session and audits the same transaction", async () => {
     const { path, writer } = database();
     const secret = Buffer.alloc(32, 4);

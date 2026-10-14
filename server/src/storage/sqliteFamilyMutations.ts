@@ -5,6 +5,8 @@ import Database from "better-sqlite3";
 import { type MutationPreflight, type StoredSession, verifyStoredMutationSession } from "../auth/cookieSession.js";
 import { parseISODate } from "../timeline/history.js";
 import { IncompatibleFamilyTimelineDatabase, privateFile, verifySchema } from "./sqliteFamilyTimeline.js";
+import { isInspectedOriginal } from "../ingest/inspection.js";
+import type { TrustedIntakeRepository, IntakeDenial, IntakeReceipt } from "../ingest/trustedIntake.js";
 
 type SessionRow = {
   sessionId: string; householdId: string; userId: string;
@@ -38,7 +40,7 @@ export type NoteReviewResult =
  * Each mutation starts BEGIN IMMEDIATE, reloads the session and permissions,
  * performs the write and appends the v1-compatible audit event before commit.
  */
-export class SqliteFamilyMutations {
+export class SqliteFamilyMutations implements TrustedIntakeRepository {
   private readonly db: Database.Database;
 
   constructor(path: string) {
@@ -59,6 +61,60 @@ export class SqliteFamilyMutations {
   }
 
   close(): void { this.db.close(); }
+
+  checkDocumentIntake(input: Parameters<TrustedIntakeRepository["checkDocumentIntake"]>[0]):
+    { ok: true } | IntakeDenial {
+    return this.db.transaction(() => {
+      const actor = this.authorizeDocumentIntake(input.preflight, input.careProfileId);
+      return actor.ok ? { ok: true as const } : actor;
+    }).immediate();
+  }
+
+  recordInspectedOriginal(input: Parameters<TrustedIntakeRepository["recordInspectedOriginal"]>[0]):
+    IntakeReceipt | IntakeDenial {
+    if (!isInspectedOriginal(input.inspection) ||
+      input.stored.sha256 !== input.admission.sha256 ||
+      input.stored.byteSize !== input.admission.byteSize ||
+      input.inspection.staged.sha256 !== input.admission.sha256 ||
+      input.inspection.staged.byteSize !== input.admission.byteSize ||
+      input.inspection.staged.mediaType !== input.admission.mediaType ||
+      input.inspection.staged.receivedAt !== input.admission.receivedAt ||
+      !["image/png", "image/jpeg"].includes(input.admission.mediaType) ||
+      input.inspection.pageCount !== 1) throw new RangeError("Invalid inspected original");
+    const uploadedAt = Math.floor(Date.parse(input.admission.receivedAt) / 1000);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isSafeInteger(uploadedAt) || uploadedAt < 1 || uploadedAt > now ||
+      !input.admission.displayName.trim() || input.admission.displayName.length > 180 ||
+      !input.inspection.scannerEngine.trim() || input.inspection.scannerEngine.length > 128)
+      throw new RangeError("Invalid inspected original metadata");
+    return this.db.transaction((): IntakeReceipt | IntakeDenial => {
+      const actor = this.authorizeDocumentIntake(input.preflight, input.careProfileId);
+      if (!actor.ok) return actor;
+      this.db.prepare("INSERT INTO source_objects (sha256, byte_size, media_type, created_at, verified_at) " +
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(sha256) DO NOTHING")
+        .run(input.admission.sha256, input.admission.byteSize, input.admission.mediaType, uploadedAt, now);
+      const object = this.db.prepare<[string], { byteSize: number; mediaType: string }>(
+        "SELECT byte_size byteSize, media_type mediaType FROM source_objects WHERE sha256 = ?",
+      ).get(input.admission.sha256);
+      if (!object || object.byteSize !== input.admission.byteSize || object.mediaType !== input.admission.mediaType)
+        throw new RangeError("Original metadata conflict");
+      const existing = this.db.prepare<[string, string], { id: string }>(
+        "SELECT id FROM documents WHERE care_profile_id = ? AND source_sha256 = ? " +
+        "AND archived_at IS NULL ORDER BY uploaded_at, id LIMIT 1",
+      ).get(input.careProfileId, input.admission.sha256);
+      if (existing) return { ok: true, documentId: existing.id, alreadyExisted: true };
+      const documentId = randomUUID();
+      this.db.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, " +
+        "scan_verdict, scan_engine, page_count, status, uploaded_by, uploaded_at) " +
+        "VALUES (?, ?, ?, ?, 'clean', ?, 1, 'needs_review', ?, ?)")
+        .run(documentId, input.careProfileId, input.admission.sha256, input.admission.displayName,
+          input.inspection.scannerEngine, actor.userId, uploadedAt);
+      this.db.prepare("INSERT INTO document_pages (document_id, page_number, created_at) VALUES (?, 1, ?)")
+        .run(documentId, now);
+      this.audit(actor.householdId, actor.userId, "document_intake_recorded", "document", documentId, now);
+      return { ok: true, documentId, alreadyExisted: false };
+    }).immediate();
+  }
 
   createCareProfile(input: {
     preflight: Extract<MutationPreflight, { ok: true }>;
@@ -313,6 +369,17 @@ export class SqliteFamilyMutations {
     if (actor.role !== "owner" || actor.memberKind !== "adult")
       return { ok: false, status: 403, error: "FORBIDDEN" };
     return { ok: true, userId: actor.userId, householdId: actor.householdId };
+  }
+
+  private authorizeDocumentIntake(preflight: Extract<MutationPreflight, { ok: true }>, careProfileId: string):
+    AuthorizedActor | Extract<GrantResult, { ok: false }> {
+    const actor = this.authorizeActor(preflight, careProfileId);
+    if (!actor.ok) return actor;
+    if (actor.role === "owner" && actor.memberKind === "adult") return actor;
+    const allowed = this.db.prepare<[string, string]>(
+      "SELECT 1 FROM current_profile_intake WHERE care_profile_id = ? AND subject_user_id = ?",
+    ).get(careProfileId, actor.userId);
+    return allowed ? actor : { ok: false, status: 403, error: "FORBIDDEN" };
   }
 
   private authorizeActor(preflight: Extract<MutationPreflight, { ok: true }>,

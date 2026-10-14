@@ -57,8 +57,17 @@ and a final transactional metadata boundary. Synthetic tests exercise actual
 filesystem staging/storage with test scanner/parser doubles, including revocation,
 unavailable scanning, capacity denial and caller mutation. They do not prove
 production decoding/scanning. PDFs remain rejected. This service is not mounted;
-the durable metadata writer, physical capacity policy and real Hermes adapters
-must be verified before enabling uploads.
+real Hermes adapters and database-backed verification remain prerequisites to
+enabling uploads. The candidate SQLite writer now rechecks intake/session/CSRF
+inside its metadata transaction, records a one-page inspected image as
+`needs_review`, deduplicates within the authorized profile and appends an audit
+event. It does not create or approve a care day. Its database regression test is
+written but has not run because migration approval is pending.
+
+The physical-capacity policy counts both staging and object roots, including
+abandoned files, and counts hard-link aliases once. It rejects unsafe permissions,
+symlinks, missing roots, excess entry/depth traversal, exhausted configured
+capacity and insufficient filesystem free space. Focused filesystem tests pass.
 
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
