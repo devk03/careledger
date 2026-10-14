@@ -111,6 +111,15 @@ expiry, revocation and account auth version; no digest is accepted as an HTTP
 credential. Durable browser-approved grants and a real stdio/SSH launch remain
 work. Nothing here enables a public MCP endpoint.
 
+The candidate private agent-grant store binds a random connection ID to the
+verified browser session's digest and identity for at most one hour. It contains
+no password, plaintext session token or health record. Each use rechecks the
+current session, expiry and immutable identity; disconnect writes a private,
+durable revocation marker and preserves the original grant metadata. File reads
+are bounded and deny symlinks/unsafe permissions. Issuance is serialized with a
+512-entry cap. Filesystem tests cover these boundaries; browser approval,
+database-backed identity and a real SSH/client setup are still unproven.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.
