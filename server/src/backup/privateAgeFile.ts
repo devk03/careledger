@@ -17,7 +17,7 @@ async function privateParent(path: string) {
 }
 async function privateInput(path: string, maxBytes: number) {
   await privateParent(path);
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await file.stat();
     if (!info.isFile() || (info.mode & 0o077) || info.uid !== process.getuid?.() || info.size < 1 || info.size > maxBytes)
