@@ -4,6 +4,7 @@ import { AppHeader, Button, Input, Notice, Select, Textarea } from "./ui";
 import "./private-pilot.css";
 import { uploadPrivateImage, UnconfirmedUpload, type IntakeCapabilities } from "./api/privateIntake";
 import { AgentConnectionPanel } from "./AgentConnectionPanel";
+import { DocumentInboxPanel } from "./DocumentInboxPanel";
 
 type Session = { csrfToken: string };
 type Profile = { id: string; preferredName: string };
@@ -177,6 +178,7 @@ export function PrivatePilotPage() {
           }
         }
       }
+      setRefresh(value => value + 1);
     });
   }
 
@@ -234,6 +236,8 @@ export function PrivatePilotPage() {
               </form>
               <ul aria-live="polite">{uploads.map((upload, index) => <li key={index}>{upload.name}: {upload.status}</li>)}</ul>
             </section>
+            <DocumentInboxPanel key={profileId} profileId={profileId} csrfToken={session.csrfToken}
+              refreshKey={refresh} onPublished={() => setRefresh(value => value + 1)} />
             <section className="workflow-panel"><h2>Add a family note</h2><form onSubmit={propose}>
               <label>Care day<Input name="careDay" type="date" required /></label>
               <label>What you observed<Textarea name="body" required maxLength={10000} /></label>

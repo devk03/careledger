@@ -263,3 +263,15 @@ allows an adult owner, current source grantee or uploader with active intake
 permission. This is a browser review route, not an MCP draft-read capability.
 Filesystem/HTTP regressions use generated images; database permission coverage
 and runtime mounting remain pending migration approval and integration.
+
+The private UI now includes a capability-gated record inbox, explicit care-day
+proposal, preserved-image review and adult accept/reject controls. Care day is
+blank until selected, independent of upload time. Approval requires the exact
+hash-pinned original to load and a human confirmation; a full-size source link
+supports closer reading. Unconfirmed writes or stale conflicts clear the
+old approval and require inbox refresh before another mutation. Signing out or
+changing profiles unmounts private review state. Upload/publication refreshes
+the inbox/history. UI tests cover confirmation, blank dates, uncertain writes
+and disabled capability with synthetic responses; desktop/mobile renders use a
+generated fictional image. The runtime
+capability defaults to disabled, and no production document routes are mounted.

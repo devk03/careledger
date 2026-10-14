@@ -68,6 +68,7 @@ export function createHttpApp(dependencies: {
   noteReviews?: NoteReviewRepository;
   allowInvitations?: boolean;
   intakeAvailable?: boolean;
+  documentWorkflowAvailable?: boolean;
   agentConnectionsAvailable?: boolean;
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
@@ -105,6 +106,11 @@ export function createHttpApp(dependencies: {
   app.get("/api/v2/agent-connections/capabilities", async (request, response) => {
     if (!await dependencies.authenticate(request)) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
     response.json({ available: dependencies.agentConnectionsAvailable === true, transport: "ssh_stdio" });
+  });
+
+  app.get("/api/v2/document-workflow/capabilities", async (request, response) => {
+    if (!await dependencies.authenticate(request)) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+    response.json({ available: dependencies.documentWorkflowAvailable === true });
   });
 
   if (dependencies.profiles !== undefined) {

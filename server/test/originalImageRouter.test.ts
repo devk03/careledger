@@ -36,12 +36,14 @@ it("returns exact generated original bytes with private image headers after both
       reads++; expect(input).toEqual({ ...scope, careProfileId: "profile-a", documentId: "document-a" }); return state.reference;
     } } });
   expect((await fetch(url)).status).toBe(401); expect(reads).toBe(0);
+  expect((await fetch(`${url}?expectedSha256=${"b".repeat(64)}`, { headers })).status).toBe(404);
+  expect((await fetch(`${url}?expectedSha256=invalid`, { headers })).status).toBe(400);
   const response = await fetch(`${url}?userId=other&householdId=other`, { headers });
   expect(response.status).toBe(200); expect(response.headers.get("content-type")).toBe("image/png");
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   expect(response.headers.get("x-content-type-options")).toBe("nosniff");
   expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
-  expect(Buffer.from(await response.arrayBuffer())).toEqual(state.bytes); expect(reads).toBe(2);
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(state.bytes); expect(reads).toBe(4);
 });
 
 it("withholds bytes when the session or source grant is revoked during a read", async () => {

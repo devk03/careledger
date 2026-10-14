@@ -9,6 +9,19 @@ const origin = "https://adeno.example.invalid";
 const token = "A".repeat(43);
 const headers = { origin, "content-type": "application/json",
   cookie: `__Host-careledger_session=${token}`, "x-csrf-token": "fictional-csrf" };
+it("keeps document workflow capability disabled by default and requires authentication", async () => {
+  const app = createHttpApp({ authenticate: async request => request.get("authorization") === "Bearer fictional-owner"
+    ? { householdId: "family-a", userId: "owner-a" } : null,
+    timeline: { profileBelongsToHousehold: async () => false, listApprovedDays: async () => [] },
+    pages: { readApprovedPageChunk: async () => null } });
+  const server = await new Promise<Server>(resolve => { const started = app.listen(0, "127.0.0.1", () => resolve(started)); });
+  servers.push(server); const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Synthetic endpoint unavailable");
+  const url = `http://127.0.0.1:${address.port}/api/v2/document-workflow/capabilities`;
+  expect((await fetch(url)).status).toBe(401);
+  const response = await fetch(url, { headers: { authorization: "Bearer fictional-owner" } });
+  expect(response.status).toBe(200); expect(await response.json()).toEqual({ available: false });
+});
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => {
     server.close(() => resolve());

@@ -18,6 +18,12 @@ export class DocumentWorkflowError extends Error {
   }
 }
 const base = (profileId: string) => `/api/v2/care-profiles/${encodeURIComponent(profileId)}`;
+export function originalImageUrl(profileId: string, documentId: string, sha256: string) {
+  return `${base(profileId)}/documents/${encodeURIComponent(documentId)}/original-image?expectedSha256=${encodeURIComponent(sha256)}`;
+}
+export function getDocumentWorkflowCapabilities(signal?: AbortSignal) {
+  return request<{ available: boolean }>("/api/v2/document-workflow/capabilities", signal ? { signal } : {});
+}
 async function request<T>(path: string, options: { signal?: AbortSignal; csrfToken?: string; body?: unknown } = {}): Promise<T> {
   const mutation = options.body !== undefined;
   let response: Response;

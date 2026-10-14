@@ -24,6 +24,13 @@ export function createOriginalImageRouter(input: {
       }
       const reference = await input.repository.readOriginalImageReference({ ...scope, careProfileId, documentId });
       if (!reference) { response.status(404).json({ error: "NOT_FOUND" }); return; }
+      const expected = request.query.expectedSha256;
+      if (expected !== undefined && (typeof expected !== "string" || !/^[0-9a-f]{64}$/.test(expected))) {
+        response.status(400).json({ error: "INVALID_QUERY" }); return;
+      }
+      if (expected !== undefined && expected !== reference.sourceSha256) {
+        response.status(404).json({ error: "NOT_FOUND" }); return;
+      }
       if (active) { response.status(503).json({ error: "SOURCE_UNAVAILABLE" }); return; }
       active = true; ownsSlot = true; reading = true;
       response.once("finish", release); response.once("close", release);
