@@ -15,8 +15,13 @@ services:
     environment:
       ADENO_PRIVATE_ORIGIN: https://adeno.kunjadia.dev
       ADENO_PRIVATE_AGENT_CONNECTIONS: ${ADENO_PRIVATE_AGENT_CONNECTIONS:-disabled}
+      ADENO_PRIVATE_RECORDS: disabled
     volumes:
-      - ${ADENO_PRIVATE_DATA_DIR:?Set an approved private data directory}:/data
+      - type: bind
+        source: ${ADENO_PRIVATE_DATA_DIR:?Set an approved private data directory}
+        target: /data
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m,mode=1777
     mem_limit: 768m

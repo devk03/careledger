@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import express from "express";
 
 import { BootstrapTokenStore } from "./auth/bootstrapTokenStore.js";
@@ -14,6 +14,13 @@ import { provisionPrivateDirectory } from "./ingest/privateDirectory.js";
 import { privatePilotConfig } from "./privatePilotConfig.js";
 import { SqliteFamilyMutations } from "./storage/sqliteFamilyMutations.js";
 import { SqliteFamilyTimeline } from "./storage/sqliteFamilyTimeline.js";
+import { createDocumentDayRouter } from "./http/documentDayRouter.js";
+import { createOriginalImageRouter } from "./http/originalImageRouter.js";
+import { createTrustedIntakeRouter } from "./http/trustedIntakeRouter.js";
+import { createTrustedIntake } from "./ingest/trustedIntake.js";
+import { createPrivateIntakeCapacity } from "./ingest/privateIntakeCapacity.js";
+import { createClamdScanner } from "./ingest/clamdScanner.js";
+import { createParserSocketInspector } from "./ingest/parserSocket.js";
 
 // No schema initialization or migration is performed by this entrypoint.
 process.umask(0o077);
@@ -43,11 +50,28 @@ app.disable("x-powered-by");
 app.use(privatePilotHeaders);
 const agentGrants = config.agentConnectionsAvailable ? new PrivateAgentGrantStore(
   await provisionPrivateDirectory(config.secretsDirectory, "agent-grants")) : null;
-app.use(createHttpApp({ authenticate: cookieAuthenticator(timeline), timeline, pages: timeline,
+const authenticate = cookieAuthenticator(timeline);
+if (config.records) {
+  const records = config.records;
+  await provisionPrivateDirectory(dirname(config.databasePath), "objects");
+  await provisionPrivateDirectory(dirname(config.databasePath), "quarantine");
+  const upload = createTrustedIntake({ repository: mutations,
+    scanner: createClamdScanner({ socketPath: records.scannerSocket, trustedWorkerUid: 10004, maxConcurrentScans: 1 }),
+    parser: createParserSocketInspector({ socketPath: records.parserSocket, trustedWorkerUid: 10002, maxConcurrentInspections: 1 }),
+    objectRoot: records.objectRoot, quarantineRoot: records.quarantineRoot,
+    storageAvailable: createPrivateIntakeCapacity({ roots: [records.objectRoot, records.quarantineRoot],
+      maxBytes: records.maxStorageBytes, minimumFreeBytes: 512 * 1024 * 1024 }) });
+  app.use(createTrustedIntakeRouter({ expectedOrigin: config.origin, repository: mutations, upload }));
+  app.use(createDocumentDayRouter({ expectedOrigin: config.origin, writer: mutations,
+    reviews: { authenticate, repository: timeline }, inbox: { authenticate, repository: timeline } }));
+  app.use(createOriginalImageRouter({ authenticate, repository: timeline, objectRoot: records.objectRoot }));
+}
+app.use(createHttpApp({ authenticate, timeline, pages: timeline,
   profiles: timeline, reviews: timeline, noteReviews: timeline, versions: timeline,
   sessions: timeline, mutations, profileWriter: mutations, accounts, expectedOrigin: config.origin,
   ownerSetup: { bootstrap, recoveryPepper }, allowInvitations: false,
   agentConnectionsAvailable: agentGrants !== null,
+  intakeAvailable: config.records !== null, documentWorkflowAvailable: config.records !== null,
   readiness: () => timeline.ready() }));
 if (agentGrants) app.use(createPrivateAgentRouter({ expectedOrigin: config.origin,
   authority: mutations, grants: agentGrants, inventory: { grants: agentGrants, sessions: timeline } }));

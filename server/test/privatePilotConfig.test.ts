@@ -6,6 +6,18 @@ const valid = { ADENO_EDITION: "trusted-private", ADENO_PRIVATE_ORIGIN: "https:/
   ADENO_PRIVATE_WEB_ROOT: "/app/web", PORT: "8080" };
 
 describe("trusted private runtime configuration", () => {
+  it("keeps record routes disabled without explicit opt-in and requires distinct isolated sockets", () => {
+    expect(privatePilotConfig(valid).records).toBeNull();
+    expect(() => privatePilotConfig({ ...valid, ADENO_PRIVATE_RECORDS: "true" })).toThrow();
+    expect(() => privatePilotConfig({ ...valid, ADENO_PRIVATE_RECORDS: "verified" })).toThrow();
+    const enabled = { ...valid, ADENO_PRIVATE_RECORDS: "verified", ADENO_PRIVATE_PARSER_SOCKET: "/run/parser/parser.sock",
+      ADENO_PRIVATE_SCANNER_SOCKET: "/run/scanner/clamd.sock" };
+    expect(privatePilotConfig(enabled).records).toEqual({ objectRoot: "/data/objects", quarantineRoot: "/data/quarantine",
+      parserSocket: "/run/parser/parser.sock", scannerSocket: "/run/scanner/clamd.sock", maxStorageBytes: 536870912 });
+    expect(() => privatePilotConfig({ ...enabled, ADENO_PRIVATE_SCANNER_SOCKET: enabled.ADENO_PRIVATE_PARSER_SOCKET })).toThrow();
+    expect(() => privatePilotConfig({ ...enabled, ADENO_PRIVATE_PARSER_SOCKET: "relative" })).toThrow();
+    for (const storage of ["1", "536870913", "5e8", "invalid"]) expect(() => privatePilotConfig({ ...enabled, ADENO_PRIVATE_STORAGE_BYTES: storage })).toThrow();
+  });
   it("keeps browser agent approvals disabled unless explicitly marked verified", () => {
     expect(privatePilotConfig(valid).agentConnectionsAvailable).toBe(false);
     expect(privatePilotConfig({ ...valid, ADENO_PRIVATE_AGENT_CONNECTIONS: "verified" }).agentConnectionsAvailable).toBe(true);

@@ -275,3 +275,61 @@ the inbox/history. UI tests cover confirmation, blank dates, uncertain writes
 and disabled capability with synthetic responses; desktop/mobile renders use a
 generated fictional image. The runtime
 capability defaults to disabled, and no production document routes are mounted.
+
+## Candidate record runtime composition
+
+The entrypoint now composes upload, private originals, inbox and adult document
+review only when `ADENO_PRIVATE_RECORDS=verified`. Base Compose explicitly sets
+it to `disabled`. An opt-in composition is prepared in
+`compose.private-records.yaml`; this is not an assertion that activation has
+been approved or its database-backed acceptance checks passed.
+
+The enabled runtime requires two distinct absolute Unix-socket paths. It derives
+private `objects` and `quarantine` directories beside the existing database and
+provisions them under the existing private application-owned parent. It never
+creates, initializes or migrates a database. The same transactional writer is
+used by note, grant, upload and document-review routes. The scanner requires
+fresh loaded signatures on every scan, and the parser independently checks exact
+bytes in its isolated worker. No unavailable scanner/parser verdict is clean.
+
+The initial physical storage limit is 512 MiB across originals, retained staging
+and orphans; a smaller explicit limit is allowed down to 64 MiB. Each admission
+also preserves 512 MiB of filesystem free space. This private MVP limit is
+intentional while the backup bundle has a 1 GiB bound. Capacity exhaustion denies
+new uploads and preserves existing files. Operators must reconcile retained
+stages/orphans manually; no background deletion or cleanup job is installed.
+
+Before using the override:
+
+1. Obtain approval to apply the existing migrations to synthetic test databases,
+   run the complete v7 authorization/publication/restore tests, and resolve
+   failures. Obtain separate approval for a new production database.
+2. Build reviewed app/parser/scanner images. Set `ADENO_RELEASE_TAG`,
+   `ADENO_PARSER_RELEASE_TAG` and `ADENO_SCANNER_RELEASE_TAG` to those exact tags.
+3. Provision fresh private production socket volumes with the workers' intended
+   ownership. Set `ADENO_PARSER_SOCKET_VOLUME` and `ADENO_SCANNER_SOCKET_VOLUME`.
+   Do not reuse the retained synthetic test socket volumes.
+4. Load/test official signatures with the bounded, once-only updater and set
+   `ADENO_SIGNATURE_VOLUME`. The running scanner mounts signatures read-only,
+   and both workers have networking disabled and no application-data mounts.
+   Worker container logging is disabled so parser/scanner diagnostics cannot
+   persist document-derived material. Use exit/resource metadata and generated
+   probes for operator checks; do not replay real source bytes into debug logs.
+5. Set `ADENO_PRIVATE_DATA_DIR` to the separately approved private data directory.
+   The bind must already exist; Compose no longer creates a missing host path.
+   Inspect the merge of the base and record override with Compose `config`
+   before starting any services. The app gains only supplementary socket groups
+   10003/10005 and read-only socket mounts; its database/data mount remains private.
+6. Prove synthetic sign-in, upload, original viewing, proposal/review/publication,
+   source citations, revocation, app restart and off-host restore in the composed
+   runtime before real records are introduced. Check actual peak host resources.
+
+The workers retry crash exits at most three times. A stale scanner socket fails
+closed; verify the exact stopped worker and preserve/archive the stale socket
+before manually restarting. Parser stale-socket recovery is independently tested.
+For signature updates, stop the verified scanner, run the bounded updater against
+its signature volume, require update/load-test success, preserve/archive any
+stale socket, restart, then require real clean/detection/freshness probes.
+No recurring updater or monitoring job is added by this composition. Readiness
+currently describes the app/database; adapter failure is denied at intake and
+must not be inferred from the app readiness endpoint alone.

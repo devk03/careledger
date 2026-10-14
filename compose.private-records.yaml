@@ -1,0 +1,63 @@
+# Opt-in override for an approved/verified private record deployment.
+# Build/provision isolated workers and signatures before starting this composition.
+services:
+  adeno-private:
+    group_add: ["10003", "10005"]
+    environment:
+      ADENO_PRIVATE_RECORDS: verified
+      ADENO_PRIVATE_PARSER_SOCKET: /run/adeno-parser/parser.sock
+      ADENO_PRIVATE_SCANNER_SOCKET: /run/adeno-scanner/clamd.sock
+      ADENO_PRIVATE_STORAGE_BYTES: ${ADENO_PRIVATE_STORAGE_BYTES:-536870912}
+    volumes:
+      - parser_socket:/run/adeno-parser:ro
+      - scanner_socket:/run/adeno-scanner:ro
+  parser:
+    image: adeno-parser:${ADENO_PARSER_RELEASE_TAG:?Set a verified parser release}
+    user: "10002:10003"
+    network_mode: none
+    read_only: true
+    init: true
+    restart: "on-failure:3"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      ADENO_PARSER_SOCKET_PATH: /run/adeno-parser/parser.sock
+      ADENO_PARSER_HEALTH_SOCKET_PATH: /run/adeno-parser/health.sock
+    volumes:
+      - parser_socket:/run/adeno-parser
+    tmpfs: ["/tmp:size=67108864,mode=1777"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    pids_limit: 64
+    logging:
+      driver: none
+  scanner:
+    image: adeno-scanner:${ADENO_SCANNER_RELEASE_TAG:?Set a verified scanner release}
+    user: "10004:10005"
+    network_mode: none
+    read_only: true
+    init: true
+    restart: "on-failure:3"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - signatures:/var/lib/adeno-signatures:ro
+      - scanner_socket:/run/adeno-scanner
+    tmpfs: ["/tmp:size=134217728,mode=1777"]
+    mem_limit: 1700m
+    memswap_limit: 1700m
+    cpus: 1
+    pids_limit: 64
+    logging:
+      driver: none
+volumes:
+  parser_socket:
+    external: true
+    name: ${ADENO_PARSER_SOCKET_VOLUME:?Set a private production parser socket volume}
+  scanner_socket:
+    external: true
+    name: ${ADENO_SCANNER_SOCKET_VOLUME:?Set a private production scanner socket volume}
+  signatures:
+    external: true
+    name: ${ADENO_SIGNATURE_VOLUME:?Set provisioned official signatures}
