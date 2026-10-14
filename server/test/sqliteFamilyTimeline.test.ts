@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,8 @@ import { createHttpApp } from "../src/http/app.js";
 import { SqliteFamilyTimeline, IncompatibleFamilyTimelineDatabase } from "../src/storage/sqliteFamilyTimeline.js";
 import { SqliteFamilyMutations } from "../src/storage/sqliteFamilyMutations.js";
 import { createTrustedIntake } from "../src/ingest/trustedIntake.js";
+import { createPrivateBackupIdentity } from "../src/backup/privateAgeFile.js";
+import { createPrivateSnapshot, restorePrivateSnapshot } from "../src/backup/privateSnapshot.js";
 
 const directory = fileURLToPath(new URL("../../app/storage/migrations/", import.meta.url));
 const files = [
@@ -76,6 +78,55 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("restores an encrypted paired database and original without reviving sessions or altering the source", async () => {
+    const { path, writer } = emptyDatabase();
+    const root = mkdtempSync(join(tmpdir(), "adeno-fictional-snapshot-"));
+    const objectRoot = join(root, "objects"); mkdirSync(objectRoot, { mode: 0o700 });
+    const bytes = Buffer.from("An independently invented original for the backup regression.");
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const shard = join(objectRoot, hash.slice(0, 2), hash.slice(2, 4));
+    mkdirSync(shard, { recursive: true, mode: 0o700 });
+    writeFileSync(join(shard, hash), bytes, { mode: 0o400 });
+    const pepperPath = join(root, "recovery-pepper");
+    const pepper = Buffer.alloc(32, 7); writeFileSync(pepperPath, pepper, { mode: 0o600 });
+    writer.prepare("INSERT INTO households (singleton, id, display_name, created_at) VALUES (1, 'backup-family', 'Invented backup family', 100)").run();
+    writer.prepare("INSERT INTO users (id, household_id, login_name, login_name_normalized, display_name, role, status, password_hash, created_at, updated_at, password_changed_at, member_kind) " +
+      "VALUES ('backup-owner', 'backup-family', 'backup-owner', 'backup-owner', 'Invented owner', 'owner', 'active', '$argon2id$fictional', 100, 100, 100, 'adult')").run();
+    writer.prepare("INSERT INTO care_profiles (id, household_id, preferred_name, created_by, created_at, updated_at) " +
+      "VALUES ('backup-profile', 'backup-family', 'Invented person', 'backup-owner', 100, 100)").run();
+    writer.prepare("INSERT INTO source_objects (sha256, byte_size, media_type, created_at) VALUES (?, ?, 'image/png', 100)").run(hash, bytes.length);
+    writer.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, status, uploaded_by, uploaded_at) " +
+      "VALUES ('backup-document', 'backup-profile', ?, 'invented.png', 'clean', 'needs_review', 'backup-owner', 100)").run(hash);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('backup-session', 'backup-owner', ?, ?, 1, 100, 4000000000, 100)").run("f".repeat(64), Buffer.alloc(32, 9));
+    writer.close();
+    const sourceBefore = createHash("sha256").update(readFileSync(path)).digest("hex");
+    const identityPath = join(root, "off-host-test-identity");
+    const { recipient } = await createPrivateBackupIdentity(identityPath);
+    const encryptedPath = join(root, "generation.age");
+    const encrypted = await createPrivateSnapshot({ sourceDbPath: path, objectRoot,
+      recoveryPepperPath: pepperPath, snapshotRoot: join(root, "snapshot"), encryptedPath, recipient, writersStopped: true });
+    expect(createHash("sha256").update(readFileSync(path)).digest("hex")).toBe(sourceBefore);
+    const source = new Database(path, { readonly: true });
+    try { expect(source.prepare("SELECT revoked_at FROM sessions").get()).toEqual({ revoked_at: null }); }
+    finally { source.close(); }
+    const destinationRoot = join(root, "restore");
+    await restorePrivateSnapshot({ encryptedPath, expectedSha256: encrypted.sha256, identityPath,
+      workRoot: join(root, "restore-work"), destinationRoot });
+    const data = join(destinationRoot, "data");
+    expect(readFileSync(join(data, "objects", hash.slice(0, 2), hash.slice(2, 4), hash))).toEqual(bytes);
+    expect(readFileSync(join(data, "secrets", "recovery-pepper"))).toEqual(pepper);
+    const restored = new Database(join(data, "case.sqlite"), { readonly: true });
+    try {
+      expect(restored.prepare("SELECT id, source_sha256 FROM documents").all()).toEqual([{ id: "backup-document", source_sha256: hash }]);
+      expect(restored.prepare("SELECT 1 FROM sessions WHERE revoked_at IS NULL").get()).toBeUndefined();
+    } finally { restored.close(); }
+    await expect(restorePrivateSnapshot({ encryptedPath, expectedSha256: "0".repeat(64), identityPath,
+      workRoot: join(root, "wrong-pin-work"), destinationRoot: join(root, "wrong-pin-restore") })).rejects.toThrow();
+    await expect(restorePrivateSnapshot({ encryptedPath, expectedSha256: encrypted.sha256, identityPath,
+      workRoot: join(root, "second-work"), destinationRoot })).rejects.toThrow();
+  });
+
   it("authorizes only a current adult session for an agent approval", () => {
     const { path, writer } = database();
     const secret = Buffer.alloc(32, 8);

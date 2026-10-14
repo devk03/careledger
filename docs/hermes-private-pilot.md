@@ -167,8 +167,8 @@ On October 14, wholly synthetic 200,000-byte data encrypted here was decrypted
 by Hermes's reference age CLI 1.1.1; CLI-encrypted data then restored here with an
 exact-byte match. The probe's test identity was transferred only for that
 fictional interoperability check and is not a production backup identity.
-No real database or record was read. The paired SQLite/object bundle, off-host
-generation retention and full application restore are still unimplemented.
+No real database or record was read. Off-host generation retention and full
+application restore remain unverified.
 
 Sharp is now pinned at 0.35.5 in both server and parser lockfiles, addressing
 [GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w).
@@ -183,6 +183,18 @@ pending tree. Only a successful required application-state verifier permits
 publication as `restore-root/data`; originals are restored read-only. Filesystem
 tests use explicitly non-SQLite synthetic database bytes, so they prove archive
 framing/path/digest behavior, not application restore or database compatibility.
+
+The candidate offline snapshot collector copies an existing compatible v7
+database through SQLite's backup API, bundles exactly its referenced originals
+and recovery pepper, then encrypts to an off-host recipient. It requires stopped
+writers and new output paths. Only the copied database has its sessions revoked;
+the source database and originals are preserved. Agent approvals and bootstrap
+tokens are excluded. Restoration checks the separately pinned ciphertext digest,
+authenticated archive, schema/audit integrity, exact original inventory and
+revoked sessions before publishing a new private data directory. Plaintext
+working copies remain private and retained; operator cleanup is manual.
+The synthetic database integration regression is written but remains unrun
+pending permission to apply the existing migrations to new test databases.
 
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
