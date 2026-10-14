@@ -78,6 +78,38 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("paginates a private inbox at tied upload times and removes own-intake access after revocation", async () => {
+    const { path, writer } = database();
+    const secret = Buffer.alloc(32, 13); const token = "q".repeat(43);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('inbox-owner', 'owner-a', ?, ?, 1, 100, 4000000000, 100)").run(sessionTokenSha256(token), secret);
+    const preflight = { ok: true as const, tokenSha256: sessionTokenSha256(token), csrfToken: issueCsrfToken("inbox-owner", secret) };
+    const mutations = new SqliteFamilyMutations(path); const reader = new SqliteFamilyTimeline(path);
+    const scope = { householdId: "family-a", userId: "owner-a", careProfileId: "profile-a" };
+    try {
+      expect(mutations.grantProfileIntake({ preflight, careProfileId: "profile-a", subjectUserId: "child-a", allowed: true, nowSeconds: 200 })).toMatchObject({ ok: true });
+      for (let index = 0; index < 22; index++) writer.prepare(
+        "INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, page_count, status, uploaded_by, uploaded_at) " +
+        "VALUES (?, 'profile-a', ?, 'Independently invented inbox record.pdf', 'clean', 1, 'needs_review', ?, 201)",
+      ).run(`inbox-${String(index).padStart(2, "0")}`, documentHash, index === 0 ? "child-a" : "owner-a");
+      const first = await reader.listDocumentInbox(scope);
+      expect(first.documents).toHaveLength(20); expect(first.nextCursor).toEqual({ uploadedAt: 201, documentId: "inbox-02" });
+      const second = await reader.listDocumentInbox({ ...scope, before: first.nextCursor! });
+      expect(second.documents).toHaveLength(3); expect(second.nextCursor).toBeNull();
+      expect(new Set([...first.documents, ...second.documents].map(document => document.documentId)).size).toBe(23);
+      expect((await reader.listDocumentInbox({ ...scope, userId: "child-a" })).documents.map(document => document.documentId)).toEqual(["inbox-00"]);
+      expect((await reader.listDocumentInbox({ ...scope, userId: "adult-a" })).documents).toEqual([]);
+      expect((await reader.listDocumentInbox({ ...scope, householdId: "other-family" })).documents).toEqual([]);
+      const proposed = mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a", documentId: "inbox-00", careDay: "2030-04-15", nowSeconds: 202 });
+      if (!proposed.ok) throw new Error("Expected synthetic inbox placement");
+      expect((await reader.listDocumentInbox({ ...scope, before: first.nextCursor! })).documents.find(document => document.documentId === "inbox-00")?.pendingDayProposals)
+        .toEqual([{ revisionId: proposed.revisionId, careDay: "2030-04-15" }]);
+      expect((await reader.listDocumentInbox({ ...scope, userId: "child-a" })).documents[0]?.pendingDayProposals).toEqual([]);
+      expect(mutations.grantProfileIntake({ preflight, careProfileId: "profile-a", subjectUserId: "child-a", allowed: false, nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect((await reader.listDocumentInbox({ ...scope, userId: "child-a" })).documents).toEqual([]);
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
   it("holds document-day proposals out of history and checks freshness before source-linked publication", async () => {
     const { path, writer } = database();
     const secret = Buffer.alloc(32, 12);

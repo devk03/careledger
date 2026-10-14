@@ -3,7 +3,7 @@ import { z } from "zod";
 import { preflightCookieMutation } from "../auth/cookieSession.js";
 import type { SqliteFamilyMutations } from "../storage/sqliteFamilyMutations.js";
 import { parseISODate } from "../timeline/history.js";
-import type { DocumentDayReviewRepository } from "../timeline/types.js";
+import type { DocumentDayReviewRepository, DocumentInboxRepository } from "../timeline/types.js";
 import type { AuthenticateRequest } from "./app.js";
 
 const id = z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/);
@@ -16,9 +16,29 @@ export function createDocumentDayRouter(input: {
   expectedOrigin: string;
   writer: Pick<SqliteFamilyMutations, "proposeDocumentDay" | "reviewDocumentDay">;
   reviews?: { authenticate: AuthenticateRequest; repository: DocumentDayReviewRepository };
+  inbox?: { authenticate: AuthenticateRequest; repository: DocumentInboxRepository };
 }) {
   const router = express.Router();
   router.use((_request, response, next) => { response.setHeader("Cache-Control", "no-store"); next(); });
+  if (input.inbox) router.get("/api/v2/care-profiles/:careProfileId/documents/inbox", async (request, response) => {
+    try {
+      const scope = await input.inbox!.authenticate(request);
+      if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+      const profile = id.safeParse(request.params.careProfileId);
+      const timestamp = request.query.beforeUploadedAt; const document = request.query.beforeDocumentId;
+      let before: { uploadedAt: number; documentId: string } | undefined;
+      if (timestamp !== undefined || document !== undefined) {
+        if (typeof timestamp !== "string" || !/^[1-9]\d{0,15}$/.test(timestamp) ||
+          !Number.isSafeInteger(Number(timestamp)) || !id.safeParse(document).success) {
+          response.status(400).json({ error: "INVALID_QUERY" }); return;
+        }
+        before = { uploadedAt: Number(timestamp), documentId: document as string };
+      }
+      if (!profile.success) { response.status(400).json({ error: "INVALID_QUERY" }); return; }
+      response.json(await input.inbox!.repository.listDocumentInbox({ ...scope, careProfileId: profile.data,
+        ...(before === undefined ? {} : { before }) }));
+    } catch { response.status(503).json({ error: "DOCUMENT_WORKFLOW_UNAVAILABLE" }); }
+  });
   if (input.reviews) router.get("/api/v2/care-profiles/:careProfileId/reviews/document-days/:revisionId", async (request, response) => {
     try {
       const scope = await input.reviews!.authenticate(request);

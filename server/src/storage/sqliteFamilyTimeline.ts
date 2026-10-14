@@ -7,7 +7,7 @@ import type { ApprovedPageRepository, CareProfileRepository, DayVersion, DayVers
   PendingNoteHint, PendingReviewHint, PendingReviewRepository,
   StoredPageChunk, TimelineDay, TimelineRepository, VisibleCareProfile } from "../timeline/types.js";
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
-import type { DocumentDayReviewDetail, NoteReviewDetail, NoteReviewRepository } from "../timeline/types.js";
+import type { DocumentDayReviewDetail, DocumentInboxCursor, InboxDocument, NoteReviewDetail, NoteReviewRepository } from "../timeline/types.js";
 
 const MIGRATIONS = [
   [1, "initial", "793dbf7dc872fe52f05e2f7e9294145898ea4f1f499816d304dd8e8b8190c501"],
@@ -299,6 +299,44 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     if (!row) return null;
     return { ...row, createdAt: new Date(row.createdAt * 1000).toISOString(),
       attribution: "family_note", state: "proposed" };
+  }
+
+  async listDocumentInbox(input: {
+    householdId: string; userId: string; careProfileId: string; before?: DocumentInboxCursor;
+  }): Promise<{ documents: InboxDocument[]; nextCursor: DocumentInboxCursor | null }> {
+    if (input.before && (!Number.isSafeInteger(input.before.uploadedAt) || input.before.uploadedAt < 1 ||
+      !/^[a-zA-Z0-9_-]{1,64}$/.test(input.before.documentId))) throw new RangeError("Invalid inbox cursor");
+    return this.db.transaction(() => {
+      const rows = this.db.prepare<[string, string, string, number | null, number | null, number | null, string | null],
+        Omit<InboxDocument, "uploadedAt" | "pendingDayProposals"> & { uploadedAt: number }>(
+        "SELECT d.id documentId, d.original_display_name displayName, d.source_sha256 sourceSha256, " +
+        "s.media_type mediaType, s.byte_size byteSize, d.page_count pageCount, d.uploaded_at uploadedAt " +
+        "FROM documents d JOIN source_objects s ON s.sha256 = d.source_sha256 " +
+        "JOIN care_profiles p ON p.id = d.care_profile_id AND p.archived_at IS NULL " +
+        "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
+        "WHERE p.household_id = ? AND p.id = ? AND d.archived_at IS NULL " +
+        "AND d.scan_verdict = 'clean' AND d.page_count > 0 AND d.status IN ('needs_review', 'complete') " +
+        "AND ((u.role = 'owner' AND u.member_kind = 'adult') OR (d.uploaded_by = u.id AND EXISTS " +
+        "(SELECT 1 FROM current_profile_intake a WHERE a.care_profile_id = p.id AND a.subject_user_id = u.id))) " +
+        "AND (? IS NULL OR d.uploaded_at < ? OR (d.uploaded_at = ? AND d.id < ?)) " +
+        "ORDER BY d.uploaded_at DESC, d.id DESC LIMIT 21",
+      ).all(input.userId, input.householdId, input.careProfileId, input.before?.uploadedAt ?? null,
+        input.before?.uploadedAt ?? null, input.before?.uploadedAt ?? null, input.before?.documentId ?? null);
+      const documents = rows.slice(0, 20).map(row => {
+        const pendingDayProposals = this.db.prepare<[string, string, string], { revisionId: string; careDay: ISODate }>(
+          "SELECT r.id revisionId, r.care_day careDay FROM document_day_placement_revisions r " +
+          "JOIN document_day_placements pl ON pl.id = r.placement_id " +
+          "JOIN users u ON u.id = ? AND u.status = 'active' " +
+          "WHERE pl.document_id = ? AND pl.care_profile_id = ? AND r.is_retracted = 0 " +
+          "AND (r.created_by = u.id OR (u.role = 'owner' AND u.member_kind = 'adult')) " +
+          "AND NOT EXISTS (SELECT 1 FROM document_day_placement_reviews v WHERE v.revision_id = r.id) " +
+          "ORDER BY r.created_at DESC, r.id DESC LIMIT 100",
+        ).all(input.userId, row.documentId, input.careProfileId);
+        return { ...row, uploadedAt: new Date(row.uploadedAt * 1000).toISOString(), pendingDayProposals };
+      });
+      const last = rows[Math.min(rows.length, 20) - 1];
+      return { documents, nextCursor: rows.length > 20 && last ? { uploadedAt: last.uploadedAt, documentId: last.documentId } : null };
+    }).deferred();
   }
 
   async readPendingDocumentDay(input: {

@@ -68,6 +68,19 @@ export interface DocumentDayReviewRepository {
     householdId: string; userId: string; careProfileId: string; revisionId: string;
   }): Promise<DocumentDayReviewDetail | null>;
 }
+export type DocumentInboxCursor = { uploadedAt: number; documentId: string };
+export type InboxDocument = {
+  documentId: string; displayName: string; sourceSha256: string;
+  mediaType: "application/pdf" | "image/png" | "image/jpeg"; byteSize: number;
+  pageCount: number; uploadedAt: string;
+  pendingDayProposals: { revisionId: string; careDay: ISODate }[];
+};
+export interface DocumentInboxRepository {
+  /** Adult owners see profile intake; current contributors see their own uploads. */
+  listDocumentInbox(input: {
+    householdId: string; userId: string; careProfileId: string; before?: DocumentInboxCursor;
+  }): Promise<{ documents: InboxDocument[]; nextCursor: DocumentInboxCursor | null }>;
+}
 
 export interface PendingReviewRepository {
   /** No proposal content is returned; reviewer authority is rechecked on every call. */

@@ -10,18 +10,42 @@ const headers = { origin, cookie: `__Host-careledger_session=${token}`,
   "x-csrf-token": "fictional-csrf", "content-type": "application/json" };
 afterEach(async () => { for (const server of servers.splice(0)) await new Promise<void>(resolve => server.close(() => resolve())); });
 async function endpoint(writer: Parameters<typeof createDocumentDayRouter>[0]["writer"],
-  reviews?: Parameters<typeof createDocumentDayRouter>[0]["reviews"]) {
+  reviews?: Parameters<typeof createDocumentDayRouter>[0]["reviews"],
+  inbox?: Parameters<typeof createDocumentDayRouter>[0]["inbox"]) {
   const app = express(); app.use(createDocumentDayRouter({ expectedOrigin: origin, writer,
-    ...(reviews === undefined ? {} : { reviews }) }));
+    ...(reviews === undefined ? {} : { reviews }), ...(inbox === undefined ? {} : { inbox }) }));
   const server = await new Promise<Server>(resolve => { const started = app.listen(0, "127.0.0.1", () => resolve(started)); });
   servers.push(server); const address = server.address();
   if (!address || typeof address === "string") throw new Error("Synthetic endpoint unavailable");
   const base = `http://127.0.0.1:${address.port}/api/v2/care-profiles/profile-a`;
   return { proposal: `${base}/documents/document-a/day-proposals`, review: `${base}/timeline/document-days/revision-a/review`,
-    read: `${base}/reviews/document-days/revision-a` };
+    read: `${base}/reviews/document-days/revision-a`, inbox: `${base}/documents/inbox` };
 }
 const denied = () => ({ ok: false as const, status: 403 as const, error: "FORBIDDEN" as const });
 const post = (url: string, body: unknown) => fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+
+it("authenticates paginated inbox reads and validates both cursor fields without trusting query authority", async () => {
+  let reads = 0;
+  const urls = await endpoint({ proposeDocumentDay: denied, reviewDocumentDay: denied }, undefined, {
+    authenticate: async request => request.get("authorization") === "Bearer fictional-owner"
+      ? { householdId: "family-a", userId: "owner-a" } : null,
+    repository: { listDocumentInbox: async input => {
+      reads++; expect(input).toEqual({ householdId: "family-a", userId: "owner-a", careProfileId: "profile-a",
+        before: { uploadedAt: 100, documentId: "document-a" } });
+      return { documents: [], nextCursor: null };
+    } },
+  });
+  expect((await fetch(urls.inbox)).status).toBe(401); expect(reads).toBe(0);
+  const authorized = { authorization: "Bearer fictional-owner" };
+  for (const query of ["beforeUploadedAt=100", "beforeDocumentId=document-a", "beforeUploadedAt=-1&beforeDocumentId=document-a",
+    "beforeUploadedAt=100&beforeUploadedAt=200&beforeDocumentId=document-a", "beforeUploadedAt=9007199254740992&beforeDocumentId=document-a"]) {
+    expect((await fetch(`${urls.inbox}?${query}`, { headers: authorized })).status).toBe(400);
+  }
+  expect(reads).toBe(0);
+  const response = await fetch(`${urls.inbox}?beforeUploadedAt=100&beforeDocumentId=document-a&userId=other&householdId=other`, { headers: authorized });
+  expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ documents: [], nextCursor: null }); expect(reads).toBe(1);
+});
 
 it("requires cookie, origin and CSRF preflight before parsing either mutation body", async () => {
   const mustNotWrite = () => { throw new Error("Must not write"); };

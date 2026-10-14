@@ -238,3 +238,17 @@ returns the observed day revision with source hash/page count. Ordinary history
 and MCP still exclude proposals. HTTP regressions use independently invented
 repository doubles; the SQLite read regression remains gated on migration
 approval. The router is not mounted in the private production runtime yet.
+
+The candidate private inbox returns up to 20 clean inspected records per page,
+using upload-time/document-ID cursors for stable ties. It labels upload time
+separately from proposed care days. Adult owners can see profile intake; current
+contributors can see their own uploads. Proposal pointers are limited to their
+author and adult owner. Scoped reads run inside one SQLite read transaction;
+revoked intake permission removes contributor inbox access. The HTTP cursor gate
+rejects partial, repeated and unsafe values. The synthetic SQLite pagination and
+revocation test is written but remains unrun pending migration approval.
+The browser API client encodes the profile/document/cursor fields, sends only
+explicit care-day decisions with CSRF and the observed day revision, and marks
+network failures, server failures and unparseable mutation replies as unconfirmed.
+It never automatically retries a mutation. This client is not yet a complete
+inbox/review interface or evidence of a deployed workflow.
