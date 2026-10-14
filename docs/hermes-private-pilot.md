@@ -405,3 +405,16 @@ declared frames. An approved-image repository query additionally requires source
 permission plus current visible publication; own intake rights are insufficient.
 Its SQL regression is written but remains gated on migration approval. No MCP
 image tool or production activation is enabled by this socket work.
+
+On October 14, `bd86dc3` built on Hermes as parser image
+`sha256:69d37dcae23f5c370eaac57459cc6f25d0e574ab665cda9129b85a0a8f16bd03`.
+A fresh UID/GID 10002:10003 worker had networking disabled, read-only root,
+512 MiB memory cap, one synthetic socket volume and a 480-second lifetime bound.
+Its control health check passed. A separate network-disabled UID/GID
+10001:10003 client generated an image and confirmed a source-bound rendition
+larger than the inspection reply limit plus corruption denial. Another generated
+probe confirmed PNG/JPEG acceptance and truncated-image/PDF denial. Both clients
+exited 0 without OOM. The exact worker identity/image/label/mount were rechecked
+before stopping it; containers and volume are retained. No database or records
+were mounted. This proves target-host decoder transport for generated inputs,
+not database authorization, MCP/client integration or the full deployed workflow.
