@@ -332,6 +332,22 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     ).get(input.userId, input.householdId, input.careProfileId, input.documentId) ?? null;
   }
 
+  async readApprovedImageReference(input: {
+    householdId: string; userId: string; careProfileId: string; documentId: string;
+  }): Promise<OriginalImageReference | null> {
+    return this.db.prepare<[string, string, string, string], OriginalImageReference>(
+      "SELECT d.source_sha256 sourceSha256, s.byte_size byteSize, s.media_type mediaType " +
+      "FROM documents d JOIN source_objects s ON s.sha256 = d.source_sha256 " +
+      "JOIN care_profiles p ON p.id = d.care_profile_id AND p.archived_at IS NULL " +
+      "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
+      "WHERE p.household_id = ? AND p.id = ? AND d.id = ? AND d.archived_at IS NULL " +
+      "AND d.scan_verdict = 'clean' AND d.page_count = 1 AND d.status IN ('needs_review', 'complete') " +
+      "AND s.media_type IN ('image/png', 'image/jpeg') AND " + VISIBLE_PUBLISHED_SOURCE + " " +
+      "AND ((u.role = 'owner' AND u.member_kind = 'adult') OR EXISTS " +
+      "(SELECT 1 FROM current_document_access a WHERE a.document_id = d.id AND a.care_profile_id = p.id AND a.subject_user_id = u.id))",
+    ).get(input.userId, input.householdId, input.careProfileId, input.documentId) ?? null;
+  }
+
   async listDocumentInbox(input: {
     householdId: string; userId: string; careProfileId: string; before?: DocumentInboxCursor;
   }): Promise<{ documents: InboxDocument[]; nextCursor: DocumentInboxCursor | null }> {

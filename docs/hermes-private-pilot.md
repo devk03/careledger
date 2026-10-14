@@ -393,3 +393,15 @@ Server typecheck/build and 30 focused decoder/process/parser tests passed after
 this bridge change. A fresh supervisor-only process loaded its module without
 Sharp/libvips native libraries. This is local IPC evidence, not target-host
 image-rendering or database-backed source authorization acceptance.
+
+The parser socket now recognizes an explicit rendition purpose while preserving
+the ordinary 2 KiB inspection reply bound and existing inspection behavior. The
+worker shares one bounded job slot across inspection/rendering and launches the
+same trusted short-lived decoder child. The rendition client validates its
+trusted socket, exact request envelope, frame length, input/output digests and
+bounded result. Generated Unix-socket tests cover a response larger than the
+inspection limit, corrupt input, unsafe directories, forged digests and oversized
+declared frames. An approved-image repository query additionally requires source
+permission plus current visible publication; own intake rights are insufficient.
+Its SQL regression is written but remains gated on migration approval. No MCP
+image tool or production activation is enabled by this socket work.

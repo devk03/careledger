@@ -141,8 +141,17 @@ describe("fictional v7 family timeline", () => {
       writer.prepare("INSERT INTO source_objects (sha256, byte_size, media_type, created_at) VALUES (?, 20, 'image/png', 201)").run(imageHash);
       writer.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, page_count, status, uploaded_by, uploaded_at) " +
         "VALUES ('image-original-a', 'profile-a', ?, 'Invented original.png', 'clean', 1, 'needs_review', 'child-a', 201)").run(imageHash);
+      writer.prepare("INSERT INTO document_pages (document_id, page_number, created_at) VALUES ('image-original-a', 1, 201)").run();
       const source = { ...scope, documentId: "image-original-a" };
       expect(await reader.readOriginalImageReference(source)).toEqual({ sourceSha256: imageHash, byteSize: 20, mediaType: "image/png" });
+      expect(await reader.readApprovedImageReference(source)).toBeNull();
+      const imageProposal = mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a", documentId: "image-original-a", careDay: "2030-04-17", nowSeconds: 202 });
+      if (!imageProposal.ok) throw new Error("Expected synthetic image proposal");
+      expect(await reader.readApprovedImageReference(source)).toBeNull();
+      expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: imageProposal.revisionId,
+        expectedDayRevision: 0, decision: "accepted", nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect(await reader.readApprovedImageReference(source)).toEqual({ sourceSha256: imageHash, byteSize: 20, mediaType: "image/png" });
+      expect(await reader.readApprovedImageReference({ ...source, userId: "child-a" })).toBeNull();
       expect(await reader.readOriginalImageReference({ ...source, userId: "child-a" })).toBeTruthy();
       expect(await reader.readOriginalImageReference({ ...source, userId: "adult-a" })).toBeNull();
       expect(await reader.readOriginalImageReference({ ...source, householdId: "other-family" })).toBeNull();
@@ -150,9 +159,14 @@ describe("fictional v7 family timeline", () => {
       expect(mutations.grantDocumentAccess({ preflight, careProfileId: "profile-a", documentId: "image-original-a",
         subjectUserId: "adult-a", allowed: true, nowSeconds: 203 })).toMatchObject({ ok: true });
       expect(await reader.readOriginalImageReference({ ...source, userId: "adult-a" })).toBeTruthy();
+      expect(await reader.readApprovedImageReference({ ...source, userId: "adult-a" })).toBeNull(); // No published-day grant.
+      expect(mutations.grantDayAccess({ preflight, careProfileId: "profile-a", careDay: "2030-04-17", subjectUserId: "adult-a",
+        level: "view", nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect(await reader.readApprovedImageReference({ ...source, userId: "adult-a" })).toBeTruthy();
       expect(mutations.grantDocumentAccess({ preflight, careProfileId: "profile-a", documentId: "image-original-a",
         subjectUserId: "adult-a", allowed: false, nowSeconds: 203 })).toMatchObject({ ok: true });
       expect(await reader.readOriginalImageReference({ ...source, userId: "adult-a" })).toBeNull();
+      expect(await reader.readApprovedImageReference({ ...source, userId: "adult-a" })).toBeNull();
       expect(mutations.grantProfileIntake({ preflight, careProfileId: "profile-a", subjectUserId: "child-a", allowed: false, nowSeconds: 203 })).toMatchObject({ ok: true });
       expect((await reader.listDocumentInbox({ ...scope, userId: "child-a" })).documents).toEqual([]);
       expect(await reader.readOriginalImageReference({ ...source, userId: "child-a" })).toBeNull();

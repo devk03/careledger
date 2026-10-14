@@ -5,7 +5,8 @@ import { dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ImageDecodeResult, ImageMediaType } from "./imageDecoder.js";
-import { decodeImageInSubprocess } from "./imageDecodeProcess.js";
+import { decodeImageInSubprocess, renderImageInSubprocess } from "./imageDecodeProcess.js";
+import { MAX_RENDITION_REPLY_BYTES, type ImageRenditionResult } from "./imageRenditionProtocol.js";
 import { MAX_PARSER_HEADER_BYTES, MAX_PARSER_REPLY_BYTES, PARSER_WORKER_VERSION,
   parseParserRequestHeader, type ParserRequest } from "./parserProtocol.js";
 
@@ -21,6 +22,7 @@ export type ParserWorkerOptions = Readonly<{
 export type ParserWorkerDependencies = Readonly<{
   decodeImage?: (bytes: Uint8Array, mediaType: ImageMediaType,
     signal: AbortSignal) => Promise<ImageDecodeResult>;
+  renderImage?: (bytes: Uint8Array, mediaType: ImageMediaType, signal: AbortSignal) => Promise<ImageRenditionResult>;
   childScriptPath?: string;
   terminateProcess?: (exitCode: number) => never;
 }>;
@@ -33,9 +35,9 @@ async function assertPrivateSocketParent(path: string): Promise<void> {
     (parent.mode & 0o027) !== 0) throw new Error("UNSAFE_PARSER_SOCKET");
 }
 
-function replyFrame(value: object): Buffer {
+function replyFrame(value: object, maximum = MAX_PARSER_REPLY_BYTES): Buffer {
   const json = Buffer.from(JSON.stringify(value), "utf8");
-  if (json.length > MAX_PARSER_REPLY_BYTES) throw new Error("PARSER_REPLY_TOO_LARGE");
+  if (json.length > maximum) throw new Error("PARSER_REPLY_TOO_LARGE");
   const frame = Buffer.allocUnsafe(4 + json.length);
   frame.writeUInt32BE(json.length, 0);
   json.copy(frame, 4);
@@ -66,6 +68,8 @@ export async function startParserWorkerServer(
       timeoutMs, signal }));
   const terminateProcess = dependencies.terminateProcess ??
     ((exitCode: number): never => process.exit(exitCode));
+  const renderImage = dependencies.renderImage ?? ((bytes: Uint8Array, mediaType: ImageMediaType, signal: AbortSignal) =>
+    renderImageInSubprocess(bytes, mediaType, { scriptPath: childScriptPath, timeoutMs, signal }));
   let active = 0;
 
   const server = createServer({ allowHalfOpen: true }, (socket: Socket) => {
@@ -161,10 +165,15 @@ export async function startParserWorkerServer(
         } else if (boundRequest.mediaType === "application/pdf") {
           outcome = { verdict: "rejected", code: "UNSUPPORTED" };
         } else {
-          outcome = await decodeImage(boundPayload, boundRequest.mediaType, decodeAbort.signal);
+          outcome = boundRequest.purpose === "rendition"
+            ? await renderImage(boundPayload, boundRequest.mediaType, decodeAbort.signal)
+            : await decodeImage(boundPayload, boundRequest.mediaType, decodeAbort.signal);
         }
-        if (!socket.destroyed) socket.end(replyFrame({ ...boundRequest,
-          workerVersion: PARSER_WORKER_VERSION, ...outcome }));
+        const envelope = boundRequest.purpose === "rendition"
+          ? { ...boundRequest, workerVersion: PARSER_WORKER_VERSION, result: outcome }
+          : { ...boundRequest, workerVersion: PARSER_WORKER_VERSION, ...outcome };
+        if (!socket.destroyed) socket.end(replyFrame(envelope,
+          boundRequest.purpose === "rendition" ? MAX_RENDITION_REPLY_BYTES : MAX_PARSER_REPLY_BYTES));
       })().catch(() => socket.destroy()).finally(() => {
         processing = false;
         if (socket.destroyed) release();

@@ -18,7 +18,7 @@ export type ParserSocketOptions = Readonly<{
   maxConcurrentInspections?: number;
 }>;
 
-async function trustedSocketPath(path: string, workerUid: number): Promise<boolean> {
+export async function trustedParserSocketPath(path: string, workerUid: number): Promise<boolean> {
   try {
     const appUid = process.getuid?.();
     if (appUid === undefined) return false;
@@ -56,7 +56,7 @@ export function createParserSocketInspector(options: ParserSocketOptions): Struc
   return {
     async inspect(input, mediaType) {
       if (input.byteLength < 1 || input.byteLength > MAX_UPLOAD_BYTES ||
-        !await trustedSocketPath(options.socketPath, options.trustedWorkerUid) ||
+        !await trustedParserSocketPath(options.socketPath, options.trustedWorkerUid) ||
         active >= maxConcurrentInspections) return rejected;
       active += 1;
       try {

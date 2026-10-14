@@ -90,6 +90,12 @@ export interface OriginalImageRepository {
     householdId: string; userId: string; careProfileId: string; documentId: string;
   }): Promise<OriginalImageReference | null>;
 }
+export interface ApprovedImageRepository {
+  /** Source grant and a currently visible published snapshot are both required. */
+  readApprovedImageReference(input: {
+    householdId: string; userId: string; careProfileId: string; documentId: string;
+  }): Promise<OriginalImageReference | null>;
+}
 
 export interface PendingReviewRepository {
   /** No proposal content is returned; reviewer authority is rechecked on every call. */

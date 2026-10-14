@@ -4,6 +4,7 @@ import { z } from "zod";
 import { MAX_UPLOAD_BYTES, type AdmittedMediaType } from "./admission.js";
 import { INGEST_POLICY_VERSION, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS,
   MAX_PDF_OBJECTS, MAX_PDF_PAGE_POINTS, MAX_PDF_PAGES } from "./policy.js";
+import { MAX_RENDITION_REPLY_BYTES, parseImageRendition, type ImageRenditionResult } from "./imageRenditionProtocol.js";
 
 export const MAX_PARSER_HEADER_BYTES = 512;
 export const MAX_PARSER_REPLY_BYTES = 2048;
@@ -17,6 +18,7 @@ const common = {
   sha256: digest,
   byteSize: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
   mediaType: z.enum(["application/pdf", "image/jpeg", "image/png"]),
+  purpose: z.literal("rendition").optional(),
 };
 const requestSchema = z.strictObject(common);
 const replyCommon = { ...common, workerVersion: z.literal(PARSER_WORKER_VERSION) };
@@ -55,7 +57,7 @@ function parseJson(bytes: Uint8Array, maximum: number): unknown {
 }
 
 export function createParserRequest(input: {
-  mediaType: AdmittedMediaType; sha256: string; byteSize: number;
+  mediaType: AdmittedMediaType; sha256: string; byteSize: number; purpose?: "rendition";
 }): ParserRequest {
   const parsed = requestSchema.safeParse({
     ...input,
@@ -86,14 +88,25 @@ export function parseParserRequestHeader(bytes: Uint8Array): ParserRequest {
 
 /** Rejects unknown fields and replies not bound to the exact request. */
 export function parseParserReply(bytes: Uint8Array, expected: ParserRequest): ParserReply {
+  if (expected.purpose !== undefined) throw new ParserProtocolError();
   const expectedResult = requestSchema.safeParse(expected);
   const parsed = replySchema.safeParse(parseJson(bytes, MAX_PARSER_REPLY_BYTES));
   if (!expectedResult.success || !parsed.success) throw new ParserProtocolError();
   for (const key of ["protocolVersion", "requestId", "policyVersion", "sha256",
-    "byteSize", "mediaType"] as const) {
+    "byteSize", "mediaType", "purpose"] as const) {
     if (parsed.data[key] !== expectedResult.data[key]) throw new ParserProtocolError();
   }
   if (parsed.data.verdict === "safe" && parsed.data.mediaType !== "application/pdf" &&
     parsed.data.width * parsed.data.height > MAX_IMAGE_PIXELS) throw new ParserProtocolError();
   return parsed.data;
+}
+
+export function parseParserRenditionReply(bytes: Uint8Array, expected: ParserRequest): ImageRenditionResult {
+  const schema = z.strictObject({ ...replyCommon, purpose: z.literal("rendition"), result: z.unknown() });
+  const request = requestSchema.safeParse(expected);
+  const parsed = schema.safeParse(parseJson(bytes, MAX_RENDITION_REPLY_BYTES));
+  if (!request.success || expected.purpose !== "rendition" || !parsed.success) throw new ParserProtocolError();
+  for (const key of ["protocolVersion", "requestId", "policyVersion", "sha256", "byteSize", "mediaType", "purpose"] as const)
+    if (parsed.data[key] !== expected[key]) throw new ParserProtocolError();
+  return parseImageRendition(parsed.data.result, expected.sha256);
 }
