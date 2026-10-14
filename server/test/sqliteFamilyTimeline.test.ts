@@ -105,8 +105,25 @@ describe("fictional v7 family timeline", () => {
       expect((await reader.listDocumentInbox({ ...scope, before: first.nextCursor! })).documents.find(document => document.documentId === "inbox-00")?.pendingDayProposals)
         .toEqual([{ revisionId: proposed.revisionId, careDay: "2030-04-15" }]);
       expect((await reader.listDocumentInbox({ ...scope, userId: "child-a" })).documents[0]?.pendingDayProposals).toEqual([]);
+      const imageHash = "c".repeat(64);
+      writer.prepare("INSERT INTO source_objects (sha256, byte_size, media_type, created_at) VALUES (?, 20, 'image/png', 201)").run(imageHash);
+      writer.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, page_count, status, uploaded_by, uploaded_at) " +
+        "VALUES ('image-original-a', 'profile-a', ?, 'Invented original.png', 'clean', 1, 'needs_review', 'child-a', 201)").run(imageHash);
+      const source = { ...scope, documentId: "image-original-a" };
+      expect(await reader.readOriginalImageReference(source)).toEqual({ sourceSha256: imageHash, byteSize: 20, mediaType: "image/png" });
+      expect(await reader.readOriginalImageReference({ ...source, userId: "child-a" })).toBeTruthy();
+      expect(await reader.readOriginalImageReference({ ...source, userId: "adult-a" })).toBeNull();
+      expect(await reader.readOriginalImageReference({ ...source, householdId: "other-family" })).toBeNull();
+      expect(await reader.readOriginalImageReference({ ...scope, documentId: "document-a" })).toBeNull(); // PDF is never an image.
+      expect(mutations.grantDocumentAccess({ preflight, careProfileId: "profile-a", documentId: "image-original-a",
+        subjectUserId: "adult-a", allowed: true, nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect(await reader.readOriginalImageReference({ ...source, userId: "adult-a" })).toBeTruthy();
+      expect(mutations.grantDocumentAccess({ preflight, careProfileId: "profile-a", documentId: "image-original-a",
+        subjectUserId: "adult-a", allowed: false, nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect(await reader.readOriginalImageReference({ ...source, userId: "adult-a" })).toBeNull();
       expect(mutations.grantProfileIntake({ preflight, careProfileId: "profile-a", subjectUserId: "child-a", allowed: false, nowSeconds: 203 })).toMatchObject({ ok: true });
       expect((await reader.listDocumentInbox({ ...scope, userId: "child-a" })).documents).toEqual([]);
+      expect(await reader.readOriginalImageReference({ ...source, userId: "child-a" })).toBeNull();
     } finally { reader.close(); mutations.close(); writer.close(); }
   });
 

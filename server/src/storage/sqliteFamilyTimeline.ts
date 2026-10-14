@@ -7,7 +7,7 @@ import type { ApprovedPageRepository, CareProfileRepository, DayVersion, DayVers
   PendingNoteHint, PendingReviewHint, PendingReviewRepository,
   StoredPageChunk, TimelineDay, TimelineRepository, VisibleCareProfile } from "../timeline/types.js";
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
-import type { DocumentDayReviewDetail, DocumentInboxCursor, InboxDocument, NoteReviewDetail, NoteReviewRepository } from "../timeline/types.js";
+import type { DocumentDayReviewDetail, DocumentInboxCursor, InboxDocument, NoteReviewDetail, NoteReviewRepository, OriginalImageReference } from "../timeline/types.js";
 
 const MIGRATIONS = [
   [1, "initial", "793dbf7dc872fe52f05e2f7e9294145898ea4f1f499816d304dd8e8b8190c501"],
@@ -299,6 +299,24 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     if (!row) return null;
     return { ...row, createdAt: new Date(row.createdAt * 1000).toISOString(),
       attribution: "family_note", state: "proposed" };
+  }
+
+  async readOriginalImageReference(input: {
+    householdId: string; userId: string; careProfileId: string; documentId: string;
+  }): Promise<OriginalImageReference | null> {
+    return this.db.prepare<[string, string, string, string], OriginalImageReference>(
+      "SELECT d.source_sha256 sourceSha256, s.byte_size byteSize, s.media_type mediaType " +
+      "FROM documents d JOIN source_objects s ON s.sha256 = d.source_sha256 " +
+      "JOIN care_profiles p ON p.id = d.care_profile_id AND p.archived_at IS NULL " +
+      "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
+      "WHERE p.household_id = ? AND p.id = ? AND d.id = ? AND d.archived_at IS NULL " +
+      "AND d.scan_verdict = 'clean' AND d.page_count = 1 AND d.status IN ('needs_review', 'complete') " +
+      "AND s.media_type IN ('image/png', 'image/jpeg') AND (" +
+      "(u.role = 'owner' AND u.member_kind = 'adult') OR EXISTS (SELECT 1 FROM current_document_access a " +
+      "WHERE a.document_id = d.id AND a.care_profile_id = p.id AND a.subject_user_id = u.id) " +
+      "OR (d.uploaded_by = u.id AND EXISTS (SELECT 1 FROM current_profile_intake a " +
+      "WHERE a.care_profile_id = p.id AND a.subject_user_id = u.id)))",
+    ).get(input.userId, input.householdId, input.careProfileId, input.documentId) ?? null;
   }
 
   async listDocumentInbox(input: {

@@ -81,6 +81,15 @@ export interface DocumentInboxRepository {
     householdId: string; userId: string; careProfileId: string; before?: DocumentInboxCursor;
   }): Promise<{ documents: InboxDocument[]; nextCursor: DocumentInboxCursor | null }>;
 }
+export type OriginalImageReference = {
+  sourceSha256: string; byteSize: number; mediaType: "image/png" | "image/jpeg";
+};
+export interface OriginalImageRepository {
+  /** Private review source: owner, current source grant, or own active intake. */
+  readOriginalImageReference(input: {
+    householdId: string; userId: string; careProfileId: string; documentId: string;
+  }): Promise<OriginalImageReference | null>;
+}
 
 export interface PendingReviewRepository {
   /** No proposal content is returned; reviewer authority is rechecked on every call. */

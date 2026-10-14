@@ -252,3 +252,14 @@ explicit care-day decisions with CSRF and the observed day revision, and marks
 network failures, server failures and unparseable mutation replies as unconfirmed.
 It never automatically retries a mutation. This client is not yet a complete
 inbox/review interface or evidence of a deployed workflow.
+
+The candidate original-image route provides a private review prerequisite. It
+reads only a metadata-authorized PNG/JPEG hash from the immutable object tree,
+checks private ownership/permissions, exact length, signature and digest, then
+rechecks session identity and source authorization before returning bytes.
+It applies no-store/nosniff/same-origin image headers, opens no arbitrary path
+and holds one bounded original read at a time. PDFs are rejected. The repository
+allows an adult owner, current source grantee or uploader with active intake
+permission. This is a browser review route, not an MCP draft-read capability.
+Filesystem/HTTP regressions use generated images; database permission coverage
+and runtime mounting remain pending migration approval and integration.
