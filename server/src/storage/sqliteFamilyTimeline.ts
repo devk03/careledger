@@ -7,6 +7,7 @@ import type { ApprovedPageRepository, CareProfileRepository, DayVersion, DayVers
   PendingNoteHint, PendingReviewHint, PendingReviewRepository,
   StoredPageChunk, TimelineDay, TimelineRepository, VisibleCareProfile } from "../timeline/types.js";
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
+import type { NoteReviewDetail, NoteReviewRepository } from "../timeline/types.js";
 
 const MIGRATIONS = [
   [1, "initial", "793dbf7dc872fe52f05e2f7e9294145898ea4f1f499816d304dd8e8b8190c501"],
@@ -47,7 +48,7 @@ export class IncompatibleFamilyTimelineDatabase extends Error {
  * recheck user status and current grants, including after MCP connection setup.
  */
 export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRepository,
-  PendingReviewRepository, DayVersionRepository, CareProfileRepository, SessionRepository {
+  PendingReviewRepository, NoteReviewRepository, DayVersionRepository, CareProfileRepository, SessionRepository {
   private readonly db: Database.Database;
 
   constructor(path: string) {
@@ -264,6 +265,33 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     return rows.map((row) => ({ revisionId: row.revisionId,
       reviewRequestId: row.reviewRequestId, targetCareDay: row.targetCareDay,
       createdAt: new Date(row.createdAt * 1000).toISOString() }));
+  }
+
+  async readPendingNote(input: {
+    householdId: string; userId: string; careProfileId: string; revisionId: string;
+  }): Promise<NoteReviewDetail | null> {
+    const row = this.db.prepare<[string, string, string, string], {
+      revisionId: string; careDay: ISODate; body: string; authorLabel: string;
+      createdAt: number; expectedDayRevision: number;
+    }>(
+      "SELECT r.id revisionId, r.care_day careDay, r.body, author.display_name authorLabel, " +
+      "r.created_at createdAt, COALESCE((SELECT max(s.revision_no) FROM day_snapshots s " +
+      "JOIN day_nodes d ON d.id = s.day_node_id WHERE d.care_profile_id = p.id " +
+      "AND d.care_day = r.care_day), 0) expectedDayRevision " +
+      "FROM family_note_revisions r JOIN family_notes n ON n.id = r.note_id " +
+      "JOIN care_profiles p ON p.id = n.care_profile_id AND p.archived_at IS NULL " +
+      "JOIN users author ON author.id = r.created_by AND author.household_id = p.household_id " +
+      "JOIN users reviewer ON reviewer.id = ? AND reviewer.household_id = p.household_id " +
+      "AND reviewer.status = 'active' AND reviewer.member_kind = 'adult' " +
+      "WHERE p.household_id = ? AND p.id = ? AND r.id = ? AND r.care_day IS NOT NULL " +
+      "AND NOT EXISTS (SELECT 1 FROM family_note_reviews reviewed WHERE reviewed.revision_id = r.id) " +
+      "AND (reviewer.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access a " +
+      "WHERE a.care_profile_id = p.id AND a.care_day = r.care_day " +
+      "AND a.subject_user_id = reviewer.id AND a.level = 'publish'))",
+    ).get(input.userId, input.householdId, input.careProfileId, input.revisionId);
+    if (!row) return null;
+    return { ...row, createdAt: new Date(row.createdAt * 1000).toISOString(),
+      attribution: "family_note", state: "proposed" };
   }
 
   async listDayVersions(input: { householdId: string; userId: string;

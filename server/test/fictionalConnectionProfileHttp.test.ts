@@ -139,11 +139,13 @@ it("denies unauthenticated, cross-origin, wrong-host and invalid adult grants be
   expect(wrongHost).toBe(403);
   const duplicateAuth = await new Promise<number>((resolve, reject) => {
     const request = httpRequest(`${state.origin}/mcp`, {
-      method: "POST", headers: {
-        authorization: [`Bearer ${state.token}`, `Bearer ${state.token}`],
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      },
+      method: "POST", headers: [
+        "Host", new URL(state.origin).host,
+        "Authorization", `Bearer ${state.token}`,
+        "Authorization", `Bearer ${state.token}`,
+        "Content-Type", "application/json",
+        "Accept", "application/json, text/event-stream",
+      ],
     }, (response) => {
       response.resume();
       response.on("end", () => resolve(response.statusCode ?? 0));

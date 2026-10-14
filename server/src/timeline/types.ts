@@ -43,6 +43,20 @@ export type PendingReviewHint = { id: string; revisionId: string;
 export type PendingNoteHint = { revisionId: string; reviewRequestId: string | null;
   targetCareDay: ISODate; createdAt: string };
 
+/** Private proposal for human review; excluded from ordinary history/MCP. */
+export type NoteReviewDetail = {
+  revisionId: string; careDay: ISODate; body: string;
+  authorLabel: string; createdAt: string; expectedDayRevision: number;
+  attribution: "family_note"; state: "proposed";
+};
+
+export interface NoteReviewRepository {
+  /** Recheck active adult reviewer and publish rights in the same scoped read. */
+  readPendingNote(input: {
+    householdId: string; userId: string; careProfileId: string; revisionId: string;
+  }): Promise<NoteReviewDetail | null>;
+}
+
 export interface PendingReviewRepository {
   /** No proposal content is returned; reviewer authority is rechecked on every call. */
   listPendingChildReviews(input: {

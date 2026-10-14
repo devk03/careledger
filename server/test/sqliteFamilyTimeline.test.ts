@@ -75,6 +75,43 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("reveals pending note text only to a current authorized adult reviewer", async () => {
+    const { path, writer } = database();
+    writer.prepare("INSERT INTO family_notes (id, care_profile_id, created_by, created_at) " +
+      "VALUES ('pending-note', 'profile-a', 'child-a', 200)").run();
+    writer.prepare("INSERT INTO family_note_revisions (id, note_id, revision_no, care_day, " +
+      "body, created_by, created_at) VALUES ('pending-revision', 'pending-note', 1, " +
+      "'2030-04-12', 'Independent fictional pending note.', 'child-a', 200)").run();
+    const reader = new SqliteFamilyTimeline(path);
+    const input = { householdId: "family-a", careProfileId: "profile-a",
+      revisionId: "pending-revision" };
+    try {
+      const detail = await reader.readPendingNote({ ...input, userId: "owner-a" });
+      expect(detail).toMatchObject({ body: "Independent fictional pending note.",
+        careDay: "2030-04-12", expectedDayRevision: 1, state: "proposed",
+        attribution: "family_note", authorLabel: "Fictional child-a" });
+      expect(await reader.readPendingNote({ ...input, userId: "adult-a" })).toBeNull();
+      expect(await reader.readPendingNote({ ...input, userId: "child-a" })).toBeNull();
+      expect(await reader.readPendingNote({ ...input, userId: "owner-a",
+        householdId: "family-b" })).toBeNull();
+      expect(await reader.readPendingNote({ ...input, userId: "owner-a",
+        careProfileId: "other-profile" })).toBeNull();
+      expect(await reader.readPendingNote({ ...input, userId: "owner-a",
+        revisionId: "note-revision-a" })).toBeNull(); // Already reviewed.
+      writer.prepare("INSERT INTO day_access_events (id, care_profile_id, care_day, " +
+        "subject_user_id, event_no, level, actor_user_id, occurred_at) " +
+        "VALUES ('publish-grant', 'profile-a', '2030-04-12', 'adult-a', 2, 'publish', 'owner-a', 201)").run();
+      expect(await reader.readPendingNote({ ...input, userId: "adult-a" })).not.toBeNull();
+      writer.prepare("INSERT INTO day_access_events (id, care_profile_id, care_day, " +
+        "subject_user_id, event_no, level, actor_user_id, occurred_at) " +
+        "VALUES ('publish-revoked', 'profile-a', '2030-04-12', 'adult-a', 3, 'view', 'owner-a', 202)").run();
+      expect(await reader.readPendingNote({ ...input, userId: "adult-a" })).toBeNull();
+      writer.prepare("INSERT INTO family_note_reviews (id, revision_id, decision, reviewer_id, decided_at) " +
+        "VALUES ('pending-rejected', 'pending-revision', 'rejected', 'owner-a', 203)").run();
+      expect(await reader.readPendingNote({ ...input, userId: "owner-a" })).toBeNull();
+    } finally { reader.close(); writer.close(); }
+  });
+
   it("sets up the owner once with private bootstrap and recovery codes", async () => {
     const { path, writer } = emptyDatabase();
     const secretDirectory = mkdtempSync(join(tmpdir(), "adeno-fictional-bootstrap-"));

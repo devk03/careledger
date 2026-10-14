@@ -55,7 +55,7 @@ const setupToken = accounts.isSetupComplete() ? null : bootstrap.initialize();
 
 const app = createHttpApp({
   authenticate: cookieAuthenticator(timeline), timeline, pages: timeline,
-  profiles: timeline, reviews: timeline, versions: timeline, sessions: timeline,
+  profiles: timeline, reviews: timeline, noteReviews: timeline, versions: timeline, sessions: timeline,
   mutations, accounts, expectedOrigin: origin, readiness: () => timeline.ready(),
   ownerSetup: { bootstrap, recoveryPepper },
 });

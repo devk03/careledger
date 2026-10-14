@@ -1,6 +1,7 @@
 **
 !Dockerfile
 !Dockerfile.parser
+!Dockerfile.private-pilot
 !pyproject.toml
 !uv.lock
 !README.md

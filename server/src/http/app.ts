@@ -20,6 +20,7 @@ import {
 import type { ApprovedPageRepository, AuthorizedScope, CareProfileRepository,
   DayVersionRepository, PendingReviewRepository,
   TimelineRepository } from "../timeline/types.js";
+import type { NoteReviewRepository } from "../timeline/types.js";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthorizedScope | null>;
 export type DayAccessWriter = {
@@ -61,6 +62,8 @@ export function createHttpApp(dependencies: {
   accounts?: SqliteFamilyAccounts;
   sessions?: SessionRepository;
   reviews?: PendingReviewRepository;
+  noteReviews?: NoteReviewRepository;
+  allowInvitations?: boolean;
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
   readiness?: () => boolean;
@@ -68,6 +71,11 @@ export function createHttpApp(dependencies: {
 }) {
   const app = express();
   app.disable("x-powered-by");
+  if (dependencies.allowInvitations === false) {
+    app.use("/api/v2/auth/invitations", (_request, response) => {
+      response.status(404).json({ error: "NOT_FOUND" });
+    });
+  }
   app.use((_request, response, next) => {
     response.setHeader("Cache-Control", "no-store");
     next();
@@ -465,6 +473,18 @@ export function createHttpApp(dependencies: {
       });
       response.json({ pending: hints });
     });
+  }
+
+  if (dependencies.noteReviews !== undefined) {
+    app.get("/api/v2/care-profiles/:careProfileId/reviews/notes/:revisionId",
+      async (request, response) => {
+        const scope = await dependencies.authenticate(request);
+        if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+        const note = await dependencies.noteReviews!.readPendingNote({ ...scope,
+          careProfileId: request.params.careProfileId, revisionId: request.params.revisionId });
+        if (!note) { response.status(404).json({ error: "NOT_FOUND" }); return; }
+        response.json({ note });
+      });
   }
 
   if (dependencies.versions !== undefined) {
