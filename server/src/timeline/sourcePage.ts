@@ -49,9 +49,10 @@ export async function getApprovedSourcePage(
   });
   if (result === null) throw new SourcePageNotFound();
   if (result.documentId !== input.documentId || result.pageNumber !== input.pageNumber ||
-    result.offset !== offset || result.text.length > 6_000 ||
+    result.offset !== offset || result.text.length === 0 || result.text.length > 6_000 ||
     (result.nextOffset !== null &&
-      (!Number.isInteger(result.nextOffset) || result.nextOffset <= offset || result.nextOffset > 5_000_000)) ||
+      (!Number.isInteger(result.nextOffset) || result.nextOffset !== offset + result.text.length ||
+        result.nextOffset > 5_000_000)) ||
     !/^[0-9a-f]{64}$/.test(result.sourceSha256)) {
     throw new Error("Approved page repository returned invalid data");
   }

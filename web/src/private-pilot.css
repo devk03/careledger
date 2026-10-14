@@ -1,0 +1,8 @@
+.pilot-source-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pilot-source-digest {
+  overflow-wrap: anywhere;
+}

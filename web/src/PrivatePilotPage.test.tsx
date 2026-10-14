@@ -80,3 +80,55 @@ it("creates a profile through the protected API and opens note intake for it", a
   expect(creations).toEqual([{ preferredName: "Invented person" }]);
   expect(screen.getByRole("option", { name: "Invented person" })).toBeInTheDocument();
 });
+
+it("traverses earlier days and bounded source sections with immutable provenance", async () => {
+  const requests: string[] = [];
+  const text = "<script>fake document instructions</script>";
+  const day = { id: "day-a", careProfileId: "profile-a", day: "2030-04-12", revision: 1,
+    statements: [], sources: [{ documentId: "document-a", displayName: "Invented report",
+      uploadedAt: "2030-04-13T12:00:00Z", sourceSha256: "d".repeat(64), pageNumbers: [1] }] };
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    requests.push(path);
+    if (path === "/api/v2/auth/session") return json({ csrfToken: "fictional-csrf" });
+    if (path === "/api/v2/care-profiles") return json({ profiles: [{ id: "profile-a", preferredName: "Invented person" }] });
+    if (path.endsWith("reviews/notes/pending")) return json({ pending: [] });
+    if (path.includes("timeline/history")) return json({ throughDay: "9999-12-31", focusFromDay: null,
+      meaning: "currently_recorded_history", days: path.includes("&before=")
+        ? [{ ...day, id: "day-earlier", day: "2030-04-01", sources: [] }] : [day],
+      nextBeforeDay: path.includes("&before=") ? null : "2030-04-12" });
+    if (path.includes("documents/document-a/pages/1")) return json({ documentId: "document-a", pageNumber: 1,
+      sourceSha256: "d".repeat(64), offset: path.endsWith("offset=0") ? 0 : text.length,
+      text: path.endsWith("offset=0") ? text : "Next independently invented source section.",
+      nextOffset: path.endsWith("offset=0") ? text.length : null, sourceTextIsUntrusted: true });
+    throw new Error(`Unexpected API: ${path}`);
+  }));
+  const { container } = render(<PrivatePilotPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Load earlier days" }));
+  await screen.findByRole("heading", { name: "2030-04-01" });
+  expect(screen.getByRole("heading", { name: "2030-04-12" })).toBeInTheDocument();
+  expect(requests).toContain("/api/v2/care-profiles/profile-a/timeline/history?through=9999-12-31&before=2030-04-12");
+  fireEvent.click(screen.getByRole("button", { name: "Open Invented report, page 1" }));
+  await screen.findByText(text);
+  expect(container.querySelector("script")).toBeNull();
+  expect(screen.getByText("d".repeat(64))).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Read next source section" }));
+  await screen.findByText("Next independently invented source section.");
+  expect(requests).toContain(`/api/v2/care-profiles/profile-a/documents/document-a/pages/1?offset=${text.length}`);
+  expect(screen.queryByRole("button", { name: "Read next source section" })).toBeNull();
+});
+
+it("clears previously displayed sources when the care-day cutoff changes", async () => {
+  const requests: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+    requests.push(path);
+    if (path === "/api/v2/auth/session") return json({ csrfToken: "fictional-csrf" });
+    if (path === "/api/v2/care-profiles") return json({ profiles: [{ id: "profile-a", preferredName: "Invented person" }] });
+    if (path.endsWith("reviews/notes/pending")) return json({ pending: [] });
+    if (path.includes("timeline/history")) return json({ days: [], nextBeforeDay: null });
+    throw new Error(`Unexpected API: ${path}`);
+  }));
+  render(<PrivatePilotPage />);
+  fireEvent.change(await screen.findByLabelText("Through care day"), { target: { value: "2030-04-12" } });
+  await waitFor(() => expect(requests).toContain("/api/v2/care-profiles/profile-a/timeline/history?through=2030-04-12"));
+  expect(screen.getByText(/Currently recorded history through 2030-04-12/)).toBeInTheDocument();
+});

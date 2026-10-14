@@ -44,7 +44,12 @@ observed day revision. Profile creation now has an owner-only transactional
 writer, Origin/session/CSRF preflight route and UI form. HTTP/UI tests cover
 request boundaries and selecting the newly created profile. Database-backed
 ownership, audit and revocation assertions await migration approval.
-Durable file intake and complete history pagination remain work.
+The UI can traverse earlier days, select an inclusive care-day cutoff, and open
+bounded source text with document/page IDs and the original hash. Source text
+is rendered as text; cursor validation rejects skipped or repeated sections.
+The private runtime applies a self-only CSP, disallows framing/objects, and
+suppresses referrers. UI tests cover pagination, provenance and literal rendering
+of synthetic script-like text. Durable file intake remains work.
 
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for

@@ -7,6 +7,7 @@ import { BootstrapTokenStore } from "./auth/bootstrapTokenStore.js";
 import { cookieAuthenticator } from "./auth/cookieSession.js";
 import { SqliteFamilyAccounts } from "./auth/familyAccounts.js";
 import { createHttpApp } from "./http/app.js";
+import { privatePilotHeaders } from "./http/privatePilotHeaders.js";
 import { privatePilotConfig } from "./privatePilotConfig.js";
 import { SqliteFamilyMutations } from "./storage/sqliteFamilyMutations.js";
 import { SqliteFamilyTimeline } from "./storage/sqliteFamilyTimeline.js";
@@ -34,11 +35,14 @@ try {
   writeFileSync(pepperPath, recoveryPepper, { flag: "wx", mode: 0o600 });
 }
 if (!accounts.isSetupComplete()) bootstrap.initialize();
-const app = createHttpApp({ authenticate: cookieAuthenticator(timeline), timeline, pages: timeline,
+const app = express();
+app.disable("x-powered-by");
+app.use(privatePilotHeaders);
+app.use(createHttpApp({ authenticate: cookieAuthenticator(timeline), timeline, pages: timeline,
   profiles: timeline, reviews: timeline, noteReviews: timeline, versions: timeline,
   sessions: timeline, mutations, profileWriter: mutations, accounts, expectedOrigin: config.origin,
   ownerSetup: { bootstrap, recoveryPepper }, allowInvitations: false,
-  readiness: () => timeline.ready() });
+  readiness: () => timeline.ready() }));
 app.use(express.static(config.webRoot, { index: false, dotfiles: "deny", redirect: false }));
 app.get("/", (_request, response) => { response.redirect(302, "/pilot"); });
 app.get("/pilot", (_request, response) => {

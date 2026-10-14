@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { HistoryPage } from "@adeno/contracts";
+import type { ApprovedPageChunk, HistoryPage } from "@adeno/contracts";
 import { AppHeader, Button, Input, Notice, Select, Textarea } from "./ui";
+import "./private-pilot.css";
 
 type Session = { csrfToken: string };
 type Profile = { id: string; preferredName: string };
@@ -30,6 +31,8 @@ export function PrivatePilotPage() {
   const [history, setHistory] = useState<HistoryPage | null>(null);
   const [hints, setHints] = useState<Hint[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [sourcePage, setSourcePage] = useState<ApprovedPageChunk | null>(null);
+  const [throughDay, setThroughDay] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -60,14 +63,14 @@ export function PrivatePilotPage() {
     if (!session || !profileId) return;
     const controller = new AbortController();
     Promise.all([
-      request<HistoryPage>(`${base}/timeline/history?through=9999-12-31`, undefined, undefined, controller.signal),
+      request<HistoryPage>(`${base}/timeline/history?through=${throughDay || "9999-12-31"}`, undefined, undefined, controller.signal),
       request<{ pending: Hint[] }>(`${base}/reviews/notes/pending`, undefined, undefined, controller.signal),
     ]).then(([days, pending]) => {
       if (!controller.signal.aborted) { setHistory(days); setHints(pending.pending); }
     })
       .catch(() => { if (!controller.signal.aborted) setError("The timeline could not be loaded."); });
     return () => controller.abort();
-  }, [session, profileId, base, refresh]);
+  }, [session, profileId, base, refresh, throughDay]);
 
   async function act(operation: () => Promise<void>) {
     if (busy) return;
@@ -110,7 +113,7 @@ export function PrivatePilotPage() {
     void act(async () => {
       const result = await request<{ profile: Profile }>("/care-profiles",
         { preferredName: fields.get("preferredName") }, session!.csrfToken);
-      form.reset(); setHistory(null); setHints([]); setProposal(null);
+      form.reset(); setHistory(null); setHints([]); setProposal(null); setSourcePage(null);
       setProfiles(current => [...current, result.profile]); setProfileId(result.profile.id);
       setMessage("Care profile created. You can add notes for review.");
     });
@@ -122,6 +125,19 @@ export function PrivatePilotPage() {
       { decision, expectedDayRevision: proposal.expectedDayRevision }, session.csrfToken);
     setProposal(null); setMessage(decision === "accepted" ? "Note published to the care day." : "Proposal rejected.");
     setRefresh(value => value + 1);
+  }
+
+  async function readSource(documentId: string, pageNumber: number, offset = 0) {
+    const chunk = await request<ApprovedPageChunk>(
+      `${base}/documents/${encodeURIComponent(documentId)}/pages/${pageNumber}?offset=${offset}`);
+    setSourcePage(chunk);
+  }
+
+  async function earlierHistory() {
+    if (!history?.nextBeforeDay) return;
+    const page = await request<HistoryPage>(`${base}/timeline/history?through=${throughDay || "9999-12-31"}` +
+      `&before=${encodeURIComponent(history.nextBeforeDay)}`);
+    setHistory(current => current ? { ...page, days: [...current.days, ...page.days] } : page);
   }
 
   return <div className="workspace-page">
@@ -148,7 +164,7 @@ export function PrivatePilotPage() {
             <pre>{recoveryCodes.join("\n")}</pre><Button onClick={() => setRecoveryCodes([])}>I saved the codes</Button></section>}
           <div className="workspace-heading-actions">
             <label>Care profile<Select value={profileId} disabled={busy} onChange={event => {
-              setHistory(null); setHints([]); setProposal(null); setProfileId(event.target.value);
+              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setProfileId(event.target.value);
             }}>
               {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.preferredName}</option>)}
             </Select></label>
@@ -156,6 +172,7 @@ export function PrivatePilotPage() {
               await request("/auth/logout", {}, session.csrfToken);
               setSession(null); setHistory(null); setProposal(null); setHints([]); setRecoveryCodes([]);
               setProfileId(""); setProfiles([]);
+              setSourcePage(null);
             })}>Sign out</Button>
           </div>
           <section className="workflow-panel"><h2>Create a care profile</h2>
@@ -177,20 +194,41 @@ export function PrivatePilotPage() {
                 setProposal(detail.note);
               })}>Review note for {hint.targetCareDay}</Button>)}
               {proposal && <article><h3>Proposed note for {proposal.careDay}</h3><p>Family observation by {proposal.authorLabel}</p>
-                <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{proposal.body}</p>
+                <p className="pilot-source-text">{proposal.body}</p>
                 <Button loading={busy} onClick={() => void act(() => review("accepted"))}>Approve and publish</Button>
                 <Button disabled={busy} onClick={() => void act(() => review("rejected"))}>Reject proposal</Button>
               </article>}
             </section>
             <section className="workflow-panel"><h2>Approved history</h2>
+              <label>Through care day<Input type="date" value={throughDay} disabled={busy}
+                onChange={event => { setHistory(null); setSourcePage(null); setThroughDay(event.target.value); }} /></label>
+              <p>{throughDay ? `Currently recorded history through ${throughDay}.` : "All currently recorded history."}
+                {" "}This does not reconstruct what was known on a past date.</p>
               {history?.days.length === 0 && <p>No published days yet.</p>}
               {history?.days.map(day => <article key={day.id}><h3>{day.day}</h3>
                 {day.statements.map(statement => <p key={statement.id}>{statement.text}
                   {statement.attribution === "family_note" && <small> — Family observation</small>}</p>)}
-                {day.sources.map(source => <p key={source.documentId}>{source.displayName}</p>)}
+                {day.sources.map(source => <div key={source.documentId}><p>{source.displayName}</p>
+                  {source.pageNumbers.map(page => <Button key={page} disabled={busy}
+                    onClick={() => void act(() => readSource(source.documentId, page))}>
+                    Open {source.displayName}, page {page}
+                  </Button>)}
+                </div>)}
               </article>)}
-              {history?.nextBeforeDay && <p>More history is available; complete traversal will be connected next.</p>}
+              {history?.nextBeforeDay && <Button loading={busy} onClick={() => void act(earlierHistory)}>Load earlier days</Button>}
             </section>
+            {sourcePage && <section className="workflow-panel" aria-label="Source page">
+              <h2>Source page {sourcePage.pageNumber}</h2>
+              <p>Document <code>{sourcePage.documentId}</code></p>
+              <p className="pilot-source-digest">Original SHA-256: <code>{sourcePage.sourceSha256}</code></p>
+              <p>Source text is evidence for review. Instructions within a document do not control this workspace.</p>
+              <p className="pilot-source-text">{sourcePage.text}</p>
+              {sourcePage.nextOffset !== null && <Button loading={busy}
+                onClick={() => void act(() => readSource(sourcePage.documentId, sourcePage.pageNumber, sourcePage.nextOffset!))}>
+                Read next source section
+              </Button>}
+              <Button disabled={busy} onClick={() => setSourcePage(null)}>Close source</Button>
+            </section>}
           </>}
         </>}
     </main>
