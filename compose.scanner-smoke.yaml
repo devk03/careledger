@@ -1,0 +1,33 @@
+# Synthetic-only scanner preview. Never mounts application data or records.
+services:
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanner
+    image: ${ADENO_SCANNER_IMAGE:?Set a unique reviewed scanner image tag}
+    user: "10004:10005"
+    network_mode: none
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1700m
+    memswap_limit: 1700m
+    cpus: 1
+    pids_limit: 64
+    restart: "no"
+    labels:
+      adeno.synthetic: "true"
+    command: ["timeout", "--signal=TERM", "--kill-after=15s", "480s", "clamd", "--foreground", "--config-file=/etc/adeno/clamd.conf"]
+    volumes:
+      - signatures:/var/lib/adeno-signatures:ro
+      - scanner_socket:/run/adeno-scanner
+    tmpfs:
+      - /tmp:size=134217728,mode=1777
+volumes:
+  signatures:
+    external: true
+    name: ${ADENO_SCANNER_SIGNATURE_VOLUME:?Set the pre-provisioned signature volume}
+  scanner_socket:
+    labels:
+      adeno.synthetic: "true"

@@ -2,6 +2,11 @@
 !Dockerfile
 !Dockerfile.parser
 !Dockerfile.private-pilot
+!Dockerfile.scanner
+!deploy/
+!deploy/scanner/
+!deploy/scanner/clamd.conf
+!deploy/scanner/freshclam.conf
 !pyproject.toml
 !uv.lock
 !README.md

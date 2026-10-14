@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdtemp } from "node:fs/promises";
+import { chmod, mkdtemp, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -54,6 +54,19 @@ async function close(server: Server) {
 }
 
 describe("local clamd INSTREAM adapter", () => {
+  it("denies writable socket directories and symlinked endpoints even when the daemon would return clean", async () => {
+    const daemon = await fakeDaemon(Buffer.from("stream: OK\0"));
+    try {
+      const alias = join(daemon.socketPath, "..", "alias.sock");
+      await symlink(daemon.socketPath, alias);
+      await expect(createClamdScanner({ socketPath: alias }).scan(fictionalBytes, "image/png"))
+        .resolves.toMatchObject({ verdict: "unavailable" });
+      await chmod(join(daemon.socketPath, ".."), 0o777);
+      await expect(createClamdScanner({ socketPath: daemon.socketPath, trustedWorkerUid: process.getuid?.() ?? 10004 }).scan(fictionalBytes, "image/png"))
+        .resolves.toMatchObject({ verdict: "unavailable" });
+    } finally { await close(daemon.server); }
+  });
+
   it("returns clean only after a complete protocol success response", async () => {
     const daemon = await fakeDaemon(Buffer.from("stream: OK\0"));
     try {

@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+# Install into this image only; never start an updater or daemon during build.
+RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
+    && chmod 0755 /usr/sbin/policy-rc.d \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       clamav-daemon=1.5.4+dfsg-0ubuntu0.24.04.1 \
+       clamav-freshclam=1.5.4+dfsg-0ubuntu0.24.04.1 ca-certificates \
+    && groupadd --gid 10005 adeno-scanner-socket \
+    && useradd --uid 10004 --gid 10005 --no-create-home --home-dir /nonexistent adeno-scanner \
+    && install -d -o 10004 -g 10005 -m 0710 /run/adeno-scanner \
+    && install -d -o 10004 -g 10005 -m 0700 /var/lib/adeno-signatures \
+    && command -v timeout && command -v clamd && command -v freshclam
+COPY deploy/scanner/clamd.conf /etc/adeno/clamd.conf
+COPY deploy/scanner/freshclam.conf /etc/adeno/freshclam.conf
+USER 10004:10005
+# Requires pre-provisioned official signatures. The daemon opens no TCP port.
+CMD ["clamd", "--foreground", "--config-file=/etc/adeno/clamd.conf"]

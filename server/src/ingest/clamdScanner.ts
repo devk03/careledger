@@ -13,6 +13,7 @@ export type ClamdScannerOptions = Readonly<{
   socketPath: string;
   timeoutMs?: number;
   maxConcurrentScans?: number;
+  trustedWorkerUid?: number;
 }>;
 
 function write(socket: Socket, bytes: Buffer): Promise<void> {
@@ -30,15 +31,15 @@ function parseReply(reply: Buffer): "clean" | "detected" | "unavailable" {
   return "unavailable";
 }
 
-async function trustedSocketPath(socketPath: string): Promise<boolean> {
+async function trustedSocketPath(socketPath: string, workerUid?: number): Promise<boolean> {
   try {
     const uid = process.getuid?.();
     if (uid === undefined) return false;
     const [parent, socket] = await Promise.all([lstat(dirname(socketPath)), lstat(socketPath)]);
+    const trusted = (owner: number) => owner === uid || owner === 0 || owner === workerUid;
     return parent.isDirectory() && socket.isSocket() &&
       (parent.mode & 0o022) === 0 &&
-      (parent.uid === uid || parent.uid === 0) &&
-      (socket.uid === uid || socket.uid === 0);
+      trusted(parent.uid) && trusted(socket.uid);
   } catch {
     return false;
   }
@@ -52,6 +53,8 @@ async function trustedSocketPath(socketPath: string): Promise<boolean> {
  */
 export function createClamdScanner(options: ClamdScannerOptions): MalwareScanner {
   if (!isAbsolute(options.socketPath)) throw new Error("CLAMD_SOCKET_MUST_BE_ABSOLUTE");
+  if (options.trustedWorkerUid !== undefined && (!Number.isSafeInteger(options.trustedWorkerUid) || options.trustedWorkerUid < 0))
+    throw new Error("INVALID_CLAMD_WORKER_UID");
   const timeoutMs = options.timeoutMs ?? 30_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000)
     throw new Error("INVALID_CLAMD_TIMEOUT");
@@ -64,7 +67,7 @@ export function createClamdScanner(options: ClamdScannerOptions): MalwareScanner
     async scan(input) {
       if (input.byteLength < 1 || input.byteLength > MAX_UPLOAD_BYTES)
         return { verdict: "unavailable", engine: ENGINE };
-      if (!await trustedSocketPath(options.socketPath))
+      if (!await trustedSocketPath(options.socketPath, options.trustedWorkerUid))
         return { verdict: "unavailable", engine: ENGINE };
       if (activeScans >= maxConcurrentScans)
         return { verdict: "unavailable", engine: ENGINE };
