@@ -94,6 +94,13 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     ).get(careProfileId, householdId) !== undefined;
   }
 
+  async isActiveAdult(input: { userId: string; householdId: string }): Promise<boolean> {
+    return this.db.prepare<[string, string]>(
+      "SELECT 1 FROM users WHERE id = ? AND household_id = ? " +
+      "AND status = 'active' AND member_kind = 'adult'",
+    ).get(input.userId, input.householdId) !== undefined;
+  }
+
   async listVisibleCareProfiles(input: { householdId: string; userId: string }):
     Promise<VisibleCareProfile[]> {
     return this.db.prepare<[string, string], { id: string; preferredName: string }>(

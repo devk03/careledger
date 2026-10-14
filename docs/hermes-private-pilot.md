@@ -120,6 +120,21 @@ are bounded and deny symlinks/unsafe permissions. Issuance is serialized with a
 512-entry cap. Filesystem tests cover these boundaries; browser approval,
 database-backed identity and a real SSH/client setup are still unproven.
 
+`runPrivateMcp.ts` is the candidate read-only stdio entrypoint for SSH. It
+requires explicit transport opt-in, a strictly formatted grant ID, the private
+runtime configuration, an existing compatible database and a live adult account.
+It opens no network listener and issues no grants. Every read reloads grant/session
+authorization; protocol input is capped at 256 KiB and process lifetime at one
+hour. Startup failure writes one generic stderr line, never stdout credentials.
+A real stdio SDK client passed initialization, cited synthetic history/source
+reads and post-revocation denial using invented repository fixtures. CLI tests
+deny malformed/missing arguments. These tests do not prove browser approval,
+durable database authorization, Hermes SSH setup or actual Codex interoperability.
+A second real-process test uses the actual private grant files and observes a
+durable revocation marker written by another process context. Its session reader
+is still a fictional repository double, so this is grant-file/stdio evidence,
+not the missing SQLite/browser acceptance run.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.

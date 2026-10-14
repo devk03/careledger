@@ -267,6 +267,9 @@ describe("fictional v7 family timeline", () => {
     const input = { householdId: "family-a", careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 };
     try {
       const owner = await reader.listApprovedDays({ ...input, userId: "owner-a" });
+      expect(await reader.isActiveAdult({ householdId: "family-a", userId: "owner-a" })).toBe(true);
+      expect(await reader.isActiveAdult({ householdId: "family-a", userId: "child-a" })).toBe(false);
+      expect(await reader.isActiveAdult({ householdId: "other-family", userId: "owner-a" })).toBe(false);
       expect(owner[0]?.sources[0]?.displayName).toBe("fictional.pdf");
       expect(owner[0]?.statements[0]?.text).toBe("Fictional family note.");
       const adult = await reader.listApprovedDays({ ...input, userId: "adult-a" });
