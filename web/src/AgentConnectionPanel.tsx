@@ -12,7 +12,8 @@ async function agentRequest<T>(path: string, csrfToken: string, body?: unknown, 
 }
 function instruction(id: string) {
   return `Connect this assistant to my private adeno workspace with MCP over stdio.\nCommand: ssh\nArguments: ${JSON.stringify([
-    "-T", "-o", "BatchMode=yes", "hermes", "sudo", "-n", "docker", "exec", "-i", "--env",
+    "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1",
+    "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "hermes", "sudo", "-n", "docker", "exec", "-i", "--env",
     "ADENO_MCP_TRANSPORT=ssh-stdio", "adeno-private", "node", "server/dist/runPrivateMcp.js", id,
   ])}\nThen call get_connection_profile and show me the account, family and scopes. Do not ask for a password, API key or recovery code. If this client cannot configure a local stdio MCP server, tell me plainly.`;
 }
@@ -57,7 +58,7 @@ export function AgentConnectionPanel({ csrfToken }: { csrfToken: string }) {
   }
   return <section className="workflow-panel"><h2>Connect your assistant</h2>
     <p>This private connection uses your existing SSH access to Hermes and reads approved history and permitted source pages.
-      Your assistant and its provider may receive selected record text. adeno remains server-readable.</p>
+      Your assistant and its provider may receive selected record text and source images. adeno remains server-readable.</p>
     <p>Disconnect blocks future tool calls. It cannot erase content already received by your assistant.</p>
     {!available && <Notice>Assistant approval is unavailable on this installation.</Notice>}
     {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}

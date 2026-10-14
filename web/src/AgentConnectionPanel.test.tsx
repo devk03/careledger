@@ -36,6 +36,10 @@ it("requires explicit consent, shows a nonsecret setup instruction and supports 
   const instruction = screen.getByLabelText("Connection instruction") as HTMLTextAreaElement;
   expect(instruction.value).toContain(grantId);
   expect(instruction.value).toContain("get_connection_profile");
+  expect(instruction.value).toContain("ConnectTimeout=10");
+  expect(instruction.value).toContain("ConnectionAttempts=1");
+  expect(instruction.value).toContain("ServerAliveCountMax=2");
+  expect(screen.getByText(/provider may receive selected record text and source images/)).toBeVisible();
   expect(instruction.value).not.toContain("invented-csrf");
   fireEvent.click(screen.getByRole("button", { name: "Disconnect assistant" }));
   await screen.findByText("Assistant access disconnected.");
