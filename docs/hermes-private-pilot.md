@@ -69,6 +69,19 @@ abandoned files, and counts hard-link aliases once. It rejects unsafe permission
 symlinks, missing roots, excess entry/depth traversal, exhausted configured
 capacity and insufficient filesystem free space. Focused filesystem tests pass.
 
+The candidate HTTP intake router performs Origin/cookie/CSRF and intake-right
+checks before buffering one bounded binary request. It rejects PDFs, compression
+and malformed filename headers, preserves exact bytes and returns generic
+pipeline errors. HTTP tests cover permission denial, byte/name transfer,
+concurrent-request exclusion and slot release after failure. It is not yet
+mounted in the private runtime.
+
+`runSyntheticImageProbe.ts` generates its own PNG/JPEG bytes and checks the
+actual parser socket, truncation denial and PDF rejection. The health probe runs
+separately as the worker user, whose health socket is private. Neither accepts
+source documents. Hermes verification must run with network disabled, private
+socket-only mounts, non-root users and a worker lifetime under ten minutes.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.
