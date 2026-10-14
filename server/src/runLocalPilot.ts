@@ -56,7 +56,7 @@ const setupToken = accounts.isSetupComplete() ? null : bootstrap.initialize();
 const app = createHttpApp({
   authenticate: cookieAuthenticator(timeline), timeline, pages: timeline,
   profiles: timeline, reviews: timeline, noteReviews: timeline, versions: timeline, sessions: timeline,
-  mutations, accounts, expectedOrigin: origin, readiness: () => timeline.ready(),
+  mutations, profileWriter: mutations, accounts, expectedOrigin: origin, readiness: () => timeline.ready(),
   ownerSetup: { bootstrap, recoveryPepper },
 });
 const server = app.listen(port, "127.0.0.1", () => {

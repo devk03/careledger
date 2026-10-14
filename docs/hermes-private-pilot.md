@@ -40,8 +40,11 @@ synthetic Argon2 hash. This proves native runtime compatibility, not app startup
 The `/pilot` UI now implements the v2 login/setup, note-proposal and explicit
 review APIs, using the existing component library. UI tests verify password POST
 handling and publication only after reviewing the actual proposal with its
-observed day revision. It still lacks profile creation, durable file intake and
-complete history pagination; these are remaining work, not completed features.
+observed day revision. Profile creation now has an owner-only transactional
+writer, Origin/session/CSRF preflight route and UI form. HTTP/UI tests cover
+request boundaries and selecting the newly created profile. Database-backed
+ownership, audit and revocation assertions await migration approval.
+Durable file intake and complete history pagination remain work.
 
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for

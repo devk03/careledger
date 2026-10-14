@@ -75,6 +75,40 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("creates profiles only for a live adult owner session and audits the same transaction", async () => {
+    const { path, writer } = database();
+    const secret = Buffer.alloc(32, 4);
+    const token = "p".repeat(43);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, " +
+      "auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('profile-session', 'owner-a', ?, ?, 1, 100, 1000, 100)")
+      .run(sessionTokenSha256(token), secret);
+    const preflight = { ok: true as const, tokenSha256: sessionTokenSha256(token),
+      csrfToken: issueCsrfToken("profile-session", secret) };
+    const mutations = new SqliteFamilyMutations(path);
+    const reader = new SqliteFamilyTimeline(path);
+    try {
+      const result = mutations.createCareProfile({ preflight,
+        preferredName: "  Independently invented person  ", nowSeconds: 200 });
+      expect(result).toMatchObject({ ok: true, preferredName: "Independently invented person" });
+      if (!result.ok) throw new Error("Expected fictional owner creation");
+      expect(writer.prepare("SELECT household_id, created_by FROM care_profiles WHERE id = ?").get(result.id))
+        .toEqual({ household_id: "family-a", created_by: "owner-a" });
+      expect(writer.prepare("SELECT action, entity_id FROM audit_events ORDER BY sequence DESC LIMIT 1").get())
+        .toEqual({ action: "care_profile_created", entity_id: result.id });
+      expect(reader.ready()).toBe(true);
+      expect(await reader.listVisibleCareProfiles({ householdId: "family-a", userId: "owner-a" }))
+        .toContainEqual({ id: result.id, preferredName: "Independently invented person" });
+      const count = writer.prepare("SELECT count(*) total FROM care_profiles").get();
+      expect(mutations.createCareProfile({ preflight: { ...preflight, csrfToken: "wrong" },
+        preferredName: "Denied person", nowSeconds: 200 })).toMatchObject({ ok: false, error: "INVALID_CSRF" });
+      writer.prepare("UPDATE sessions SET revoked_at = 201 WHERE id = 'profile-session'").run();
+      expect(mutations.createCareProfile({ preflight, preferredName: "Denied person", nowSeconds: 202 }))
+        .toMatchObject({ ok: false, error: "AUTH_REQUIRED" });
+      expect(writer.prepare("SELECT count(*) total FROM care_profiles").get()).toEqual(count);
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
   it("reveals pending note text only to a current authorized adult reviewer", async () => {
     const { path, writer } = database();
     writer.prepare("INSERT INTO family_notes (id, care_profile_id, created_by, created_at) " +

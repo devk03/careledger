@@ -36,7 +36,7 @@ try {
 if (!accounts.isSetupComplete()) bootstrap.initialize();
 const app = createHttpApp({ authenticate: cookieAuthenticator(timeline), timeline, pages: timeline,
   profiles: timeline, reviews: timeline, noteReviews: timeline, versions: timeline,
-  sessions: timeline, mutations, accounts, expectedOrigin: config.origin,
+  sessions: timeline, mutations, profileWriter: mutations, accounts, expectedOrigin: config.origin,
   ownerSetup: { bootstrap, recoveryPepper }, allowInvitations: false,
   readiness: () => timeline.ready() });
 app.use(express.static(config.webRoot, { index: false, dotfiles: "deny", redirect: false }));

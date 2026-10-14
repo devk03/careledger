@@ -58,3 +58,25 @@ it("shows a proposal's actual text before an explicit approval with its observed
   expect(reviews).toEqual([{ decision: "accepted", expectedDayRevision: 3 }]);
   await waitFor(() => expect(screen.queryByText("Wholly invented family observation.")).toBeNull());
 });
+
+it("creates a profile through the protected API and opens note intake for it", async () => {
+  const creations: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (path: string, options?: RequestInit) => {
+    if (path === "/api/v2/auth/session") return json({ csrfToken: "fictional-csrf" });
+    if (path === "/api/v2/care-profiles") {
+      if (options?.method !== "POST") return json({ profiles: [] });
+      creations.push(JSON.parse(String(options.body)));
+      expect(options.headers).toMatchObject({ "x-csrf-token": "fictional-csrf" });
+      return json({ profile: { id: "new-profile", preferredName: "Invented person" } }, 201);
+    }
+    if (path.includes("/new-profile/timeline/history")) return json({ days: [], nextBeforeDay: null });
+    if (path.includes("/new-profile/reviews/notes/pending")) return json({ pending: [] });
+    throw new Error(`Unexpected API: ${path}`);
+  }));
+  render(<PrivatePilotPage />);
+  fireEvent.change(await screen.findByLabelText("Preferred name"), { target: { value: "Invented person" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+  await screen.findByRole("heading", { name: "Add a family note" });
+  expect(creations).toEqual([{ preferredName: "Invented person" }]);
+  expect(screen.getByRole("option", { name: "Invented person" })).toBeInTheDocument();
+});

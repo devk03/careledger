@@ -103,6 +103,19 @@ export function PrivatePilotPage() {
     });
   }
 
+  function createProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    void act(async () => {
+      const result = await request<{ profile: Profile }>("/care-profiles",
+        { preferredName: fields.get("preferredName") }, session!.csrfToken);
+      form.reset(); setHistory(null); setHints([]); setProposal(null);
+      setProfiles(current => [...current, result.profile]); setProfileId(result.profile.id);
+      setMessage("Care profile created. You can add notes for review.");
+    });
+  }
+
   async function review(decision: "accepted" | "rejected") {
     if (!proposal || !session) return;
     await request(`${base}/timeline/notes/${encodeURIComponent(proposal.revisionId)}/review`,
@@ -145,7 +158,13 @@ export function PrivatePilotPage() {
               setProfileId(""); setProfiles([]);
             })}>Sign out</Button>
           </div>
-          {!profileId ? <Notice>Create a care profile before adding notes. Profile setup is being connected.</Notice> : <>
+          <section className="workflow-panel"><h2>Create a care profile</h2>
+            <form onSubmit={createProfile}>
+              <label>Preferred name<Input name="preferredName" required maxLength={120} /></label>
+              <Button type="submit" loading={busy}>Create profile</Button>
+            </form>
+          </section>
+          {!profileId ? <Notice>Create a care profile before adding notes.</Notice> : <>
             <section className="workflow-panel"><h2>Add a family note</h2><form onSubmit={propose}>
               <label>Care day<Input name="careDay" type="date" required /></label>
               <label>What you observed<Textarea name="body" required maxLength={10000} /></label>

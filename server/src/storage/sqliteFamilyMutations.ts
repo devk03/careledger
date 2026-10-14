@@ -24,6 +24,9 @@ export type GrantResult =
 export type NoteProposalResult =
   | { ok: true; noteId: string; revisionId: string; reviewRequestId: string | null }
   | Extract<GrantResult, { ok: false }>;
+export type CareProfileCreationResult =
+  | { ok: true; id: string; preferredName: string }
+  | Extract<GrantResult, { ok: false }>;
 export type NoteReviewResult =
   | { ok: true; snapshotId: string | null; revision: number }
   | { ok: false; status: 401 | 403 | 404 | 409;
@@ -56,6 +59,27 @@ export class SqliteFamilyMutations {
   }
 
   close(): void { this.db.close(); }
+
+  createCareProfile(input: {
+    preflight: Extract<MutationPreflight, { ok: true }>;
+    preferredName: string; nowSeconds?: number;
+  }): CareProfileCreationResult {
+    const name = input.preferredName.trim();
+    if (!name || input.preferredName.length > 120) throw new RangeError("Invalid profile name");
+    return this.db.transaction((): CareProfileCreationResult => {
+      const actor = this.authorizeSession(input.preflight, input.nowSeconds);
+      if (!actor.ok) return actor;
+      if (actor.role !== "owner" || actor.memberKind !== "adult")
+        return { ok: false, status: 403, error: "FORBIDDEN" };
+      const id = randomUUID();
+      const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
+      this.db.prepare("INSERT INTO care_profiles (id, household_id, preferred_name, " +
+        "created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, actor.householdId, name, actor.userId, now, now);
+      this.audit(actor.householdId, actor.userId, "care_profile_created", "care_profile", id, now);
+      return { ok: true, id, preferredName: name };
+    }).immediate();
+  }
 
   grantDayAccess(input: {
     preflight: Extract<MutationPreflight, { ok: true }>;
@@ -293,6 +317,17 @@ export class SqliteFamilyMutations {
 
   private authorizeActor(preflight: Extract<MutationPreflight, { ok: true }>,
     careProfileId: string, nowSeconds?: number): AuthorizedActor | Extract<GrantResult, { ok: false }> {
+    const actor = this.authorizeSession(preflight, nowSeconds);
+    if (!actor.ok) return actor;
+    const profile = this.db.prepare<[string, string], { id: string }>(
+      "SELECT id FROM care_profiles WHERE id = ? AND household_id = ? AND archived_at IS NULL",
+    ).get(careProfileId, actor.householdId);
+    if (!profile) return { ok: false, status: 404, error: "NOT_FOUND" };
+    return actor;
+  }
+
+  private authorizeSession(preflight: Extract<MutationPreflight, { ok: true }>,
+    nowSeconds?: number): AuthorizedActor | Extract<GrantResult, { ok: false }> {
     const row = this.db.prepare<[string], SessionRow>(
       "SELECT s.id sessionId, u.household_id householdId, u.id userId, u.status userStatus, " +
       "s.auth_version sessionAuthVersion, u.auth_version userAuthVersion, " +
@@ -305,10 +340,6 @@ export class SqliteFamilyMutations {
       "SELECT role, member_kind memberKind FROM users WHERE id = ? AND status = 'active'",
     ).get(decision.session.scope.userId);
     if (!actor) return { ok: false, status: 401, error: "AUTH_REQUIRED" };
-    const profile = this.db.prepare<[string, string], { id: string }>(
-      "SELECT id FROM care_profiles WHERE id = ? AND household_id = ? AND archived_at IS NULL",
-    ).get(careProfileId, decision.session.scope.householdId);
-    if (!profile) return { ok: false, status: 404, error: "NOT_FOUND" };
     return { ok: true, userId: decision.session.scope.userId,
       householdId: decision.session.scope.householdId,
       role: actor.role, memberKind: actor.memberKind };

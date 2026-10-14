@@ -21,6 +21,7 @@ import type { ApprovedPageRepository, AuthorizedScope, CareProfileRepository,
   DayVersionRepository, PendingReviewRepository,
   TimelineRepository } from "../timeline/types.js";
 import type { NoteReviewRepository } from "../timeline/types.js";
+import type { SqliteFamilyMutations } from "../storage/sqliteFamilyMutations.js";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthorizedScope | null>;
 export type DayAccessWriter = {
@@ -58,6 +59,7 @@ export function createHttpApp(dependencies: {
   pages: ApprovedPageRepository;
   /** Only pass both fields for the trusted-local v7 family pilot. */
   mutations?: DayAccessWriter;
+  profileWriter?: Pick<SqliteFamilyMutations, "createCareProfile">;
   expectedOrigin?: string;
   accounts?: SqliteFamilyAccounts;
   sessions?: SessionRepository;
@@ -95,6 +97,29 @@ export function createHttpApp(dependencies: {
       if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
       response.json({ profiles: await dependencies.profiles!.listVisibleCareProfiles(scope) });
     });
+  }
+
+  if (dependencies.profileWriter !== undefined && dependencies.expectedOrigin !== undefined) {
+    app.post("/api/v2/care-profiles", express.json({ limit: "16kb", type: "application/json" }),
+      (request, response) => {
+        const preflight = preflightCookieMutation(request, dependencies.expectedOrigin!);
+        if (!preflight.ok) { response.status(preflight.status).json({ error: preflight.error }); return; }
+        const body: unknown = request.body;
+        if (typeof body !== "object" || body === null || Array.isArray(body) ||
+          typeof (body as Record<string, unknown>).preferredName !== "string") {
+          response.status(400).json({ error: "INVALID_BODY" }); return;
+        }
+        try {
+          const result = dependencies.profileWriter!.createCareProfile({ preflight,
+            preferredName: (body as { preferredName: string }).preferredName });
+          response.status(result.ok ? 201 : result.status).json(result.ok
+            ? { profile: { id: result.id, preferredName: result.preferredName } }
+            : { error: result.error });
+        } catch (error) {
+          if (error instanceof RangeError) response.status(400).json({ error: "INVALID_BODY" });
+          else throw error;
+        }
+      });
   }
 
   if (dependencies.accounts !== undefined && dependencies.sessions !== undefined &&
