@@ -34,6 +34,10 @@ export type NoteReviewResult =
   | { ok: true; snapshotId: string | null; revision: number }
   | { ok: false; status: 401 | 403 | 404 | 409;
       error: "AUTH_REQUIRED" | "INVALID_CSRF" | "FORBIDDEN" | "NOT_FOUND" | "STALE_REVISION" };
+export type DocumentPlacementProposalResult =
+  | { ok: true; placementId: string; revisionId: string; reviewRequestId: string | null }
+  | Extract<GrantResult, { ok: false }>
+  | { ok: false; status: 409; error: "DUPLICATE_PLACEMENT" };
 
 /**
  * A separate, opt-in writer for an already-migrated trusted local v7 database.
@@ -350,6 +354,114 @@ export class SqliteFamilyMutations implements TrustedIntakeRepository {
       this.audit(actor.householdId, actor.userId,
         input.decision === "accepted" ? "family_note_published" : "family_note_rejected",
         "family_note_revision", input.revisionId, now);
+      return { ok: true, snapshotId, revision };
+    }).immediate();
+  }
+
+  proposeDocumentDay(input: {
+    preflight: Extract<MutationPreflight, { ok: true }>; careProfileId: string;
+    documentId: string; careDay: string; nowSeconds?: number;
+  }): DocumentPlacementProposalResult {
+    parseISODate(input.careDay);
+    return this.db.transaction((): DocumentPlacementProposalResult => {
+      const actor = this.authorizeActor(input.preflight, input.careProfileId, input.nowSeconds);
+      if (!actor.ok) return actor;
+      const document = this.db.prepare<[string, string], { uploadedBy: string }>(
+        "SELECT uploaded_by uploadedBy FROM documents WHERE id = ? AND care_profile_id = ? " +
+        "AND archived_at IS NULL AND scan_verdict = 'clean' AND page_count > 0 " +
+        "AND status IN ('needs_review', 'complete')",
+      ).get(input.documentId, input.careProfileId);
+      if (!document) return { ok: false, status: 404, error: "NOT_FOUND" };
+      const intake = this.db.prepare<[string, string]>(
+        "SELECT 1 FROM current_profile_intake WHERE care_profile_id = ? AND subject_user_id = ?",
+      ).get(input.careProfileId, actor.userId) !== undefined;
+      const sourceAccess = actor.role === "owner" || (intake && document.uploadedBy === actor.userId) ||
+        this.db.prepare<[string, string]>("SELECT 1 FROM current_document_access WHERE document_id = ? AND subject_user_id = ?")
+          .get(input.documentId, actor.userId) !== undefined;
+      const dayAccess = actor.role === "owner" || intake || this.db.prepare<[string, string, string]>(
+        "SELECT 1 FROM current_day_access WHERE care_profile_id = ? AND care_day = ? " +
+        "AND subject_user_id = ? AND level IN ('contribute', 'publish')",
+      ).get(input.careProfileId, input.careDay, actor.userId) !== undefined;
+      if (!sourceAccess || !dayAccess) return { ok: false, status: 403, error: "FORBIDDEN" };
+      const duplicate = this.db.prepare<[string, string, string]>(
+        "SELECT 1 FROM document_day_placements p JOIN document_day_placement_revisions r ON r.placement_id = p.id " +
+        "LEFT JOIN document_day_placement_reviews v ON v.revision_id = r.id " +
+        "WHERE p.care_profile_id = ? AND p.document_id = ? AND r.care_day = ? " +
+        "AND r.is_retracted = 0 AND (v.decision IS NULL OR v.decision = 'accepted') LIMIT 1",
+      ).get(input.careProfileId, input.documentId, input.careDay);
+      if (duplicate) return { ok: false, status: 409, error: "DUPLICATE_PLACEMENT" };
+      const placementId = randomUUID(); const revisionId = randomUUID();
+      const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
+      this.db.prepare("INSERT INTO document_day_placements (id, care_profile_id, document_id, created_by, created_at) " +
+        "VALUES (?, ?, ?, ?, ?)").run(placementId, input.careProfileId, input.documentId, actor.userId, now);
+      this.db.prepare("INSERT INTO document_day_placement_revisions (id, placement_id, revision_no, care_day, created_by, created_at) " +
+        "VALUES (?, ?, 1, ?, ?, ?)").run(revisionId, placementId, input.careDay, actor.userId, now);
+      let reviewRequestId: string | null = null;
+      if (actor.memberKind === "child") {
+        reviewRequestId = randomUUID();
+        this.db.prepare("INSERT INTO child_review_requests (id, care_profile_id, target_care_day, proposed_by, placement_revision_id, created_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?)").run(reviewRequestId, input.careProfileId, input.careDay, actor.userId, revisionId, now);
+      }
+      this.audit(actor.householdId, actor.userId, "document_day_proposed", "placement_revision", revisionId, now);
+      return { ok: true, placementId, revisionId, reviewRequestId };
+    }).immediate();
+  }
+
+  reviewDocumentDay(input: {
+    preflight: Extract<MutationPreflight, { ok: true }>; careProfileId: string;
+    revisionId: string; expectedDayRevision: number; decision: "accepted" | "rejected";
+    reason?: string; nowSeconds?: number;
+  }): NoteReviewResult {
+    if (!Number.isSafeInteger(input.expectedDayRevision) || input.expectedDayRevision < 0 ||
+      !["accepted", "rejected"].includes(input.decision) ||
+      (input.reason !== undefined && (!input.reason.trim() || input.reason.length > 2000)))
+      throw new RangeError("Invalid document review input");
+    return this.db.transaction((): NoteReviewResult => {
+      const actor = this.authorizeActor(input.preflight, input.careProfileId, input.nowSeconds);
+      if (!actor.ok) return actor;
+      if (actor.memberKind !== "adult") return { ok: false, status: 403, error: "FORBIDDEN" };
+      const proposal = this.db.prepare<[string, string], { careDay: string; documentId: string }>(
+        "SELECT r.care_day careDay, p.document_id documentId FROM document_day_placement_revisions r " +
+        "JOIN document_day_placements p ON p.id = r.placement_id JOIN documents d ON d.id = p.document_id " +
+        "WHERE r.id = ? AND p.care_profile_id = ? AND r.is_retracted = 0 " +
+        "AND d.archived_at IS NULL AND d.scan_verdict = 'clean' AND d.page_count > 0 " +
+        "AND d.status IN ('needs_review', 'complete') " +
+        "AND NOT EXISTS (SELECT 1 FROM document_day_placement_reviews v WHERE v.revision_id = r.id)",
+      ).get(input.revisionId, input.careProfileId);
+      if (!proposal) return { ok: false, status: 404, error: "NOT_FOUND" };
+      const canPublish = actor.role === "owner" || this.db.prepare<[string, string, string]>(
+        "SELECT 1 FROM current_day_access WHERE care_profile_id = ? AND care_day = ? AND subject_user_id = ? AND level = 'publish'",
+      ).get(input.careProfileId, proposal.careDay, actor.userId) !== undefined;
+      const sourceAccess = actor.role === "owner" || this.db.prepare<[string, string]>(
+        "SELECT 1 FROM current_document_access WHERE document_id = ? AND subject_user_id = ?",
+      ).get(proposal.documentId, actor.userId) !== undefined;
+      if (!canPublish || !sourceAccess) return { ok: false, status: 403, error: "FORBIDDEN" };
+      const latest = this.db.prepare<[string, string], { dayNodeId: string; snapshotId: string; revision: number }>(
+        "SELECT n.id dayNodeId, s.id snapshotId, s.revision_no revision FROM day_nodes n JOIN day_snapshots s " +
+        "ON s.day_node_id = n.id AND s.revision_no = (SELECT max(revision_no) FROM day_snapshots WHERE day_node_id = n.id) " +
+        "WHERE n.care_profile_id = ? AND n.care_day = ?",
+      ).get(input.careProfileId, proposal.careDay);
+      const currentRevision = latest?.revision ?? 0;
+      if (currentRevision !== input.expectedDayRevision) return { ok: false, status: 409, error: "STALE_REVISION" };
+      const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
+      this.db.prepare("INSERT INTO document_day_placement_reviews (id, revision_id, decision, reviewer_id, decided_at, reason) " +
+        "VALUES (?, ?, ?, ?, ?, ?)").run(randomUUID(), input.revisionId, input.decision, actor.userId, now, input.reason ?? null);
+      let snapshotId: string | null = null; let revision = currentRevision;
+      if (input.decision === "accepted") {
+        const dayNodeId = latest?.dayNodeId ?? randomUUID();
+        if (!latest) this.db.prepare("INSERT INTO day_nodes (id, care_profile_id, care_day, created_by, created_at) VALUES (?, ?, ?, ?, ?)")
+          .run(dayNodeId, input.careProfileId, proposal.careDay, actor.userId, now);
+        const entries = this.publishedEntries(input.careProfileId, proposal.careDay);
+        snapshotId = randomUUID(); revision = currentRevision + 1;
+        this.db.prepare("INSERT INTO day_snapshots (id, day_node_id, revision_no, previous_snapshot_id, content_sha256, published_by, published_at, reason) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(snapshotId, dayNodeId, revision, latest?.snapshotId ?? null,
+            createHash("sha256").update(JSON.stringify(entries)).digest("hex"), actor.userId, now, input.reason ?? null);
+        const insert = this.db.prepare("INSERT INTO day_snapshot_entries (snapshot_id, position, placement_revision_id, note_revision_id, claim_revision_id) VALUES (?, ?, ?, ?, ?)");
+        for (const [position, entry] of entries.entries()) insert.run(snapshotId, position,
+          entry.kind === "placement" ? entry.id : null, entry.kind === "note" ? entry.id : null, entry.kind === "claim" ? entry.id : null);
+      }
+      this.audit(actor.householdId, actor.userId, input.decision === "accepted" ? "document_day_published" : "document_day_rejected",
+        "placement_revision", input.revisionId, now);
       return { ok: true, snapshotId, revision };
     }).immediate();
   }

@@ -78,6 +78,76 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("holds document-day proposals out of history and checks freshness before source-linked publication", async () => {
+    const { path, writer } = database();
+    const secret = Buffer.alloc(32, 12);
+    const token = "p".repeat(43);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('placement-owner', 'owner-a', ?, ?, 1, 100, 4000000000, 100)").run(sessionTokenSha256(token), secret);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('placement-child', 'child-a', ?, ?, 1, 100, 4000000000, 100)").run(sessionTokenSha256("k".repeat(43)), secret);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('placement-adult', 'adult-a', ?, ?, 1, 100, 4000000000, 100)").run(sessionTokenSha256("m".repeat(43)), secret);
+    const preflight = { ok: true as const, tokenSha256: sessionTokenSha256(token),
+      csrfToken: issueCsrfToken("placement-owner", secret) };
+    const child = { ok: true as const, tokenSha256: sessionTokenSha256("k".repeat(43)),
+      csrfToken: issueCsrfToken("placement-child", secret) };
+    const adult = { ok: true as const, tokenSha256: sessionTokenSha256("m".repeat(43)),
+      csrfToken: issueCsrfToken("placement-adult", secret) };
+    const mutations = new SqliteFamilyMutations(path); const reader = new SqliteFamilyTimeline(path);
+    const scope = { householdId: "family-a", userId: "owner-a", careProfileId: "profile-a" };
+    const pendingCount = () => (writer.prepare("SELECT count(*) n FROM document_day_placement_reviews").get() as { n: number }).n;
+    try {
+      expect(mutations.proposeDocumentDay({ preflight: child, careProfileId: "profile-a",
+        documentId: "document-a", careDay: "2030-04-13", nowSeconds: 200 })).toMatchObject({ ok: false, error: "FORBIDDEN" });
+      expect(mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a",
+        documentId: "missing-document", careDay: "2030-04-13", nowSeconds: 200 })).toMatchObject({ ok: false, error: "NOT_FOUND" });
+      const proposed = mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a",
+        documentId: "document-a", careDay: "2030-04-13", nowSeconds: 200 });
+      if (!proposed.ok) throw new Error("Expected synthetic placement proposal");
+      expect(mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a",
+        documentId: "document-a", careDay: "2030-04-13", nowSeconds: 200 })).toMatchObject({ ok: false, error: "DUPLICATE_PLACEMENT" });
+      expect((await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 })).map(day => day.day)).toEqual(["2030-04-12"]);
+      const note = mutations.proposeNote({ preflight, careProfileId: "profile-a", careDay: "2030-04-13",
+        body: "An independently invented note alongside the source.", nowSeconds: 201 });
+      if (!note.ok) throw new Error("Expected synthetic note");
+      expect(mutations.reviewNote({ preflight, careProfileId: "profile-a", revisionId: note.revisionId,
+        expectedDayRevision: 0, decision: "accepted", nowSeconds: 202 })).toMatchObject({ ok: true, revision: 1 });
+      const countBefore = pendingCount();
+      expect(mutations.grantDayAccess({ preflight, careProfileId: "profile-a", careDay: "2030-04-13",
+        subjectUserId: "adult-a", level: "publish", nowSeconds: 202 })).toMatchObject({ ok: true });
+      expect(mutations.reviewDocumentDay({ preflight: adult, careProfileId: "profile-a", revisionId: proposed.revisionId,
+        expectedDayRevision: 1, decision: "accepted", nowSeconds: 203 })).toMatchObject({ ok: false, error: "FORBIDDEN" });
+      for (const allowed of [true, false]) expect(mutations.grantDocumentAccess({ preflight, careProfileId: "profile-a",
+        documentId: "document-a", subjectUserId: "adult-a", allowed, nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect(mutations.reviewDocumentDay({ preflight: adult, careProfileId: "profile-a", revisionId: proposed.revisionId,
+        expectedDayRevision: 1, decision: "accepted", nowSeconds: 203 })).toMatchObject({ ok: false, error: "FORBIDDEN" });
+      expect(mutations.reviewDocumentDay({ preflight: child, careProfileId: "profile-a", revisionId: proposed.revisionId,
+        expectedDayRevision: 1, decision: "accepted", nowSeconds: 203 })).toMatchObject({ ok: false, error: "FORBIDDEN" });
+      expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: proposed.revisionId,
+        expectedDayRevision: 0, decision: "accepted", nowSeconds: 203 })).toMatchObject({ ok: false, error: "STALE_REVISION" });
+      expect(pendingCount()).toBe(countBefore);
+      expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: proposed.revisionId,
+        expectedDayRevision: 1, decision: "accepted", nowSeconds: 204 })).toMatchObject({ ok: true, revision: 2 });
+      const days = await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 });
+      expect(days[0]).toMatchObject({ day: "2030-04-13", revision: 2,
+        sources: [{ documentId: "document-a", sourceSha256: documentHash, pageNumbers: [1] }] });
+      expect(days[0]?.statements).toHaveLength(1);
+      expect(days[1]?.revision).toBe(1);
+      expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: proposed.revisionId,
+        expectedDayRevision: 2, decision: "accepted", nowSeconds: 205 })).toMatchObject({ ok: false, error: "NOT_FOUND" });
+      const rejected = mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a",
+        documentId: "document-a", careDay: "2030-04-14", nowSeconds: 206 });
+      if (!rejected.ok) throw new Error("Expected synthetic rejection proposal");
+      expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: rejected.revisionId,
+        expectedDayRevision: 0, decision: "rejected", nowSeconds: 207 })).toMatchObject({ ok: true, snapshotId: null, revision: 0 });
+      expect((await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 }))).toHaveLength(2);
+      writer.prepare("UPDATE sessions SET revoked_at = 208 WHERE id = 'placement-owner'").run();
+      expect(mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a",
+        documentId: "document-a", careDay: "2030-04-15", nowSeconds: 209 })).toMatchObject({ ok: false, error: "AUTH_REQUIRED" });
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
   it("restores an encrypted paired database and original without reviving sessions or altering the source", async () => {
     const { path, writer } = emptyDatabase();
     const root = mkdtempSync(join(tmpdir(), "adeno-fictional-snapshot-"));

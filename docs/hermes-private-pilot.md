@@ -215,3 +215,16 @@ the inert EICAR test string through its private socket. The test worker was
 stopped and its artifacts retained. This does not enable the production intake
 route; freshness, peak resources and end-to-end database/publication checks
 remain required.
+
+The candidate writer now supports explicit document-day proposals and adult
+accept/reject decisions. Proposal authority requires source/own-intake access
+and day contribution or intake rights. Publication rechecks the session, adult
+publisher, current source grant and expected day revision inside one immediate
+transaction. Accepted placements create source-linked immutable snapshots while
+preserving accepted notes; rejected proposals create no day. Duplicate pending
+or accepted document/day placements are denied. No upload timestamp is used as
+the care day. This is editorial placement approval, not clinical verification.
+The synthetic SQLite regression covers hidden proposals, stale-edit rollback,
+child denial, duplicate/repeated decisions, note preservation and revocation.
+It is written but has not run because existing-migration approval remains
+pending. These writer methods are not mounted as HTTP routes or usable UI yet.
