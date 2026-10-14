@@ -155,6 +155,27 @@ client/provider receives selected plaintext and revocation cannot erase received
 copies. UI tests cover disabled state, consent, credential-free instructions and
 disconnect. It does not auto-configure or approve an assistant.
 
+The candidate file-encryption layer uses the author's
+[age TypeScript implementation](https://github.com/FiloSottile/typage), pinned at
+`age-encryption@0.3.1`. It streams private files to an age recipient and publishes
+restored plaintext only after complete stream authentication. Wrong identities,
+modified/truncated ciphertext, unsafe permissions, symlinks and existing output
+paths fail closed. Partial outputs remain private and recoverable; no files are
+deleted. A production decryption identity must be generated and kept off-host.
+
+On October 14, wholly synthetic 200,000-byte data encrypted here was decrypted
+by Hermes's reference age CLI 1.1.1; CLI-encrypted data then restored here with an
+exact-byte match. The probe's test identity was transferred only for that
+fictional interoperability check and is not a production backup identity.
+No real database or record was read. The paired SQLite/object bundle, off-host
+generation retention and full application restore are still unimplemented.
+
+Sharp is now pinned at 0.35.5 in both server and parser lockfiles, addressing
+[GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w).
+Focused image/parser tests pass and both production dependency audits report
+zero vulnerabilities. The patched parser still needs a fresh Hermes image smoke
+before production intake is enabled.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.
