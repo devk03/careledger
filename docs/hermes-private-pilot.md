@@ -51,6 +51,15 @@ The private runtime applies a self-only CSP, disallows framing/objects, and
 suppresses referrers. UI tests cover pagination, provenance and literal rendering
 of synthetic script-like text. Durable file intake remains work.
 
+`createTrustedIntake` now joins permission preflight, capacity admission, exact
+private staging, required scanner/parser clearance, immutable object publication
+and a final transactional metadata boundary. Synthetic tests exercise actual
+filesystem staging/storage with test scanner/parser doubles, including revocation,
+unavailable scanning, capacity denial and caller mutation. They do not prove
+production decoding/scanning. PDFs remain rejected. This service is not mounted;
+the durable metadata writer, physical capacity policy and real Hermes adapters
+must be verified before enabling uploads.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.
