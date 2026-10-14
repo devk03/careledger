@@ -333,3 +333,6 @@ stale socket, restart, then require real clean/detection/freshness probes.
 No recurring updater or monitoring job is added by this composition. Readiness
 currently describes the app/database; adapter failure is denied at intake and
 must not be inferred from the app readiness endpoint alone.
+The image has no recurring Docker healthcheck. Operator readiness/restart checks
+must use a finite deadline under two hours; do not replace this with an unbounded
+polling job or workflow.
