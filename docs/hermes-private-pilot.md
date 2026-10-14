@@ -102,6 +102,15 @@ unconfirmed response. Client and UI tests cover type/size rejection, exact file
 transfer, server/network uncertainty and leaving later files unattempted.
 No production upload route is enabled by this UI work.
 
+The candidate authorized MCP adapter pins the browser-approved user/family and
+reloads authorization before every repository operation and connection-profile
+call. Tests deny revocation and identity switching on an already-open client and
+redact storage errors. The profile states `trusted_server_readable` and that
+selected results reach the AI client. An internal session-digest reader rechecks
+expiry, revocation and account auth version; no digest is accepted as an HTTP
+credential. Durable browser-approved grants and a real stdio/SSH launch remain
+work. Nothing here enables a public MCP endpoint.
+
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.

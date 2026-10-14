@@ -9,6 +9,7 @@ import {
   issueSessionToken,
   preflightCookieMutation,
   readCookieSession,
+  readSessionByDigest,
   SESSION_COOKIE_NAME,
   sessionClearCookie,
   sessionSetCookie,
@@ -52,6 +53,24 @@ function repository(row: StoredSession | null, onLookup?: (hash: string) => void
 const cookie = `${SESSION_COOKIE_NAME}=${token}`;
 
 describe("TypeScript cookie-session boundary", () => {
+  it("revalidates server-held grant session digests without accepting plaintext credentials", async () => {
+    let current: StoredSession | null = active;
+    let lookups = 0;
+    const store: SessionRepository = { findByTokenSha256: async hash => {
+      expect(hash).toBe(sessionTokenSha256(token)); lookups++; return current;
+    } };
+    expect(await readSessionByDigest(token, store, now)).toBeNull();
+    expect(lookups).toBe(0);
+    expect((await readSessionByDigest(sessionTokenSha256(token), store, now))?.scope)
+      .toEqual({ userId: active.userId, householdId: active.householdId });
+    current = { ...active, revokedAt: now };
+    expect(await readSessionByDigest(sessionTokenSha256(token), store, now)).toBeNull();
+    current = { ...active, userAuthVersion: 4 };
+    expect(await readSessionByDigest(sessionTokenSha256(token), store, now)).toBeNull();
+    current = { ...active, expiresAt: now };
+    expect(await readSessionByDigest(sessionTokenSha256(token), store, now)).toBeNull();
+  });
+
   it("uses a random URL-safe token and stores only its SHA-256 digest", () => {
     const issued = issueSessionToken();
     expect(issued.plaintext).toMatch(/^[A-Za-z0-9_-]{43}$/);

@@ -81,7 +81,16 @@ export async function readCookieSession(
 ): Promise<VerifiedSession | null> {
   const plaintext = sessionCookie(request);
   if (plaintext === null) return null;
-  const row = await repository.findByTokenSha256(sessionTokenSha256(plaintext));
+  return readSessionByDigest(sessionTokenSha256(plaintext), repository, nowSeconds);
+}
+
+/** Internal grant binding only; a digest is never accepted as HTTP authentication. */
+export async function readSessionByDigest(
+  tokenSha256: string, repository: SessionRepository,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<VerifiedSession | null> {
+  if (!/^[0-9a-f]{64}$/.test(tokenSha256)) return null;
+  const row = await repository.findByTokenSha256(tokenSha256);
   return activeStoredSession(row, nowSeconds);
 }
 
