@@ -336,3 +336,16 @@ must not be inferred from the app readiness endpoint alone.
 The image has no recurring Docker healthcheck. Operator readiness/restart checks
 must use a finite deadline under two hours; do not replace this with an unbounded
 polling job or workflow.
+
+On October 14, runtime composition commit `90f164a` passed server build/typecheck
+and 34 focused configuration/intake/router tests. Read-only Compose validation
+confirmed loopback binding, the existing-only data bind, isolated workers,
+supplementary socket groups and disabled worker logs; it started no services.
+Commit `4acfa13` also removed the inherited recurring Docker healthcheck.
+That release built on Hermes as image
+`sha256:a3cfdff4d067e3ece7d15989eef25b7558517c51c99155b0d639bb67d79c506e`.
+A UID 10001 synthetic runtime probe with no network, read-only root and no mounts
+passed an in-memory SQLite version read, synthetic Argon2 verification and an
+ephemeral age roundtrip. Record and agent capabilities were disabled by default.
+It exited 0 without OOM and remains stopped/recoverable. No schema, migration,
+application startup or record workflow was exercised by this packaging check.
