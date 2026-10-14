@@ -22,9 +22,15 @@ finish successfully before launching the network-disabled scanner. Never use
 
 The daemon loads the signature volume read-only. It has one scanning thread,
 bounded stream/expansion sizes and no automatic concurrent database reload.
-It rejects signatures over two days old at startup. This startup guard does not
-prove freshness for an indefinitely running daemon; production still needs a
-per-request freshness gate and a verified manual update/restart procedure.
+It rejects signatures over two days old at startup. The application adapter also
+queries the loaded daemon signature timestamp before each document scan, with a
+bounded control request and no cached approval. The daemon runs with `TZ=UTC`;
+the adapter validates its exact calendar date and weekday. Missing, malformed,
+oversized, truncated, stale or more than five minutes future replies deny the
+scan before document transfer. Age defaults to 48 hours and can only be shortened.
+The same timestamp is checked again before returning a verdict, so a scan crossing
+the freshness deadline cannot return clean. Production still needs a verified
+manual update/restart procedure and acceptance of the complete intake path.
 ClamAV's documented memory requirements are substantial; verify peak RSS and
 host headroom before enabling production uploads. Do not weaken detection or
 substitute a fabricated signature database to make a resource check pass.
@@ -79,3 +85,9 @@ No patient input, application database or record storage was mounted.
 References: [ClamAV container memory and signatures](https://docs.clamav.net/manual/Installing/Docker.html),
 [ClamD configuration](https://github.com/Cisco-Talos/clamav/blob/main/etc/clamd.conf.sample),
 [stream protocol](https://docs.clamav.net/manual/Usage/ClamdProtocol.html).
+
+Freshness tests use a synthetic Unix-socket daemon. They verify that stale or
+future signatures stop document transfer, a fresh response restores access on
+the same client, invalid replies release the scan slot, and expiry during a
+scan discards its clean verdict. These tests do not replace the actual-daemon
+probe: the supported ClamD version/date format must also work on Hermes.

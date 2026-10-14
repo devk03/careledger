@@ -4,6 +4,7 @@ import { lstat } from "node:fs/promises";
 
 import { MAX_UPLOAD_BYTES } from "./admission.js";
 import type { MalwareScanner } from "./inspection.js";
+import { MAX_SIGNATURE_AGE_SECONDS, readFreshSignatureTimestamp, signatureIsFresh } from "./clamdFreshness.js";
 
 const CHUNK_BYTES = 64 * 1024;
 const MAX_REPLY_BYTES = 4096;
@@ -14,6 +15,7 @@ export type ClamdScannerOptions = Readonly<{
   timeoutMs?: number;
   maxConcurrentScans?: number;
   trustedWorkerUid?: number;
+  maxSignatureAgeSeconds?: number;
 }>;
 
 function write(socket: Socket, bytes: Buffer): Promise<void> {
@@ -62,6 +64,9 @@ export function createClamdScanner(options: ClamdScannerOptions): MalwareScanner
   if (!Number.isSafeInteger(maxConcurrentScans) || maxConcurrentScans < 1 ||
     maxConcurrentScans > 8) throw new Error("INVALID_CLAMD_CONCURRENCY");
   let activeScans = 0;
+  const maxAgeSeconds = options.maxSignatureAgeSeconds ?? MAX_SIGNATURE_AGE_SECONDS;
+  if (!Number.isSafeInteger(maxAgeSeconds) || maxAgeSeconds < 1 || maxAgeSeconds > MAX_SIGNATURE_AGE_SECONDS)
+    throw new Error("INVALID_CLAMD_SIGNATURE_AGE");
 
   return {
     async scan(input) {
@@ -74,6 +79,10 @@ export function createClamdScanner(options: ClamdScannerOptions): MalwareScanner
       activeScans += 1;
       try {
         const bytes = Buffer.from(input);
+        const signatureTimestamp = await readFreshSignatureTimestamp({ socketPath: options.socketPath,
+          timeoutMs, maxAgeSeconds });
+        if (signatureTimestamp === null || !await trustedSocketPath(options.socketPath, options.trustedWorkerUid))
+          return { verdict: "unavailable", engine: ENGINE };
         return await new Promise<Awaited<ReturnType<MalwareScanner["scan"]>>>((resolve) => {
           const socket = createConnection({ path: options.socketPath });
           let settled = false;
@@ -85,7 +94,7 @@ export function createClamdScanner(options: ClamdScannerOptions): MalwareScanner
             settled = true;
             clearTimeout(deadline);
             socket.destroy();
-            resolve({ verdict, engine: ENGINE });
+            resolve({ verdict: signatureIsFresh(signatureTimestamp, maxAgeSeconds) ? verdict : "unavailable", engine: ENGINE });
           };
 
           socket.on("error", () => finish("unavailable"));

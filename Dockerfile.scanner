@@ -16,6 +16,7 @@ COPY --chmod=0444 deploy/scanner/clamd.conf /etc/adeno/clamd.conf
 COPY --chmod=0444 deploy/scanner/freshclam.conf /etc/adeno/freshclam.conf
 RUN chmod 0755 /etc/adeno
 USER 10004:10005
+ENV TZ=UTC
 RUN test -x /etc/adeno && test -r /etc/adeno/clamd.conf && test -r /etc/adeno/freshclam.conf
 # Requires pre-provisioned official signatures. The daemon opens no TCP port.
 CMD ["clamd", "--foreground", "--config-file=/etc/adeno/clamd.conf"]

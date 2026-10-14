@@ -22,6 +22,10 @@ async function fakeDaemon(reply: Buffer | null): Promise<{
     let data = Buffer.alloc(0);
     socket.on("data", (chunk: Buffer) => {
       data = Buffer.concat([data, chunk]);
+      if (data.equals(Buffer.from("zVERSION\0"))) {
+        const date = new Date().toUTCString().replace(/^(\w{3}), (\d{2}) (\w{3}) (\d{4}) ([\d:]+) GMT$/, "$1 $3 $2 $5 $4");
+        socket.end(Buffer.from(`ClamAV 1.5.4/28153/${date}\0`)); return;
+      }
       if (!data.subarray(0, 10).equals(Buffer.from("zINSTREAM\0"))) return;
       let cursor = 10;
       const chunks: Buffer[] = [];
@@ -110,8 +114,12 @@ describe("local clamd INSTREAM adapter", () => {
     const socketPath = join(directory, "clamd.sock");
     let peerSocket: Socket | undefined;
     const server = createServer((socket) => {
-      peerSocket = socket;
-      socket.write(Buffer.from("stream: OK\0"));
+      socket.once("data", chunk => {
+        if (chunk.equals(Buffer.from("zVERSION\0"))) {
+          const date = new Date().toUTCString().replace(/^(\w{3}), (\d{2}) (\w{3}) (\d{4}) ([\d:]+) GMT$/, "$1 $3 $2 $5 $4");
+          socket.end(Buffer.from(`ClamAV 1.5.4/28153/${date}\0`));
+        } else { peerSocket = socket; socket.write(Buffer.from("stream: OK\0")); }
+      });
     });
     await new Promise<void>((resolve) => server.listen(socketPath, resolve));
     try {
