@@ -58,6 +58,23 @@ The build installed engine packages into the container image only and prevented
 service startup during package installation. Server typecheck/build and seven
 scanner adapter tests passed. Signature provisioning and real detection are
 separate checks; this build alone does not prove scanner availability.
+The initial updater failed closed because private archive extraction produced
+root-only configuration files. The Dockerfile now fixes the nonsecret config
+permissions explicitly at build time, independently of checkout/archive umask.
+The configuration directory also has explicit traversal permissions, and a build
+step runs as UID 10004 to require readable configurations before image publication.
+
+The corrected image, `adeno-scanner:candidate3-20261014`, is
+`sha256:f542bdc2c7ea3e6a73bda611d312f6c96f11d1dcfd947a0b03e6cf4bb36cf86a`.
+Its once-only updater downloaded and load-tested official daily 28153, main 63
+and bytecode 339, exiting 0 without OOM. A fresh non-root network-disabled
+scanner used only that signature volume read-only and a private socket volume.
+Observed idle memory was about 959 MiB within the 1700 MiB cap; this is not a
+peak-load sizing result. A separate network-disabled UID 10001:10005 client
+reported `generatedImageClean=true` and `inertTestDetected=true`, then exited 0.
+The exact worker image/ID, synthetic label and mounts were rechecked before
+stopping it. Test containers, signatures and socket volume are retained.
+No patient input, application database or record storage was mounted.
 
 References: [ClamAV container memory and signatures](https://docs.clamav.net/manual/Installing/Docker.html),
 [ClamD configuration](https://github.com/Cisco-Talos/clamav/blob/main/etc/clamd.conf.sample),

@@ -207,3 +207,11 @@ pending permission to apply the existing migrations to new test databases.
 HTTPS, connector setup, encrypted off-host backups, restore and deployed
 acceptance remain unproven. DNS configuration is deferred to the maintainer for
 October 15. This document is a runbook candidate, not a readiness claim.
+
+The [isolated scanner candidate](private-scanner.md) now has target-host evidence:
+official signatures were downloaded and load-tested by a finite updater, and a
+separate network-disabled, non-root daemon accepted a generated PNG and detected
+the inert EICAR test string through its private socket. The test worker was
+stopped and its artifacts retained. This does not enable the production intake
+route; freshness, peak resources and end-to-end database/publication checks
+remain required.
