@@ -7,7 +7,7 @@ import type { ApprovedPageRepository, CareProfileRepository, DayVersion, DayVers
   PendingNoteHint, PendingReviewHint, PendingReviewRepository,
   StoredPageChunk, TimelineDay, TimelineRepository, VisibleCareProfile } from "../timeline/types.js";
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
-import type { NoteReviewDetail, NoteReviewRepository } from "../timeline/types.js";
+import type { DocumentDayReviewDetail, NoteReviewDetail, NoteReviewRepository } from "../timeline/types.js";
 
 const MIGRATIONS = [
   [1, "initial", "793dbf7dc872fe52f05e2f7e9294145898ea4f1f499816d304dd8e8b8190c501"],
@@ -299,6 +299,32 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     if (!row) return null;
     return { ...row, createdAt: new Date(row.createdAt * 1000).toISOString(),
       attribution: "family_note", state: "proposed" };
+  }
+
+  async readPendingDocumentDay(input: {
+    householdId: string; userId: string; careProfileId: string; revisionId: string;
+  }): Promise<DocumentDayReviewDetail | null> {
+    const row = this.db.prepare<[string, string, string, string], Omit<DocumentDayReviewDetail, "createdAt" | "state"> & { createdAt: number }>(
+      "SELECT r.id revisionId, r.care_day careDay, d.id documentId, d.original_display_name displayName, " +
+      "d.source_sha256 sourceSha256, d.page_count pageCount, author.display_name authorLabel, r.created_at createdAt, " +
+      "COALESCE((SELECT max(s.revision_no) FROM day_snapshots s JOIN day_nodes n ON n.id = s.day_node_id " +
+      "WHERE n.care_profile_id = p.id AND n.care_day = r.care_day), 0) expectedDayRevision " +
+      "FROM document_day_placement_revisions r JOIN document_day_placements pl ON pl.id = r.placement_id " +
+      "JOIN documents d ON d.id = pl.document_id AND d.care_profile_id = pl.care_profile_id " +
+      "JOIN care_profiles p ON p.id = pl.care_profile_id AND p.archived_at IS NULL " +
+      "JOIN users author ON author.id = r.created_by AND author.household_id = p.household_id " +
+      "JOIN users reviewer ON reviewer.id = ? AND reviewer.household_id = p.household_id " +
+      "AND reviewer.status = 'active' AND reviewer.member_kind = 'adult' " +
+      "WHERE p.household_id = ? AND p.id = ? AND r.id = ? AND r.is_retracted = 0 " +
+      "AND d.archived_at IS NULL AND d.scan_verdict = 'clean' AND d.page_count > 0 " +
+      "AND d.status IN ('needs_review', 'complete') " +
+      "AND NOT EXISTS (SELECT 1 FROM document_day_placement_reviews v WHERE v.revision_id = r.id) " +
+      "AND (reviewer.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access a " +
+      "WHERE a.care_profile_id = p.id AND a.care_day = r.care_day AND a.subject_user_id = reviewer.id AND a.level = 'publish')) " +
+      "AND (reviewer.role = 'owner' OR EXISTS (SELECT 1 FROM current_document_access a " +
+      "WHERE a.document_id = d.id AND a.care_profile_id = p.id AND a.subject_user_id = reviewer.id))",
+    ).get(input.userId, input.householdId, input.careProfileId, input.revisionId);
+    return row ? { ...row, createdAt: new Date(row.createdAt * 1000).toISOString(), state: "proposed" } : null;
   }
 
   async listDayVersions(input: { householdId: string; userId: string;

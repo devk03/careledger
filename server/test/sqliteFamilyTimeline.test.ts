@@ -61,7 +61,7 @@ function database(): { path: string; writer: Database.Database } {
   }
   writer.prepare("INSERT INTO care_profiles (id, household_id, preferred_name, created_by, created_at, updated_at) VALUES ('profile-a', 'family-a', 'Fictional person', 'owner-a', 100, 100)").run();
   writer.prepare("INSERT INTO source_objects (sha256, byte_size, media_type, created_at) VALUES (?, 100, 'application/pdf', 100)").run(documentHash);
-  writer.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, status, uploaded_by, uploaded_at) VALUES ('document-a', 'profile-a', ?, 'fictional.pdf', 'clean', 'complete', 'owner-a', 100)").run(documentHash);
+  writer.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, page_count, status, uploaded_by, uploaded_at) VALUES ('document-a', 'profile-a', ?, 'fictional.pdf', 'clean', 1, 'complete', 'owner-a', 100)").run(documentHash);
   writer.prepare("INSERT INTO document_pages (document_id, page_number, extracted_text, text_sha256, created_at) VALUES ('document-a', 1, ?, ?, 100)").run(pageText, pageHash);
   writer.prepare("INSERT INTO document_day_placements (id, care_profile_id, document_id, created_by, created_at) VALUES ('placement-a', 'profile-a', 'document-a', 'owner-a', 100)").run();
   writer.prepare("INSERT INTO document_day_placement_revisions (id, placement_id, revision_no, care_day, created_by, created_at) VALUES ('placement-revision-a', 'placement-a', 1, '2030-04-12', 'owner-a', 100)").run();
@@ -105,6 +105,9 @@ describe("fictional v7 family timeline", () => {
       const proposed = mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a",
         documentId: "document-a", careDay: "2030-04-13", nowSeconds: 200 });
       if (!proposed.ok) throw new Error("Expected synthetic placement proposal");
+      expect(await reader.readPendingDocumentDay({ ...scope, revisionId: proposed.revisionId })).toMatchObject({
+        documentId: "document-a", sourceSha256: documentHash, pageCount: 1, expectedDayRevision: 0, state: "proposed" });
+      expect(await reader.readPendingDocumentDay({ ...scope, userId: "child-a", revisionId: proposed.revisionId })).toBeNull();
       expect(mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a",
         documentId: "document-a", careDay: "2030-04-13", nowSeconds: 200 })).toMatchObject({ ok: false, error: "DUPLICATE_PLACEMENT" });
       expect((await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 })).map(day => day.day)).toEqual(["2030-04-12"]);
@@ -118,6 +121,7 @@ describe("fictional v7 family timeline", () => {
         subjectUserId: "adult-a", level: "publish", nowSeconds: 202 })).toMatchObject({ ok: true });
       expect(mutations.reviewDocumentDay({ preflight: adult, careProfileId: "profile-a", revisionId: proposed.revisionId,
         expectedDayRevision: 1, decision: "accepted", nowSeconds: 203 })).toMatchObject({ ok: false, error: "FORBIDDEN" });
+      expect(await reader.readPendingDocumentDay({ ...scope, userId: "adult-a", revisionId: proposed.revisionId })).toBeNull();
       for (const allowed of [true, false]) expect(mutations.grantDocumentAccess({ preflight, careProfileId: "profile-a",
         documentId: "document-a", subjectUserId: "adult-a", allowed, nowSeconds: 203 })).toMatchObject({ ok: true });
       expect(mutations.reviewDocumentDay({ preflight: adult, careProfileId: "profile-a", revisionId: proposed.revisionId,
@@ -130,6 +134,7 @@ describe("fictional v7 family timeline", () => {
       expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: proposed.revisionId,
         expectedDayRevision: 1, decision: "accepted", nowSeconds: 204 })).toMatchObject({ ok: true, revision: 2 });
       const days = await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 });
+      expect(await reader.readPendingDocumentDay({ ...scope, revisionId: proposed.revisionId })).toBeNull();
       expect(days[0]).toMatchObject({ day: "2030-04-13", revision: 2,
         sources: [{ documentId: "document-a", sourceSha256: documentHash, pageNumbers: [1] }] });
       expect(days[0]?.statements).toHaveLength(1);

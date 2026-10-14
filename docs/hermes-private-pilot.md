@@ -228,3 +228,13 @@ The synthetic SQLite regression covers hidden proposals, stale-edit rollback,
 child denial, duplicate/repeated decisions, note preservation and revocation.
 It is written but has not run because existing-migration approval remains
 pending. These writer methods are not mounted as HTTP routes or usable UI yet.
+
+The candidate document-day router now adds private proposal/review HTTP endpoints
+and a scoped review-detail read. Cookie/Origin/CSRF preflight runs before bounded
+JSON parsing for writes; strict bodies deny spoofed authority and invalid dates.
+Storage failures return generic unavailable responses. The review-detail query
+requires an active adult, current source access and day publication rights and
+returns the observed day revision with source hash/page count. Ordinary history
+and MCP still exclude proposals. HTTP regressions use independently invented
+repository doubles; the SQLite read regression remains gated on migration
+approval. The router is not mounted in the private production runtime yet.

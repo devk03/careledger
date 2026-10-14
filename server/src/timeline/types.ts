@@ -57,6 +57,18 @@ export interface NoteReviewRepository {
   }): Promise<NoteReviewDetail | null>;
 }
 
+export type DocumentDayReviewDetail = {
+  revisionId: string; careDay: ISODate; documentId: string; displayName: string;
+  sourceSha256: string; pageCount: number; authorLabel: string;
+  createdAt: string; expectedDayRevision: number; state: "proposed";
+};
+export interface DocumentDayReviewRepository {
+  /** Scoped active adult, source access and day-publish permission in one read. */
+  readPendingDocumentDay(input: {
+    householdId: string; userId: string; careProfileId: string; revisionId: string;
+  }): Promise<DocumentDayReviewDetail | null>;
+}
+
 export interface PendingReviewRepository {
   /** No proposal content is returned; reviewer authority is rechecked on every call. */
   listPendingChildReviews(input: {
