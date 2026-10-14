@@ -91,3 +91,16 @@ future signatures stop document transfer, a fresh response restores access on
 the same client, invalid replies release the scan slot, and expiry during a
 scan discards its clean verdict. These tests do not replace the actual-daemon
 probe: the supported ClamD version/date format must also work on Hermes.
+
+On October 14, `a021cd0` rebuilt the UTC daemon as image
+`sha256:60ac88d6011f278a73e38fec07e28a8fcbcd1be200b690df014d722b1719a9e6`
+and its generated probe client as
+`sha256:bbacc496cc7eb5b933e12537c3f41e9514f4cfe3aa9d22be243d9f348de3a32e`.
+A fresh network-disabled worker loaded the retained official signatures
+read-only. The client passed clean-image and inert-test detection with the
+per-scan freshness check enabled, then exited 0. After checking its exact
+identity, image, label and mounts, the worker was stopped and confirmed exited
+0 without OOM. A separate bounded client against the stopped scanner reported
+`unavailable=true`, exercising real socket failure rather than a protocol double.
+The stopped worker, clients and volumes remain retained. This is scanner-gate
+evidence only; it is not deployed authenticated upload/publication acceptance.
