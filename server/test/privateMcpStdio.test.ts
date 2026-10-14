@@ -4,10 +4,32 @@ import { promisify } from "node:util";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { expect, it } from "vitest";
 import { PrivateAgentGrantStore } from "../src/auth/privateAgentGrants.js";
+it("transfers a cited generated image over real stdio and withholds the next image after revocation", async () => {
+  const transport = new StdioClientTransport({ command: process.execPath,
+    args: [fileURLToPath(new URL("./fixtures/imageStdio.mjs", import.meta.url))], env: { ADENO_FICTIONAL_STDIO_TEST: "1" }, stderr: "pipe" });
+  const client = new Client({ name: "invented-image-stdio-client", version: "0.1.0" });
+  try {
+    await client.connect(transport);
+    const arguments_ = { careProfileId: "11111111-1111-4111-8111-111111111111", documentId: "22222222-2222-4222-8222-222222222222" };
+    const result = await client.callTool({ name: "get_approved_source_image", arguments: arguments_ });
+    expect(result.isError).not.toBe(true);
+    const image = result.content.find(content => content.type === "image"); const text = result.content.find(content => content.type === "text");
+    if (image?.type !== "image" || text?.type !== "text") throw new Error("Expected cited generated image");
+    expect(image.data.length).toBeGreaterThan(2048); const metadata = JSON.parse(text.text);
+    expect(metadata).toMatchObject({ documentId: arguments_.documentId, pageNumber: 1, originalPreserved: true });
+    expect(createHash("sha256").update(Buffer.from(image.data, "base64")).digest("hex")).toBe(metadata.rendition.sha256);
+    const revoked = new Promise<void>(resolve => transport.stderr!.once("data", () => resolve()));
+    if (!transport.pid) throw new Error("Missing owned synthetic process");
+    process.kill(transport.pid, "SIGUSR2"); await revoked;
+    const denied = await client.callTool({ name: "get_approved_source_image", arguments: arguments_ });
+    expect(denied.isError).toBe(true); expect(denied.content.every(content => content.type === "text")).toBe(true);
+  } finally { await client.close(); }
+});
 
 it.each([{ args: [] }, { args: ["../private-file"] }, { args: ["a".repeat(32), "extra"] }])(
   "fails closed without valid production connection arguments: %j", async ({ args }) => {

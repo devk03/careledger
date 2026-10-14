@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { createTimelineMcpServer } from "./server.js";
-import type { ApprovedPageRepository, AuthorizedScope, CareProfileRepository,
+import type { ApprovedImageReader, ApprovedPageRepository, AuthorizedScope, CareProfileRepository,
   PendingReviewRepository, TimelineRepository } from "../timeline/types.js";
 
 /** Pins the approved identity; every repository operation reloads authorization. */
@@ -8,6 +8,7 @@ export async function createAuthorizedTimelineMcpServer(input: {
   authorize: () => Promise<AuthorizedScope | null>;
   timeline: TimelineRepository; pages: ApprovedPageRepository;
   profiles?: CareProfileRepository; reviews?: PendingReviewRepository;
+  images?: ApprovedImageReader;
 }) {
   const initial = await input.authorize();
   if (!initial) throw new Error("AUTH_REQUIRED");
@@ -41,14 +42,18 @@ export async function createAuthorizedTimelineMcpServer(input: {
     listPendingChildReviews: query => read(() => input.reviews!.listPendingChildReviews({ ...query, ...scope })),
     listPendingNoteReviews: query => read(() => input.reviews!.listPendingNoteReviews({ ...query, ...scope })),
   } : undefined;
+  const images: ApprovedImageReader | undefined = input.images ? {
+    readApprovedImage: query => read(() => input.images!.readApprovedImage({ ...query, ...scope })),
+  } : undefined;
   const server = createTimelineMcpServer({ scope, timeline, pages,
-    ...(profiles ? { profiles } : {}), ...(reviews ? { reviews } : {}) });
+    ...(profiles ? { profiles } : {}), ...(reviews ? { reviews } : {}), ...(images ? { images } : {}) });
   server.registerTool("get_connection_profile", {
     description: "Verify this individually approved, read-only Hermes connection. This private installation is server-readable; selected tool results reach this AI client.",
     inputSchema: z.object({}),
   }, async () => {
     const profile = await read(async () => ({ accountId: scope.userId, householdId: scope.householdId,
       scopes: ["approved_history:read", "approved_source:read"], transport: "ssh_stdio",
+      approvedSourceImages: images !== undefined,
       storagePrivacy: "trusted_server_readable", selectedClientReceivesPlaintext: true }));
     return { content: [{ type: "text" as const, text: JSON.stringify(profile) }] };
   });

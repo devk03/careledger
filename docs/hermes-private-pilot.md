@@ -418,3 +418,20 @@ exited 0 without OOM. The exact worker identity/image/label/mount were rechecked
 before stopping it; containers and volume are retained. No database or records
 were mounted. This proves target-host decoder transport for generated inputs,
 not database authorization, MCP/client integration or the full deployed workflow.
+
+The private MCP composition now optionally exposes `get_approved_source_image`
+when verified record adapters are configured. It emits standard image content
+and document/page/original-hash citation metadata, with a separately hashed,
+bounded JPEG rendition. Source bytes are verified before isolated rendering;
+source/day permission and the pinned connection are rechecked afterward. Missing,
+unpublished, changed or revoked sources return no image. The tool is read-only,
+accepts only profile/document IDs and treats pixels as untrusted evidence, with
+an explicit warning about downscaling/illegibility and client/provider disclosure.
+Generated filesystem/child/MCP tests cover source denial and in-flight source or
+session revocation. A real stdio SDK client receives and verifies a generated
+image, then receives no image after revocation. The SDK fixture uses invented
+authorization, not a live database or human-approved grant. Actual Codex client,
+browser/database and deployed acceptance remain unverified.
+Server typecheck/build and 23 focused MCP/authorized-source/real-stdio tests
+passed for this composition. The MCP fixture is a protocol client, not proof of
+a configured AI application or a production database-backed source policy.

@@ -96,6 +96,11 @@ export interface ApprovedImageRepository {
     householdId: string; userId: string; careProfileId: string; documentId: string;
   }): Promise<OriginalImageReference | null>;
 }
+export interface ApprovedImageReader {
+  readApprovedImage(input: {
+    householdId: string; userId: string; careProfileId: string; documentId: string;
+  }): Promise<import("../ingest/imageRenditionProtocol.js").ImageRenditionResult | null>;
+}
 
 export interface PendingReviewRepository {
   /** No proposal content is returned; reviewer authority is rechecked on every call. */

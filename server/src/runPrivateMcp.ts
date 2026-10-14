@@ -4,6 +4,8 @@ import { PrivateAgentGrantStore } from "./auth/privateAgentGrants.js";
 import { createAuthorizedTimelineMcpServer } from "./mcp/authorizedTimeline.js";
 import { privatePilotConfig } from "./privatePilotConfig.js";
 import { SqliteFamilyTimeline } from "./storage/sqliteFamilyTimeline.js";
+import { createApprovedImageReader } from "./timeline/approvedImage.js";
+import { createParserSocketRenderer } from "./ingest/parserRenditionSocket.js";
 
 // Launch through authenticated SSH, with a browser-approved, nonsecret grant ID.
 // Never opens a network listener, issues a grant, writes a DB or prints credentials.
@@ -16,11 +18,13 @@ try {
   const repository = new SqliteFamilyTimeline(config.databasePath);
   try {
     const grants = new PrivateAgentGrantStore(join(config.secretsDirectory, "agent-grants"));
+    const images = config.records ? createApprovedImageReader({ repository, objectRoot: config.records.objectRoot,
+      render: createParserSocketRenderer({ socketPath: config.records.parserSocket, trustedWorkerUid: 10002 }) }) : undefined;
     const server = await createAuthorizedTimelineMcpServer({
       authorize: async () => {
         const scope = await grants.authorize(id, repository);
         return scope && await repository.isActiveAdult(scope) ? scope : null;
-      }, timeline: repository, pages: repository, profiles: repository });
+      }, timeline: repository, pages: repository, profiles: repository, ...(images ? { images } : {}) });
     const transport = new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 256 * 1024 });
     let closing = false;
     const lifetime = setTimeout(() => { void shutdown(); }, 3600 * 1000);
