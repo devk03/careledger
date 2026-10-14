@@ -358,3 +358,22 @@ they apply no database migrations. An off-host identity and public-recipient
 receipt have been provisioned on the maintainer's trusted device, outside Git;
 the private identity has not been transferred to Hermes. No production database
 snapshot, off-host record generation or full application restoration has run.
+
+Source text reads now additionally require the document to appear in the latest
+approved snapshot of a currently visible care day. A source grant by itself no
+longer authorizes an unpublished intake document. The synthetic SQL regression
+covers pre-publication denial, publication and source/day grant intersection;
+it remains unrun pending migration approval.
+
+A candidate worker-only image rendition helper prepares 1600-pixel JPEG evidence
+for clients with bounded MCP responses. It fully validates/decodes the owned
+original first, auto-orients, flattens on white, strips original metadata and
+returns separate original/rendition digests. It preserves originals and performs
+no transcription, diagnosis or inference. Generated-fixture tests cover geometry,
+metadata/orientation, input ownership, digests and corrupt-source denial.
+This helper is not yet connected to isolated subprocess transport or MCP; images
+must not be rendered inside the HTTP/MCP process to bypass that pending boundary.
+MCP repository calls also recheck their pinned authorization after a read
+completes, withholding results if consent/session identity changed during the
+operation. Server build/typecheck and 25 focused decoder/MCP/real-stdio tests
+passed; those tests do not replace the pending v7 database permission checks.

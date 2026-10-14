@@ -5,6 +5,21 @@ import type { AuthorizedScope } from "../src/timeline/types.js";
 
 const profileId = "11111111-1111-4111-8111-111111111111";
 const scope = { householdId: "invented-family", userId: "invented-adult" };
+it("withholds a completed repository result when its approval was revoked during the read", async () => {
+  let current: AuthorizedScope | null = scope;
+  const server = await createAuthorizedTimelineMcpServer({ authorize: async () => current,
+    timeline: { profileBelongsToHousehold: async () => true, listApprovedDays: async () => [] },
+    pages: { readApprovedPageChunk: async () => null },
+    profiles: { listVisibleCareProfiles: async () => { current = null; return [{ id: profileId, preferredName: "Invented private profile" }]; } },
+  });
+  const client = new Client({ name: "fictional-revocation-client", version: "0.1.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport); await client.connect(clientTransport);
+    const result = await client.callTool({ name: "list_care_profiles", arguments: {} });
+    expect(result.isError).toBe(true); expect(JSON.stringify(result)).not.toContain("Invented private profile");
+  } finally { await client.close(); await server.close(); }
+});
 async function fixture() {
   let identity: AuthorizedScope | null = { ...scope };
   let reads = 0;

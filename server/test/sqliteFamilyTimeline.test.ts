@@ -78,6 +78,38 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("requires current published-day membership as well as source permission before source text reaches AI", async () => {
+    const { path, writer } = database();
+    const secret = Buffer.alloc(32, 14); const token = "r".repeat(43);
+    writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) " +
+      "VALUES ('source-owner', 'owner-a', ?, ?, 1, 100, 4000000000, 100)").run(sessionTokenSha256(token), secret);
+    writer.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, page_count, status, uploaded_by, uploaded_at) " +
+      "VALUES ('unpublished-source', 'profile-a', ?, 'Invented unpublished source.pdf', 'clean', 1, 'complete', 'owner-a', 200)").run(documentHash);
+    writer.prepare("INSERT INTO document_pages (document_id, page_number, extracted_text, text_sha256, created_at) VALUES ('unpublished-source', 1, ?, ?, 200)")
+      .run(pageText, pageHash);
+    const preflight = { ok: true as const, tokenSha256: sessionTokenSha256(token), csrfToken: issueCsrfToken("source-owner", secret) };
+    const mutations = new SqliteFamilyMutations(path); const reader = new SqliteFamilyTimeline(path);
+    const query = { householdId: "family-a", userId: "owner-a", careProfileId: "profile-a", documentId: "unpublished-source", pageNumber: 1, offset: 0, maxChars: 1000 };
+    try {
+      expect(await reader.readApprovedPageChunk(query)).toBeNull();
+      const proposal = mutations.proposeDocumentDay({ preflight, careProfileId: "profile-a", documentId: "unpublished-source", careDay: "2030-04-16", nowSeconds: 201 });
+      if (!proposal.ok) throw new Error("Expected synthetic source proposal");
+      expect(await reader.readApprovedPageChunk(query)).toBeNull();
+      expect(mutations.reviewDocumentDay({ preflight, careProfileId: "profile-a", revisionId: proposal.revisionId,
+        expectedDayRevision: 0, decision: "accepted", nowSeconds: 202 })).toMatchObject({ ok: true });
+      expect(await reader.readApprovedPageChunk(query)).toMatchObject({ text: pageText, sourceSha256: documentHash });
+      expect(mutations.grantDocumentAccess({ preflight, careProfileId: "profile-a", documentId: "unpublished-source",
+        subjectUserId: "adult-a", allowed: true, nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect(await reader.readApprovedPageChunk({ ...query, userId: "adult-a" })).toBeNull();
+      expect(mutations.grantDayAccess({ preflight, careProfileId: "profile-a", careDay: "2030-04-16",
+        subjectUserId: "adult-a", level: "view", nowSeconds: 204 })).toMatchObject({ ok: true });
+      expect(await reader.readApprovedPageChunk({ ...query, userId: "adult-a" })).toMatchObject({ text: pageText });
+      expect(mutations.grantDayAccess({ preflight, careProfileId: "profile-a", careDay: "2030-04-16",
+        subjectUserId: "adult-a", level: "none", nowSeconds: 205 })).toMatchObject({ ok: true });
+      expect(await reader.readApprovedPageChunk({ ...query, userId: "adult-a" })).toBeNull();
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
   it("paginates a private inbox at tied upload times and removes own-intake access after revocation", async () => {
     const { path, writer } = database();
     const secret = Buffer.alloc(32, 13); const token = "q".repeat(43);

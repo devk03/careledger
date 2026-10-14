@@ -12,14 +12,20 @@ export async function createAuthorizedTimelineMcpServer(input: {
   const initial = await input.authorize();
   if (!initial) throw new Error("AUTH_REQUIRED");
   const scope = Object.freeze({ ...initial });
-  async function read<T>(operation: () => Promise<T>): Promise<T> {
+  async function assertCurrent(): Promise<void> {
     let current: AuthorizedScope | null;
     try { current = await input.authorize(); }
     catch { throw new Error("AUTH_REQUIRED"); }
     if (!current || current.userId !== scope.userId || current.householdId !== scope.householdId)
       throw new Error("AUTH_REQUIRED");
-    try { return await operation(); }
+  }
+  async function read<T>(operation: () => Promise<T>): Promise<T> {
+    await assertCurrent();
+    let value: T;
+    try { value = await operation(); }
     catch { throw new Error("READ_UNAVAILABLE"); }
+    await assertCurrent(); // Long source reads must not outlive a revoked approval.
+    return value;
   }
   const timeline: TimelineRepository = {
     profileBelongsToHousehold: (profileId) => read(() => input.timeline.profileBelongsToHousehold(profileId, scope.householdId)),

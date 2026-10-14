@@ -37,6 +37,18 @@ type SessionRow = {
   userAuthVersion: number; expiresAt: number; revokedAt: number | null; csrfSecret: Buffer;
 };
 
+// Shared by AI-readable source forms. A source grant alone never exposes intake drafts.
+const VISIBLE_PUBLISHED_SOURCE =
+  "EXISTS (SELECT 1 FROM day_nodes visible_day JOIN day_snapshots snapshot " +
+  "ON snapshot.day_node_id = visible_day.id AND snapshot.revision_no = " +
+  "(SELECT max(current_snapshot.revision_no) FROM day_snapshots current_snapshot WHERE current_snapshot.day_node_id = visible_day.id) " +
+  "JOIN day_snapshot_entries entry ON entry.snapshot_id = snapshot.id " +
+  "JOIN document_day_placement_revisions placement_revision ON placement_revision.id = entry.placement_revision_id " +
+  "JOIN document_day_placements placement ON placement.id = placement_revision.placement_id " +
+  "WHERE visible_day.care_profile_id = p.id AND placement.care_profile_id = p.id AND placement.document_id = d.id " +
+  "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access visible_access " +
+  "WHERE visible_access.care_profile_id = p.id AND visible_access.care_day = visible_day.care_day AND visible_access.subject_user_id = u.id)))";
+
 export class IncompatibleFamilyTimelineDatabase extends Error {
   constructor() { super("Family timeline database is unavailable or incompatible"); }
 }
@@ -217,6 +229,7 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       "JOIN document_pages pg ON pg.document_id = d.id AND pg.page_number = ? " +
       "WHERE p.household_id = ? AND p.id = ? AND p.archived_at IS NULL " +
       "AND d.id = ? AND d.archived_at IS NULL AND pg.extracted_text IS NOT NULL " +
+      "AND " + VISIBLE_PUBLISHED_SOURCE + " " +
       "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_document_access a " +
       "WHERE a.care_profile_id = p.id AND a.document_id = d.id AND a.subject_user_id = u.id))",
     ).get(input.userId, input.pageNumber, input.householdId, input.careProfileId, input.documentId);
