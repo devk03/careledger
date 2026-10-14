@@ -173,8 +173,16 @@ application restore remain unverified.
 Sharp is now pinned at 0.35.5 in both server and parser lockfiles, addressing
 [GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w).
 Focused image/parser tests pass and both production dependency audits report
-zero vulnerabilities. The patched parser still needs a fresh Hermes image smoke
-before production intake is enabled.
+zero vulnerabilities. On October 14, the patched parser from `023f7fc` built on
+Hermes as image
+`sha256:6f0791ddea30a438f632a60c9c66b2d4f55404c0371903ed15c2ca38cc00085b`.
+A fresh non-root, network-disabled, read-only worker passed its control health
+check and the generated PNG/JPEG acceptance, truncation denial and PDF denial
+probe through its private socket. Its only persistent mount was a new synthetic
+socket volume, with a 512 MiB cap and 480-second process lifetime. The client
+exited 0. The exact worker identity/image/label/mount were rechecked before
+stopping it; test containers and volume are retained. No database or source
+record was mounted. Production scanner/intake and resource stress remain pending.
 
 The private bundle codec uses fixed database/recovery/object member types rather
 than archive-supplied paths. It verifies exact lengths and digests, rejects trailing
