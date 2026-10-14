@@ -40,7 +40,8 @@ const app = createHttpApp({ authenticate: cookieAuthenticator(timeline), timelin
   ownerSetup: { bootstrap, recoveryPepper }, allowInvitations: false,
   readiness: () => timeline.ready() });
 app.use(express.static(config.webRoot, { index: false, dotfiles: "deny", redirect: false }));
-app.get(["/", "/pilot"], (_request, response) => {
+app.get("/", (_request, response) => { response.redirect(302, "/pilot"); });
+app.get("/pilot", (_request, response) => {
   response.sendFile(join(config.webRoot, "index.html"));
 });
 app.use((_request, response) => { response.status(404).json({ error: "NOT_FOUND" }); });

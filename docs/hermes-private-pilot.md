@@ -32,6 +32,17 @@ history and MCP do not return proposals. HTTP tests cover authentication,
 generic denial, freshness and uncached responses. SQLite permission tests need
 separate approval to apply existing migrations to synthetic test databases.
 
-The production container, caregiver UI, durable file intake, connector setup,
-HTTPS, encrypted off-host backups, restore and deployed acceptance are not yet
-proven. This document is a runbook candidate, not a release-readiness claim.
+Feature commit `16f6cba` built on Hermes into `adeno-private:16f6cba`, image
+manifest `sha256:cbb5dbd7754770592ffc4a7a220d357ac6c4bb554a7ab5261a00de5c0cde7673`.
+A network-disabled, read-only, non-root container loaded SQLite and verified a
+synthetic Argon2 hash. This proves native runtime compatibility, not app startup.
+
+The `/pilot` UI now implements the v2 login/setup, note-proposal and explicit
+review APIs, using the existing component library. UI tests verify password POST
+handling and publication only after reviewing the actual proposal with its
+observed day revision. It still lacks profile creation, durable file intake and
+complete history pagination; these are remaining work, not completed features.
+
+HTTPS, connector setup, encrypted off-host backups, restore and deployed
+acceptance remain unproven. DNS configuration is deferred to the maintainer for
+October 15. This document is a runbook candidate, not a readiness claim.

@@ -14,6 +14,7 @@ import { RecordsPage } from "./RecordsPage";
 import { RecoveryPage } from "./RecoveryPage";
 import { SetupPage } from "./SetupPage";
 import { WorkspacePage } from "./WorkspacePage";
+import { PrivatePilotPage } from "./PrivatePilotPage";
 
 const rootRoute = createRootRoute({
   component: Outlet,
@@ -32,6 +33,7 @@ const routeTree = rootRoute.addChildren([
   route("/recover", RecoveryPage),
   route("/records", RecordsPage),
   route("/workspace", WorkspacePage),
+  route("/pilot", PrivatePilotPage),
   route("/backup", BackupPage),
   route("/design-system", () => import.meta.env.DEV ? <DesignSystemPage /> : <LandingPage />),
 ]);
