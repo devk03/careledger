@@ -1,3 +1,4 @@
+import { noteProvenanceInput } from "../timeline/noteProvenance.js";
 import express, { type Request } from "express";
 
 import { issueCsrfToken, preflightCookieMutation, readCookieSession,
@@ -42,6 +43,7 @@ export type DayAccessWriter = {
   proposeNote(input: {
     preflight: { ok: true; tokenSha256: string; csrfToken: string };
     careProfileId: string; careDay: string; body: string;
+    provenance?: import("@adeno/contracts").NoteProvenanceInput;
   }): NoteProposalResult;
   reviewNote(input: {
     preflight: { ok: true; tokenSha256: string; csrfToken: string };
@@ -72,6 +74,7 @@ export function createHttpApp(dependencies: {
   agentConnectionsAvailable?: boolean;
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
+  noteProvenanceAvailable?: boolean;
   familyAccess?: import("../timeline/types.js").FamilyAccessRepository;
   readiness?: () => boolean;
   ownerSetup?: { bootstrap: BootstrapTokenStore; recoveryPepper: Uint8Array };
@@ -112,6 +115,11 @@ export function createHttpApp(dependencies: {
   app.get("/api/v2/document-workflow/capabilities", async (request, response) => {
     if (!await dependencies.authenticate(request)) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
     response.json({ available: dependencies.documentWorkflowAvailable === true });
+  });
+
+  app.get("/api/v2/note-provenance/capabilities", async (request, response) => {
+    if (!await dependencies.authenticate(request)) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+    response.json({ available: dependencies.noteProvenanceAvailable === true });
   });
 
   if (dependencies.familyAccess) app.get("/api/v2/family/access", async (request, response) => {
@@ -388,10 +396,16 @@ export function createHttpApp(dependencies: {
           typeof (body as Record<string, unknown>).body !== "string") {
           response.status(400).json({ error: "INVALID_BODY" }); return;
         }
+        const rawProvenance = (body as { provenance?: unknown }).provenance;
+        const provenance = rawProvenance === undefined ? undefined : noteProvenanceInput.safeParse(rawProvenance);
+        if (provenance && (!provenance.success || dependencies.noteProvenanceAvailable !== true)) {
+          response.status(400).json({ error: "INVALID_PROVENANCE" }); return;
+        }
         try {
           const result = dependencies.mutations!.proposeNote({ preflight,
             careProfileId: request.params.careProfileId, careDay: request.params.careDay,
-            body: (body as { body: string }).body });
+            body: (body as { body: string }).body,
+            ...(provenance?.success ? { provenance: provenance.data } : {}) });
           response.status(result.ok ? 201 : result.status).json(result.ok ? result : { error: result.error });
         } catch (error) {
           if (error instanceof RangeError || error instanceof InvalidTimelineDate)

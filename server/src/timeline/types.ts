@@ -48,6 +48,8 @@ export type NoteReviewDetail = {
   revisionId: string; careDay: ISODate; body: string;
   authorLabel: string; createdAt: string; expectedDayRevision: number;
   attribution: "family_note"; state: "proposed";
+  provenance?: import("@adeno/contracts").EntryProvenance;
+  sources?: import("@adeno/contracts").SourceReference[];
 };
 
 export interface NoteReviewRepository {
@@ -73,6 +75,7 @@ export type InboxDocument = {
   documentId: string; displayName: string; sourceSha256: string;
   mediaType: "application/pdf" | "image/png" | "image/jpeg"; byteSize: number;
   pageCount: number; uploadedAt: string;
+  uploadedBy?: import("@adeno/contracts").AccessActor;
   pendingDayProposals: { revisionId: string; careDay: ISODate }[];
 };
 export interface DocumentInboxRepository {

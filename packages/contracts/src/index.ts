@@ -71,3 +71,4 @@ export type ApprovedPageChunk = {
 };
 export type { AccessActor, FamilyAccessOverview } from "./familyAccessWire.js";
 export type { EntryProvenance, DocumentProvenance } from "./provenanceWire.js";
+export type { NoteProvenanceInput } from "./noteProvenanceWire.js";

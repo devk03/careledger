@@ -7,6 +7,8 @@ export type EntryProvenance = {
   /** Reporter is distinct from the account that entered the information. */
   reportedBy?: AccessActor;
   sourceKind?: string;
+  reporterLabel?: string;
+  sourceDescription?: string;
   citations?: { documentId: string; pageNumber: number }[];
 };
 export type DocumentProvenance = {

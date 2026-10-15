@@ -49,7 +49,7 @@ function emptyDatabase(): { path: string; writer: Database.Database } {
   return { path, writer };
 }
 
-function database(): { path: string; writer: Database.Database } {
+function database(provenance = false): { path: string; writer: Database.Database } {
   const { path, writer } = emptyDatabase();
   writer.prepare("INSERT INTO households (singleton, id, display_name, created_at) VALUES (1, 'family-a', 'Fictional family', 100)").run();
   for (const [id, role, kind] of [
@@ -74,10 +74,73 @@ function database(): { path: string; writer: Database.Database } {
   writer.prepare("INSERT INTO day_snapshot_entries (snapshot_id, position, placement_revision_id) VALUES ('snapshot-a', 0, 'placement-revision-a')").run();
   writer.prepare("INSERT INTO day_snapshot_entries (snapshot_id, position, note_revision_id) VALUES ('snapshot-a', 1, 'note-revision-a')").run();
   writer.prepare("INSERT INTO day_access_events (id, care_profile_id, care_day, subject_user_id, event_no, level, actor_user_id, occurred_at) VALUES ('grant-day-a', 'profile-a', '2030-04-12', 'adult-a', 1, 'view', 'owner-a', 102)").run();
+  if (provenance) {
+    const sql = readFileSync(join(directory, "0008_note_provenance.sql"), "utf8");
+    writer.exec(sql);
+    writer.prepare("INSERT INTO schema_migrations (version, name, sha256, app_version, applied_at) VALUES (8, 'note_provenance', ?, 'fictional-test', 103)")
+      .run(createHash("sha256").update(sql).digest("hex"));
+    writer.pragma("user_version = 8");
+  }
   return { path, writer };
 }
 
+function provenanceSession(writer: Database.Database, userId: string, marker: string) {
+  const secret = Buffer.alloc(32, marker.charCodeAt(0)); const token = marker.repeat(43);
+  writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, 1, 100, 1000, 100)")
+    .run(`session-${marker}`, userId, sessionTokenSha256(token), secret);
+  return { ok: true as const, tokenSha256: sessionTokenSha256(token), csrfToken: issueCsrfToken(`session-${marker}`, secret) };
+}
+
 describe("fictional v7 family timeline", () => {
+  it("stores immutable reported-source provenance atomically and reveals linked evidence only after publication with current grants", async () => {
+    const { path, writer } = database(true); const reader = new SqliteFamilyTimeline(path); const mutations = new SqliteFamilyMutations(path);
+    const owner = provenanceSession(writer, "owner-a", "x"); const adult = provenanceSession(writer, "adult-a", "y");
+    const scope = { householdId: "family-a", userId: "owner-a", careProfileId: "profile-a" };
+    try {
+      writer.prepare("INSERT INTO source_objects (sha256, byte_size, media_type, created_at) VALUES (?, 100, 'application/pdf', 100)").run("c".repeat(64));
+      writer.prepare("INSERT INTO documents (id, care_profile_id, source_sha256, original_display_name, scan_verdict, page_count, status, uploaded_by, uploaded_at) VALUES ('note-source', 'profile-a', ?, 'invented-note-source.pdf', 'clean', 1, 'complete', 'owner-a', 100)").run("c".repeat(64));
+      writer.prepare("INSERT INTO document_pages (document_id, page_number, extracted_text, text_sha256, created_at) VALUES ('note-source', 1, ?, ?, 100)").run(pageText, pageHash);
+      const sourceQuery = { ...scope, documentId: "note-source", pageNumber: 1, offset: 0, maxChars: 1000 };
+      expect(await reader.readApprovedPageChunk(sourceQuery)).toBeNull();
+      expect(reader.supportsNoteProvenance()).toBe(true);
+      const proposed = mutations.proposeNote({ preflight: owner, careProfileId: "profile-a", careDay: "2030-04-15", body: "Wholly invented reported observation.",
+        provenance: { reporterLabel: "Invented reporter", sourceKind: "document", sourceDescription: "An invented report, page 1.", documentId: "note-source", pageNumber: 1 }, nowSeconds: 200 });
+      if (!proposed.ok) throw new Error("Synthetic proposal failed");
+      expect(await reader.readPendingNote({ ...scope, revisionId: proposed.revisionId })).toMatchObject({ provenance: { reporterLabel: "Invented reporter", sourceKind: "document", citations: [{ documentId: "note-source", pageNumber: 1 }] } });
+      expect((await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 })).some(day => day.day === "2030-04-15")).toBe(false);
+      expect(() => writer.prepare("UPDATE family_note_provenance SET reporter_label = 'Changed' WHERE note_revision_id = ?").run(proposed.revisionId)).toThrow();
+      expect(mutations.reviewNote({ preflight: owner, careProfileId: "profile-a", revisionId: proposed.revisionId, expectedDayRevision: 0, decision: "accepted", nowSeconds: 201 })).toMatchObject({ ok: true });
+      const published = (await reader.listApprovedDays({ ...scope, throughDay: "2030-04-30", limit: 10 }))[0];
+      expect(published?.sources[0]?.documentId).toBe("note-source");
+      expect(await reader.readApprovedPageChunk(sourceQuery)).toBeTruthy();
+      expect(published?.statements[0]?.provenance).toMatchObject({ reporterLabel: "Invented reporter", recordedBy: { userId: "owner-a" }, reviewedBy: { userId: "owner-a" }, citations: [{ documentId: "note-source", pageNumber: 1 }] });
+      expect(mutations.grantDayAccess({ preflight: owner, careProfileId: "profile-a", careDay: "2030-04-15", subjectUserId: "adult-a", level: "view", nowSeconds: 202 })).toMatchObject({ ok: true });
+      const denied = (await reader.listApprovedDays({ ...scope, userId: "adult-a", throughDay: "2030-04-30", limit: 10 }))[0];
+      expect(denied?.sources).toEqual([]); expect(denied?.statements[0]?.provenance?.citations).toEqual([]);
+      expect(mutations.grantDocumentAccess({ preflight: owner, careProfileId: "profile-a", documentId: "note-source", subjectUserId: "adult-a", allowed: true, nowSeconds: 202 })).toMatchObject({ ok: true });
+      expect((await reader.listApprovedDays({ ...scope, userId: "adult-a", throughDay: "2030-04-30", limit: 10 }))[0]?.sources[0]?.documentId).toBe("note-source");
+      expect(mutations.grantDocumentAccess({ preflight: owner, careProfileId: "profile-a", documentId: "note-source", subjectUserId: "adult-a", allowed: false, nowSeconds: 203 })).toMatchObject({ ok: true });
+      expect((await reader.listApprovedDays({ ...scope, userId: "adult-a", throughDay: "2030-04-30", limit: 10 }))[0]?.sources).toEqual([]);
+      expect(await reader.readApprovedPageChunk({ ...sourceQuery, userId: "adult-a" })).toBeNull();
+      expect(mutations.grantProfileIntake({ preflight: owner, careProfileId: "profile-a", subjectUserId: "adult-a", allowed: true, nowSeconds: 203 })).toMatchObject({ ok: true });
+      const before = writer.prepare("SELECT COUNT(*) count FROM family_notes").get();
+      expect(mutations.proposeNote({ preflight: adult, careProfileId: "profile-a", careDay: "2030-04-16", body: "Invented inaccessible-source attempt.", provenance: { sourceKind: "document", documentId: "note-source", pageNumber: 1 }, nowSeconds: 204 })).toMatchObject({ ok: false, error: "NOT_FOUND" });
+      expect(writer.prepare("SELECT COUNT(*) count FROM family_notes").get()).toEqual(before);
+      expect(() => mutations.proposeNote({ preflight: owner, careProfileId: "profile-a", careDay: "2030-04-16", body: "Invented invalid metadata.", provenance: { sourceKind: "document" }, nowSeconds: 204 })).toThrow(RangeError);
+      expect(() => mutations.proposeNote({ preflight: owner, careProfileId: "profile-a", careDay: "2030-04-16", body: "Invented oversized metadata.", provenance: { sourceKind: "unknown", reporterLabel: "x".repeat(121) }, nowSeconds: 204 })).toThrow(RangeError);
+      writer.prepare("INSERT INTO care_profiles (id, household_id, preferred_name, created_by, created_at, updated_at) VALUES ('other-profile', 'family-a', 'Other invented person', 'owner-a', 100, 100)").run();
+      expect(mutations.proposeNote({ preflight: owner, careProfileId: "other-profile", careDay: "2030-04-16", body: "Invented wrong-person attempt.", provenance: { sourceKind: "document", documentId: "note-source", pageNumber: 1 }, nowSeconds: 204 })).toMatchObject({ ok: false, error: "NOT_FOUND" });
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
+  it("keeps v7 notes working and rejects provenance until the explicit schema upgrade", () => {
+    const { path, writer } = database(); const mutations = new SqliteFamilyMutations(path); const reader = new SqliteFamilyTimeline(path);
+    try {
+      expect(reader.supportsNoteProvenance()).toBe(false);
+      expect(() => mutations.proposeNote({ preflight: provenanceSession(writer, "owner-a", "z"), careProfileId: "profile-a", careDay: "2030-04-16", body: "Invented v7 note.", provenance: { sourceKind: "unknown" }, nowSeconds: 200 })).toThrow(RangeError);
+    } finally { reader.close(); mutations.close(); writer.close(); }
+  });
+
   it("retains uploader, entry account, reviewer and publication metadata without inventing a reporter", async () => {
     const { path, writer } = database(); const reader = new SqliteFamilyTimeline(path);
     try {
@@ -290,8 +353,13 @@ describe("fictional v7 family timeline", () => {
     } finally { reader.close(); mutations.close(); writer.close(); }
   });
 
-  it("restores an encrypted paired database and original without reviving sessions or altering the source", async () => {
+  it.each([false, true])("restores an encrypted paired database and original without reviving sessions or altering the source (provenance schema: %s)", async provenance => {
     const { path, writer } = emptyDatabase();
+    if (provenance) {
+      const sql = readFileSync(join(directory, "0008_note_provenance.sql"), "utf8"); writer.exec(sql);
+      writer.prepare("INSERT INTO schema_migrations (version, name, sha256, app_version, applied_at) VALUES (8, 'note_provenance', ?, 'fictional-test', 103)").run(createHash("sha256").update(sql).digest("hex"));
+      writer.pragma("user_version = 8");
+    }
     const root = mkdtempSync(join(tmpdir(), "adeno-fictional-snapshot-"));
     const objectRoot = join(root, "objects"); mkdirSync(objectRoot, { mode: 0o700 });
     const bytes = Buffer.from("An independently invented original for the backup regression.");
@@ -311,6 +379,11 @@ describe("fictional v7 family timeline", () => {
       "VALUES ('backup-document', 'backup-profile', ?, 'invented.png', 'clean', 'needs_review', 'backup-owner', 100)").run(hash);
     writer.prepare("INSERT INTO sessions (id, user_id, token_sha256, csrf_secret, auth_version, created_at, expires_at, last_seen_at) " +
       "VALUES ('backup-session', 'backup-owner', ?, ?, 1, 100, 4000000000, 100)").run("f".repeat(64), Buffer.alloc(32, 9));
+    if (provenance) {
+      writer.prepare("INSERT INTO family_notes (id, care_profile_id, created_by, created_at) VALUES ('backup-note', 'backup-profile', 'backup-owner', 100)").run();
+      writer.prepare("INSERT INTO family_note_revisions (id, note_id, revision_no, care_day, body, created_by, created_at) VALUES ('backup-note-revision', 'backup-note', 1, '2030-04-12', 'Invented backup note.', 'backup-owner', 100)").run();
+      writer.prepare("INSERT INTO family_note_provenance (note_revision_id, reporter_label, source_kind, source_description) VALUES ('backup-note-revision', 'Invented reporter', 'family_observation', 'Invented provenance for restore verification.')").run();
+    }
     writer.close();
     const sourceBefore = createHash("sha256").update(readFileSync(path)).digest("hex");
     const identityPath = join(root, "off-host-test-identity");
@@ -332,6 +405,7 @@ describe("fictional v7 family timeline", () => {
     try {
       expect(restored.prepare("SELECT id, source_sha256 FROM documents").all()).toEqual([{ id: "backup-document", source_sha256: hash }]);
       expect(restored.prepare("SELECT 1 FROM sessions WHERE revoked_at IS NULL").get()).toBeUndefined();
+      if (provenance) expect(restored.prepare("SELECT reporter_label, source_kind, source_description FROM family_note_provenance").get()).toEqual({ reporter_label: "Invented reporter", source_kind: "family_observation", source_description: "Invented provenance for restore verification." });
     } finally { restored.close(); }
     await expect(restorePrivateSnapshot({ encryptedPath, expectedSha256: "0".repeat(64), identityPath,
       workRoot: join(root, "wrong-pin-work"), destinationRoot: join(root, "wrong-pin-restore") })).rejects.toThrow();

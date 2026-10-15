@@ -1,3 +1,4 @@
+import { noteProvenanceInput } from "../timeline/noteProvenance.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import Database from "better-sqlite3";
@@ -250,9 +251,13 @@ export class SqliteFamilyMutations implements TrustedIntakeRepository {
 
   proposeNote(input: {
     preflight: Extract<MutationPreflight, { ok: true }>;
-    careProfileId: string; careDay: string; body: string; nowSeconds?: number;
+    careProfileId: string; careDay: string; body: string; provenance?: import("@adeno/contracts").NoteProvenanceInput; nowSeconds?: number;
   }): NoteProposalResult {
     parseISODate(input.careDay);
+    const parsed = input.provenance === undefined ? undefined : noteProvenanceInput.safeParse(input.provenance);
+    if (parsed && !parsed.success) throw new RangeError("Invalid note provenance");
+    if (parsed && this.db.pragma("user_version", { simple: true }) !== 8) throw new RangeError("Note provenance is unavailable");
+    const provenance = parsed?.success ? parsed.data : undefined;
     if (input.body.trim().length < 1 || input.body.length > 10_000)
       throw new RangeError("Invalid note body");
     return this.db.transaction((): NoteProposalResult => {
@@ -263,6 +268,11 @@ export class SqliteFamilyMutations implements TrustedIntakeRepository {
       ).get(input.careProfileId, actor.userId);
       if (actor.role !== "owner" && !intake)
         return { ok: false, status: 403, error: "FORBIDDEN" };
+      if (provenance?.documentId) {
+        const source = this.db.prepare("SELECT 1 FROM documents d JOIN document_pages page ON page.document_id = d.id AND page.page_number = ? WHERE d.id = ? AND d.care_profile_id = ? AND d.archived_at IS NULL AND d.scan_verdict = 'clean' AND ( ? = 'owner' OR EXISTS (SELECT 1 FROM current_document_access a WHERE a.document_id = d.id AND a.care_profile_id = d.care_profile_id AND a.subject_user_id = ?) OR (d.uploaded_by = ? AND EXISTS (SELECT 1 FROM current_profile_intake i WHERE i.care_profile_id = d.care_profile_id AND i.subject_user_id = ?)))")
+          .get(provenance.pageNumber, provenance.documentId, input.careProfileId, actor.role, actor.userId, actor.userId, actor.userId);
+        if (!source) return { ok: false, status: 404, error: "NOT_FOUND" };
+      }
       const noteId = randomUUID();
       const revisionId = randomUUID();
       const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
@@ -271,6 +281,8 @@ export class SqliteFamilyMutations implements TrustedIntakeRepository {
       this.db.prepare("INSERT INTO family_note_revisions (id, note_id, revision_no, care_day, " +
         "body, created_by, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)")
         .run(revisionId, noteId, input.careDay, input.body.trim(), actor.userId, now);
+      if (provenance) this.db.prepare("INSERT INTO family_note_provenance (note_revision_id, reporter_label, source_kind, source_description, document_id, page_number) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(revisionId, provenance.reporterLabel ?? null, provenance.sourceKind, provenance.sourceDescription ?? null, provenance.documentId ?? null, provenance.pageNumber ?? null);
       let reviewRequestId: string | null = null;
       if (actor.memberKind === "child") {
         reviewRequestId = randomUUID();

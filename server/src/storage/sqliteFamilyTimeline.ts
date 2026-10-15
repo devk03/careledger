@@ -17,6 +17,7 @@ const MIGRATIONS = [
   [5, "managed_e2ee_sync", "14c4ec55e77fd721386500000f122c1d21cad740e5205a622429fe4a118fd5be"],
   [6, "sparse_care_days", "faa0e162b458861ac40efda0ca90ddf847ed5c19a79455e699053d932ac6cefb"],
   [7, "family_day_access", "9c7233be9238bd7fc6ad08b92881737accb17057fe7486a2192a2168051cc947"],
+  [8, "note_provenance", "0a87325d2e3bf447fbfa4c3a64e4c830bd1cde2419cb4e8d349c347f3052074d"],
 ] as const;
 
 type MigrationRow = { version: number; name: string; sha256: string };
@@ -52,6 +53,16 @@ const VISIBLE_PUBLISHED_SOURCE =
   "WHERE visible_day.care_profile_id = p.id AND placement.care_profile_id = p.id AND placement.document_id = d.id " +
   "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access visible_access " +
   "WHERE visible_access.care_profile_id = p.id AND visible_access.care_day = visible_day.care_day AND visible_access.subject_user_id = u.id)))";
+
+const VISIBLE_PUBLISHED_NOTE_SOURCE =
+  "EXISTS (SELECT 1 FROM day_nodes visible_day JOIN day_snapshots snapshot ON snapshot.day_node_id = visible_day.id " +
+  "AND snapshot.revision_no = (SELECT max(current_snapshot.revision_no) FROM day_snapshots current_snapshot WHERE current_snapshot.day_node_id = visible_day.id) " +
+  "JOIN day_snapshot_entries entry ON entry.snapshot_id = snapshot.id " +
+  "JOIN family_note_provenance provenance ON provenance.note_revision_id = entry.note_revision_id " +
+  "JOIN family_note_revisions revision ON revision.id = provenance.note_revision_id JOIN family_notes note ON note.id = revision.note_id " +
+  "WHERE visible_day.care_profile_id = p.id AND note.care_profile_id = p.id AND provenance.document_id = d.id " +
+  "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_day_access visible_access WHERE visible_access.care_profile_id = p.id " +
+  "AND visible_access.care_day = visible_day.care_day AND visible_access.subject_user_id = u.id)))";
 
 export class IncompatibleFamilyTimelineDatabase extends Error {
   constructor() { super("Family timeline database is unavailable or incompatible"); }
@@ -115,6 +126,39 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       "SELECT 1 FROM users WHERE id = ? AND household_id = ? " +
       "AND status = 'active' AND member_kind = 'adult'",
     ).get(input.userId, input.householdId) !== undefined;
+  }
+
+  supportsNoteProvenance(): boolean { return this.db.pragma("user_version", { simple: true }) === 8; }
+
+  private publishedSourcePredicate(): string {
+    return this.supportsNoteProvenance() ? `(${VISIBLE_PUBLISHED_SOURCE} OR ${VISIBLE_PUBLISHED_NOTE_SOURCE})` : VISIBLE_PUBLISHED_SOURCE;
+  }
+
+  private readNoteProvenance(revisionId: string, input: { householdId: string; userId: string; careProfileId: string }, published: boolean):
+    Partial<import("@adeno/contracts").EntryProvenance> {
+    if (!this.supportsNoteProvenance()) return {};
+    const row = this.db.prepare("SELECT reporter_label reporterLabel, source_kind sourceKind, source_description sourceDescription, document_id documentId, page_number pageNumber FROM family_note_provenance WHERE note_revision_id = ?")
+      .get(revisionId) as { reporterLabel: string | null; sourceKind: string; sourceDescription: string | null; documentId: string | null; pageNumber: number | null } | undefined;
+    if (!row) return {};
+    let citations: { documentId: string; pageNumber: number }[] = [];
+    if (row.documentId && row.pageNumber !== null) {
+      const allowed = this.db.prepare("SELECT 1 FROM documents d JOIN care_profiles p ON p.id = d.care_profile_id AND p.archived_at IS NULL JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' WHERE p.household_id = ? AND p.id = ? AND d.id = ? AND d.archived_at IS NULL AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_document_access a WHERE a.care_profile_id = p.id AND a.document_id = d.id AND a.subject_user_id = u.id))" +
+        (published ? " AND " + this.publishedSourcePredicate() : ""))
+        .get(input.userId, input.householdId, input.careProfileId, row.documentId);
+      if (allowed) citations = [{ documentId: row.documentId, pageNumber: row.pageNumber }];
+    }
+    return { sourceKind: row.sourceKind, ...(row.reporterLabel ? { reporterLabel: row.reporterLabel } : {}),
+      ...(row.sourceDescription ? { sourceDescription: row.sourceDescription } : {}), citations };
+  }
+
+  private noteSourceReferences(citations: { documentId: string; pageNumber: number }[], careProfileId: string): import("@adeno/contracts").SourceReference[] {
+    return citations.flatMap(citation => {
+      const document = this.db.prepare("SELECT d.id documentId, d.original_display_name displayName, d.source_sha256 sourceSha256, d.uploaded_at uploadedAt, o.media_type mediaType, uploader.id userId, uploader.display_name uploaderLabel FROM documents d JOIN source_objects o ON o.sha256 = d.source_sha256 JOIN users uploader ON uploader.id = d.uploaded_by WHERE d.id = ? AND d.care_profile_id = ? AND d.archived_at IS NULL")
+        .get(citation.documentId, careProfileId) as { documentId: string; displayName: string; sourceSha256: string; uploadedAt: number; mediaType: "application/pdf" | "image/png" | "image/jpeg"; userId: string; uploaderLabel: string } | undefined;
+      return document ? [{ documentId: document.documentId, displayName: document.displayName, sourceSha256: document.sourceSha256,
+        uploadedAt: new Date(document.uploadedAt * 1000).toISOString(), mediaType: document.mediaType, pageNumbers: [citation.pageNumber],
+        provenance: { uploadedBy: { userId: document.userId, displayName: document.uploaderLabel } } }] : [];
+    });
   }
 
   async readFamilyAccess(input: { householdId: string; userId: string }):
@@ -258,7 +302,7 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
         ).get(entry.noteRevisionId, input.careProfileId);
         if (note) statements.push({ id: note.id, text: note.text, attribution: "family_note",
           ...(note.authorLabel === null ? {} : { authorLabel: note.authorLabel }), status: "uncertain",
-          provenance: { sourceKind: "family_note", recordedBy: { userId: note.recorderId, displayName: note.authorLabel ?? "Unknown account" },
+          provenance: { sourceKind: "family_note", ...this.readNoteProvenance(note.id, input, true), recordedBy: { userId: note.recorderId, displayName: note.authorLabel ?? "Unknown account" },
             recordedAt: new Date(note.recordedAt * 1000).toISOString(),
             ...(note.reviewerId && note.reviewerLabel && note.reviewedAt !== null ? {
               reviewedBy: { userId: note.reviewerId, displayName: note.reviewerLabel }, reviewedAt: new Date(note.reviewedAt * 1000).toISOString(),
@@ -277,6 +321,14 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
           provenance: { sourceKind: claim.sourceKind, recordedBy: { userId: claim.recorderId, displayName: claim.authorLabel ?? "Unknown account" },
             recordedAt: new Date(claim.recordedAt * 1000).toISOString(),
             ...(claim.attestedId && claim.attestedLabel ? { reportedBy: { userId: claim.attestedId, displayName: claim.attestedLabel } } : {}) } });
+      }
+    }
+    for (const statement of statements) {
+      if (statement.attribution !== "family_note") continue;
+      for (const source of this.noteSourceReferences(statement.provenance?.citations ?? [], input.careProfileId)) {
+        const current = sources.get(source.documentId);
+        if (current) { for (const page of source.pageNumbers) if (!current.pageNumbers.includes(page)) current.pageNumbers.push(page); }
+        else sources.set(source.documentId, source);
       }
     }
     // Link only source references already authorized for this published day. Never
@@ -307,7 +359,7 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       "JOIN document_pages pg ON pg.document_id = d.id AND pg.page_number = ? " +
       "WHERE p.household_id = ? AND p.id = ? AND p.archived_at IS NULL " +
       "AND d.id = ? AND d.archived_at IS NULL AND pg.extracted_text IS NOT NULL " +
-      "AND " + VISIBLE_PUBLISHED_SOURCE + " " +
+      "AND " + this.publishedSourcePredicate() + " " +
       "AND (u.role = 'owner' OR EXISTS (SELECT 1 FROM current_document_access a " +
       "WHERE a.care_profile_id = p.id AND a.document_id = d.id AND a.subject_user_id = u.id))",
     ).get(input.userId, input.pageNumber, input.householdId, input.careProfileId, input.documentId);
@@ -368,6 +420,7 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
   async readPendingNote(input: {
     householdId: string; userId: string; careProfileId: string; revisionId: string;
   }): Promise<NoteReviewDetail | null> {
+    return this.db.transaction((): NoteReviewDetail | null => {
     const row = this.db.prepare<[string, string, string, string], {
       revisionId: string; careDay: ISODate; body: string; authorLabel: string;
       createdAt: number; expectedDayRevision: number;
@@ -388,8 +441,11 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       "AND a.subject_user_id = reviewer.id AND a.level = 'publish'))",
     ).get(input.userId, input.householdId, input.careProfileId, input.revisionId);
     if (!row) return null;
+    const provenance = this.readNoteProvenance(input.revisionId, input, false);
     return { ...row, createdAt: new Date(row.createdAt * 1000).toISOString(),
-      attribution: "family_note", state: "proposed" };
+      attribution: "family_note", state: "proposed", provenance,
+      sources: this.noteSourceReferences(provenance.citations ?? [], input.careProfileId) };
+    }).deferred();
   }
 
   async readOriginalImageReference(input: {
@@ -420,7 +476,7 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
       "WHERE p.household_id = ? AND p.id = ? AND d.id = ? AND d.archived_at IS NULL " +
       "AND d.scan_verdict = 'clean' AND d.page_count = 1 AND d.status IN ('needs_review', 'complete') " +
-      "AND s.media_type IN ('image/png', 'image/jpeg') AND " + VISIBLE_PUBLISHED_SOURCE + " " +
+      "AND s.media_type IN ('image/png', 'image/jpeg') AND " + this.publishedSourcePredicate() + " " +
       "AND ((u.role = 'owner' AND u.member_kind = 'adult') OR EXISTS " +
       "(SELECT 1 FROM current_document_access a WHERE a.document_id = d.id AND a.care_profile_id = p.id AND a.subject_user_id = u.id))",
     ).get(input.userId, input.householdId, input.careProfileId, input.documentId) ?? null;
@@ -433,10 +489,11 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       !/^[a-zA-Z0-9_-]{1,64}$/.test(input.before.documentId))) throw new RangeError("Invalid inbox cursor");
     return this.db.transaction(() => {
       const rows = this.db.prepare<[string, string, string, number | null, number | null, number | null, string | null],
-        Omit<InboxDocument, "uploadedAt" | "pendingDayProposals"> & { uploadedAt: number }>(
+        Omit<InboxDocument, "uploadedAt" | "pendingDayProposals"> & { uploadedAt: number; uploaderId: string; uploaderLabel: string }>(
         "SELECT d.id documentId, d.original_display_name displayName, d.source_sha256 sourceSha256, " +
-        "s.media_type mediaType, s.byte_size byteSize, d.page_count pageCount, d.uploaded_at uploadedAt " +
+        "s.media_type mediaType, s.byte_size byteSize, d.page_count pageCount, d.uploaded_at uploadedAt, uploader.id uploaderId, uploader.display_name uploaderLabel " +
         "FROM documents d JOIN source_objects s ON s.sha256 = d.source_sha256 " +
+        "JOIN users uploader ON uploader.id = d.uploaded_by " +
         "JOIN care_profiles p ON p.id = d.care_profile_id AND p.archived_at IS NULL " +
         "JOIN users u ON u.id = ? AND u.household_id = p.household_id AND u.status = 'active' " +
         "WHERE p.household_id = ? AND p.id = ? AND d.archived_at IS NULL " +
@@ -457,7 +514,9 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
           "AND NOT EXISTS (SELECT 1 FROM document_day_placement_reviews v WHERE v.revision_id = r.id) " +
           "ORDER BY r.created_at DESC, r.id DESC LIMIT 100",
         ).all(input.userId, row.documentId, input.careProfileId);
-        return { ...row, uploadedAt: new Date(row.uploadedAt * 1000).toISOString(), pendingDayProposals };
+        const { uploaderId, uploaderLabel, ...document } = row;
+        return { ...document, uploadedAt: new Date(row.uploadedAt * 1000).toISOString(),
+          uploadedBy: { userId: uploaderId, displayName: uploaderLabel }, pendingDayProposals };
       });
       const last = rows[Math.min(rows.length, 20) - 1];
       return { documents, nextCursor: rows.length > 20 && last ? { uploadedAt: last.uploadedAt, documentId: last.documentId } : null };
@@ -543,9 +602,9 @@ export function privateFile(path: string, required: boolean): void {
 
 export function verifySchema(db: Database.Database): void {
   if (db.pragma("application_id", { simple: true }) !== 1_129_071_687 ||
-    db.pragma("user_version", { simple: true }) !== 7) throw new IncompatibleFamilyTimelineDatabase();
+    ![7, 8].includes(db.pragma("user_version", { simple: true }) as number)) throw new IncompatibleFamilyTimelineDatabase();
   const rows = db.prepare<[], MigrationRow>("SELECT version, name, sha256 FROM schema_migrations ORDER BY version").all();
-  if (rows.length !== MIGRATIONS.length || rows.some((row, i) =>
+  if (rows.length !== db.pragma("user_version", { simple: true }) || rows.some((row, i) =>
     row.version !== MIGRATIONS[i]?.[0] || row.name !== MIGRATIONS[i]?.[1] ||
     row.sha256 !== MIGRATIONS[i]?.[2])) throw new IncompatibleFamilyTimelineDatabase();
   if (db.prepare<[], { integrity_check: string }>("PRAGMA integrity_check").get()?.integrity_check !== "ok" ||
