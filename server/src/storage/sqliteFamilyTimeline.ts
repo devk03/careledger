@@ -29,6 +29,9 @@ type EntryRow = {
 type DocumentRow = {
   documentId: string; displayName: string; uploadedAt: number; sourceSha256: string; pageNumber: number | null;
   mediaType: "application/pdf" | "image/png" | "image/jpeg";
+  uploaderId: string; uploaderLabel: string; recordDate: string | null; recordDateText: string | null;
+  recorderId: string; recorderLabel: string; recordedAt: number;
+  reviewerId: string | null; reviewerLabel: string | null; reviewedAt: number | null;
 };
 type StatementRow = { id: string; text: string; authorLabel: string | null };
 type PageRow = { sourceSha256: string; text: string; textSha256: string };
@@ -114,6 +117,36 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
     ).get(input.userId, input.householdId) !== undefined;
   }
 
+  async readFamilyAccess(input: { householdId: string; userId: string }):
+    Promise<import("@adeno/contracts").FamilyAccessOverview | null> {
+    return this.db.transaction(() => {
+      const actor = this.db.prepare("SELECT role FROM users WHERE id = ? AND household_id = ? AND status = 'active'")
+        .get(input.userId, input.householdId) as { role: string } | undefined;
+      if (!actor) return null;
+      const owner = actor.role === "owner";
+      const profiles = this.db.prepare("SELECT id, preferred_name preferredName FROM care_profiles WHERE household_id = ? AND archived_at IS NULL ORDER BY preferred_name, id")
+        .all(input.householdId) as { id: string; preferredName: string }[];
+      type Member = { id: string; displayName: string; role: "owner" | "caregiver"; memberKind: "adult" | "child"; status: "active" | "pending" | "disabled" };
+      const people = this.db.prepare("SELECT id, display_name displayName, role, member_kind memberKind, status FROM users WHERE household_id = ? AND (? = 1 OR id = ?) ORDER BY created_at, id")
+        .all(input.householdId, Number(owner), input.userId) as Member[];
+      const members = people.map(person => {
+        const active = person.status === "active";
+        const allProfiles = active && person.role === "owner";
+        const intakeProfiles = active ? (this.db.prepare("SELECT a.care_profile_id id FROM current_profile_intake a JOIN care_profiles p ON p.id = a.care_profile_id WHERE p.household_id = ? AND p.archived_at IS NULL AND a.subject_user_id = ? ORDER BY p.id")
+          .all(input.householdId, person.id) as { id: string }[]).map(row => row.id) : [];
+        const rawDays = active ? this.db.prepare("SELECT a.care_profile_id careProfileId, a.care_day careDay, a.level, e.actor_user_id userId, actor.display_name displayName, e.occurred_at grantedAt FROM current_day_access a JOIN day_access_events e ON e.care_profile_id = a.care_profile_id AND e.care_day = a.care_day AND e.subject_user_id = a.subject_user_id AND e.event_no = a.event_no JOIN users actor ON actor.id = e.actor_user_id JOIN care_profiles p ON p.id = a.care_profile_id WHERE p.household_id = ? AND p.archived_at IS NULL AND a.subject_user_id = ? ORDER BY a.care_day DESC, p.id")
+          .all(input.householdId, person.id) as { careProfileId: string; careDay: string; level: "view" | "contribute" | "publish"; userId: string; displayName: string; grantedAt: number }[] : [];
+        const days = rawDays.map(({ userId, displayName, grantedAt, ...day }) => ({ ...day, grantedBy: { userId, displayName }, grantedAt: new Date(grantedAt * 1000).toISOString() }));
+        const rawDocuments = active ? this.db.prepare("SELECT d.care_profile_id careProfileId, d.id documentId, d.original_display_name displayName, CASE WHEN a.document_id IS NOT NULL THEN 'explicit_grant' ELSE 'own_upload' END basis FROM documents d JOIN care_profiles p ON p.id = d.care_profile_id LEFT JOIN current_document_access a ON a.document_id = d.id AND a.care_profile_id = p.id AND a.subject_user_id = ? WHERE p.household_id = ? AND p.archived_at IS NULL AND d.archived_at IS NULL AND (a.document_id IS NOT NULL OR (d.uploaded_by = ? AND EXISTS (SELECT 1 FROM current_profile_intake i WHERE i.care_profile_id = p.id AND i.subject_user_id = ?))) ORDER BY d.uploaded_at DESC, d.id")
+          .all(person.id, input.householdId, person.id, person.id) as { careProfileId: string; documentId: string; displayName: string; basis: "explicit_grant" | "own_upload" }[] : [];
+        return { ...person, allProfiles, intakeProfiles, days, documents: rawDocuments };
+      });
+      const visibleIds = new Set(members.flatMap(member => [...member.intakeProfiles, ...member.days.map(day => day.careProfileId), ...member.documents.map(document => document.careProfileId)]));
+      return { visibility: owner ? "household" as const : "self" as const, currentUserId: input.userId,
+        profiles: owner ? profiles : profiles.filter(profile => visibleIds.has(profile.id)), members };
+    }).deferred();
+  }
+
   async listVisibleCareProfiles(input: { householdId: string; userId: string }):
     Promise<VisibleCareProfile[]> {
     return this.db.prepare<[string, string], { id: string; preferredName: string }>(
@@ -172,11 +205,17 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
       if (entry.placementRevisionId) {
         const documents = this.db.prepare<[string, string, string, string], DocumentRow>(
           "SELECT d.id documentId, d.original_display_name displayName, d.uploaded_at uploadedAt, " +
-          "d.source_sha256 sourceSha256, pg.page_number pageNumber, object.media_type mediaType " +
+          "d.source_sha256 sourceSha256, pg.page_number pageNumber, object.media_type mediaType, " +
+          "d.record_date recordDate, d.record_date_text recordDateText, uploader.id uploaderId, uploader.display_name uploaderLabel, " +
+          "recorder.id recorderId, recorder.display_name recorderLabel, r.created_at recordedAt, " +
+          "reviewer.id reviewerId, reviewer.display_name reviewerLabel, review.decided_at reviewedAt " +
           "FROM document_day_placement_revisions r " +
           "JOIN document_day_placements pl ON pl.id = r.placement_id " +
           "JOIN documents d ON d.id = pl.document_id AND d.care_profile_id = pl.care_profile_id " +
           "JOIN source_objects object ON object.sha256 = d.source_sha256 " +
+          "JOIN users uploader ON uploader.id = d.uploaded_by JOIN users recorder ON recorder.id = r.created_by " +
+          "LEFT JOIN document_day_placement_reviews review ON review.revision_id = r.id AND review.decision = 'accepted' " +
+          "LEFT JOIN users reviewer ON reviewer.id = review.reviewer_id " +
           "LEFT JOIN document_pages pg ON pg.document_id = d.id " +
           "JOIN users u ON u.id = ? AND u.status = 'active' AND u.household_id = ? " +
           "WHERE r.id = ? AND pl.care_profile_id = ? AND d.archived_at IS NULL " +
@@ -194,29 +233,65 @@ export class SqliteFamilyTimeline implements TimelineRepository, ApprovedPageRep
               uploadedAt: new Date(document.uploadedAt * 1000).toISOString(),
               sourceSha256: document.sourceSha256,
               mediaType: document.mediaType,
+              provenance: { uploadedBy: { userId: document.uploaderId, displayName: document.uploaderLabel },
+                recordDate: document.recordDate, recordDateText: document.recordDateText,
+                placement: { recordedBy: { userId: document.recorderId, displayName: document.recorderLabel },
+                  recordedAt: new Date(document.recordedAt * 1000).toISOString(),
+                  ...(document.reviewerId && document.reviewerLabel && document.reviewedAt !== null ? {
+                    reviewedBy: { userId: document.reviewerId, displayName: document.reviewerLabel },
+                    reviewedAt: new Date(document.reviewedAt * 1000).toISOString(),
+                  } : {}) } },
               pageNumbers: document.pageNumber === null ? [] : [document.pageNumber],
             });
           }
         }
       } else if (entry.noteRevisionId) {
-        const note = this.db.prepare<[string, string], StatementRow>(
-          "SELECT r.id, r.body text, u.display_name authorLabel FROM family_note_revisions r " +
+        const note = this.db.prepare<[string, string], StatementRow & {
+          recorderId: string; recordedAt: number; reviewerId: string | null; reviewerLabel: string | null; reviewedAt: number | null;
+        }>(
+          "SELECT r.id, r.body text, u.display_name authorLabel, u.id recorderId, r.created_at recordedAt, " +
+          "reviewer.id reviewerId, reviewer.display_name reviewerLabel, review.decided_at reviewedAt FROM family_note_revisions r " +
           "JOIN users u ON u.id = r.created_by JOIN family_notes n ON n.id = r.note_id " +
+          "LEFT JOIN family_note_reviews review ON review.revision_id = r.id AND review.decision = 'accepted' " +
+          "LEFT JOIN users reviewer ON reviewer.id = review.reviewer_id " +
           "WHERE r.id = ? AND n.care_profile_id = ?",
         ).get(entry.noteRevisionId, input.careProfileId);
         if (note) statements.push({ id: note.id, text: note.text, attribution: "family_note",
-          ...(note.authorLabel === null ? {} : { authorLabel: note.authorLabel }), status: "uncertain" });
+          ...(note.authorLabel === null ? {} : { authorLabel: note.authorLabel }), status: "uncertain",
+          provenance: { sourceKind: "family_note", recordedBy: { userId: note.recorderId, displayName: note.authorLabel ?? "Unknown account" },
+            recordedAt: new Date(note.recordedAt * 1000).toISOString(),
+            ...(note.reviewerId && note.reviewerLabel && note.reviewedAt !== null ? {
+              reviewedBy: { userId: note.reviewerId, displayName: note.reviewerLabel }, reviewedAt: new Date(note.reviewedAt * 1000).toISOString(),
+            } : {}) } });
       } else if (entry.claimRevisionId) {
-        const claim = this.db.prepare<[string, string], StatementRow>(
-          "SELECT r.id, r.statement text, NULL authorLabel FROM evidence_claim_revisions r " +
+        const claim = this.db.prepare<[string, string], StatementRow & {
+          recorderId: string; recordedAt: number; sourceKind: string; attestedId: string | null; attestedLabel: string | null;
+        }>(
+          "SELECT r.id, r.statement text, recorder.display_name authorLabel, recorder.id recorderId, r.created_at recordedAt, r.kind sourceKind, " +
+          "attested.id attestedId, attested.display_name attestedLabel FROM evidence_claim_revisions r " +
+          "JOIN users recorder ON recorder.id = r.created_by LEFT JOIN users attested ON attested.id = r.attested_by " +
           "JOIN evidence_claims c ON c.id = r.claim_id WHERE r.id = ? AND c.care_profile_id = ? " +
           "AND r.review_state = 'accepted'",
         ).get(entry.claimRevisionId, input.careProfileId);
-        if (claim) statements.push({ id: claim.id, text: claim.text, attribution: "document", status: "uncertain" });
+        if (claim) statements.push({ id: claim.id, text: claim.text, attribution: "document", status: "uncertain",
+          provenance: { sourceKind: claim.sourceKind, recordedBy: { userId: claim.recorderId, displayName: claim.authorLabel ?? "Unknown account" },
+            recordedAt: new Date(claim.recordedAt * 1000).toISOString(),
+            ...(claim.attestedId && claim.attestedLabel ? { reportedBy: { userId: claim.attestedId, displayName: claim.attestedLabel } } : {}) } });
       }
     }
+    // Link only source references already authorized for this published day. Never
+    // leak a denied citation's file name, ID, hash or page through provenance.
+    for (const statement of statements) {
+      if (statement.attribution !== "document" || !statement.provenance) continue;
+      const citations = this.db.prepare("SELECT document_id documentId, page_number pageNumber FROM citations WHERE claim_revision_id = ? ORDER BY position")
+        .all(statement.id) as { documentId: string; pageNumber: number }[];
+      statement.provenance.citations = citations.filter(citation => sources.get(citation.documentId)?.pageNumbers.includes(citation.pageNumber));
+    }
+    const publication = this.db.prepare("SELECT u.id userId, u.display_name displayName, s.published_at publishedAt FROM day_snapshots s JOIN users u ON u.id = s.published_by WHERE s.id = ?")
+      .get(row.snapshotId) as { userId: string; displayName: string; publishedAt: number } | undefined;
     return { id: row.id, careProfileId: input.careProfileId, day: row.day,
-      revision: row.revision, sources: [...sources.values()], statements };
+      revision: row.revision, sources: [...sources.values()], statements,
+      ...(publication ? { publishedBy: { userId: publication.userId, displayName: publication.displayName }, publishedAt: new Date(publication.publishedAt * 1000).toISOString() } : {}) };
   }
 
   async readApprovedPageChunk(input: {

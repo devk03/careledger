@@ -134,3 +134,17 @@
   .pilot-why-adeno dl { grid-template-columns: minmax(0, 1fr); }
   .pilot-why-adeno summary { font-size: var(--text-small); }
 }
+
+.pilot-family-access > .ui-button { margin-block: var(--space-sm); }
+.pilot-access-member + .pilot-access-member { border-top: 1px solid var(--color-rule); margin-top: var(--space-md); padding-top: var(--space-md); }
+.pilot-access-member > header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); }
+.pilot-access-member h3, .pilot-access-member li { overflow-wrap: anywhere; }
+.pilot-access-member details summary { min-height: var(--control-height); display: flex; align-items: center; cursor: pointer; font-weight: 600; }
+.pilot-access-member details summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.pilot-access-member ul { padding-left: var(--space-md); }
+.pilot-access-member li + li { margin-top: var(--space-xs); }
+.pilot-permission-list { display: grid; gap: var(--space-sm); margin-block: var(--space-md); }
+.pilot-permission-list > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--space-xs); }
+.pilot-permission-list dt { font-size: var(--text-small); font-weight: 650; }
+.pilot-permission-list dd { margin: 0; font-size: var(--text-small); line-height: var(--leading-body); color: var(--color-ink-soft); }
+@media (max-width: 600px) { .pilot-permission-list > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-3xs); } }

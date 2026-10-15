@@ -72,6 +72,7 @@ export function createHttpApp(dependencies: {
   agentConnectionsAvailable?: boolean;
   versions?: DayVersionRepository;
   profiles?: CareProfileRepository;
+  familyAccess?: import("../timeline/types.js").FamilyAccessRepository;
   readiness?: () => boolean;
   ownerSetup?: { bootstrap: BootstrapTokenStore; recoveryPepper: Uint8Array };
 }) {
@@ -111,6 +112,16 @@ export function createHttpApp(dependencies: {
   app.get("/api/v2/document-workflow/capabilities", async (request, response) => {
     if (!await dependencies.authenticate(request)) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
     response.json({ available: dependencies.documentWorkflowAvailable === true });
+  });
+
+  if (dependencies.familyAccess) app.get("/api/v2/family/access", async (request, response) => {
+    try {
+      const scope = await dependencies.authenticate(request);
+      if (!scope) { response.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+      const access = await dependencies.familyAccess!.readFamilyAccess(scope);
+      if (!access) { response.status(403).json({ error: "FORBIDDEN" }); return; }
+      response.json(access);
+    } catch { response.status(503).json({ error: "ACCESS_INVENTORY_UNAVAILABLE" }); }
   });
 
   if (dependencies.profiles !== undefined) {

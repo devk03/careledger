@@ -78,6 +78,46 @@ function database(): { path: string; writer: Database.Database } {
 }
 
 describe("fictional v7 family timeline", () => {
+  it("retains uploader, entry account, reviewer and publication metadata without inventing a reporter", async () => {
+    const { path, writer } = database(); const reader = new SqliteFamilyTimeline(path);
+    try {
+      const days = await reader.listApprovedDays({ householdId: "family-a", userId: "owner-a", careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 });
+      expect(days[0]).toMatchObject({ publishedBy: { userId: "owner-a", displayName: "Fictional owner-a" }, publishedAt: new Date(102000).toISOString() });
+      expect(days[0]?.sources[0]?.provenance).toMatchObject({ uploadedBy: { userId: "owner-a" }, placement: {
+        recordedBy: { userId: "owner-a" }, recordedAt: new Date(100000).toISOString(), reviewedBy: { userId: "owner-a" }, reviewedAt: new Date(101000).toISOString(),
+      } });
+      expect(days[0]?.statements[0]?.provenance).toMatchObject({ sourceKind: "family_note", recordedBy: { userId: "owner-a" }, reviewedBy: { userId: "owner-a" } });
+      expect(days[0]?.statements[0]?.provenance?.reportedBy).toBeUndefined();
+      const denied = await reader.listApprovedDays({ householdId: "family-a", userId: "adult-a", careProfileId: "profile-a", throughDay: "2030-04-30", limit: 10 });
+      expect(denied[0]?.sources).toEqual([]);
+    } finally { reader.close(); writer.close(); }
+  });
+
+  it("shows the owner's full roster, only the caller's own grants otherwise, and no effective disabled/revoked access", async () => {
+    const { path, writer } = database(); const reader = new SqliteFamilyTimeline(path);
+    const scope = { householdId: "family-a", userId: "owner-a" };
+    try {
+      writer.prepare("INSERT INTO profile_intake_events (id, care_profile_id, subject_user_id, event_no, allowed, actor_user_id, occurred_at) VALUES ('intake-access', 'profile-a', 'adult-a', 1, 1, 'owner-a', 103)").run();
+      writer.prepare("INSERT INTO document_access_events (id, care_profile_id, document_id, subject_user_id, event_no, allowed, actor_user_id, occurred_at) VALUES ('source-access', 'profile-a', 'document-a', 'adult-a', 1, 1, 'owner-a', 103)").run();
+      const owner = await reader.readFamilyAccess(scope);
+      expect(owner?.visibility).toBe("household"); expect(owner?.members).toHaveLength(3);
+      expect(owner?.members.find(member => member.id === "owner-a")?.allProfiles).toBe(true);
+      const self = await reader.readFamilyAccess({ ...scope, userId: "adult-a" });
+      expect(self?.visibility).toBe("self"); expect(self?.members.map(member => member.id)).toEqual(["adult-a"]);
+      expect(self?.members[0]).toMatchObject({ allProfiles: false, intakeProfiles: ["profile-a"],
+        days: [{ careProfileId: "profile-a", careDay: "2030-04-12", level: "view", grantedBy: { userId: "owner-a" } }],
+        documents: [{ documentId: "document-a", basis: "explicit_grant" }] });
+      expect((await reader.readFamilyAccess({ ...scope, userId: "child-a" }))?.profiles).toEqual([]);
+      expect(await reader.readFamilyAccess({ ...scope, householdId: "other-family" })).toBeNull();
+      writer.prepare("INSERT INTO document_access_events (id, care_profile_id, document_id, subject_user_id, event_no, allowed, actor_user_id, occurred_at) VALUES ('source-revoked', 'profile-a', 'document-a', 'adult-a', 2, 0, 'owner-a', 104)").run();
+      expect((await reader.readFamilyAccess({ ...scope, userId: "adult-a" }))?.members[0]?.documents).toEqual([]);
+      writer.prepare("UPDATE users SET status = 'disabled', disabled_at = 105, updated_at = 105 WHERE id = 'adult-a'").run();
+      expect(await reader.readFamilyAccess({ ...scope, userId: "adult-a" })).toBeNull();
+      expect((await reader.readFamilyAccess(scope))?.members.find(member => member.id === "adult-a"))
+        .toMatchObject({ status: "disabled", allProfiles: false, intakeProfiles: [], days: [], documents: [] });
+    } finally { reader.close(); writer.close(); }
+  });
+
   it("requires current published-day membership as well as source permission before source text reaches AI", async () => {
     const { path, writer } = database();
     const secret = Buffer.alloc(32, 14); const token = "r".repeat(43);

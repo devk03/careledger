@@ -129,3 +129,8 @@ export interface CareProfileRepository {
   listVisibleCareProfiles(input: { householdId: string; userId: string }):
     Promise<VisibleCareProfile[]>;
 }
+
+export interface FamilyAccessRepository {
+  /** Owners see their household; other active members see only their own effective access. */
+  readFamilyAccess(input: AuthorizedScope): Promise<import("@adeno/contracts").FamilyAccessOverview | null>;
+}

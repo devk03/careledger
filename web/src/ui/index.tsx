@@ -60,7 +60,6 @@ export function AppHeader({ context = "Private installation", className, childre
   { context?: ReactNode; className?: string; children?: ReactNode }) {
   return <header className={classes("ui-header", className)}>
     <a className="wordmark" href="/" aria-label="adeno home">adeno</a>
-    {children}
-    <p><ShieldCheck aria-hidden="true" size={16} />{context}</p>
+    <div className="ui-header-actions"><p><ShieldCheck aria-hidden="true" size={16} />{context}</p>{children}</div>
   </header>;
 }

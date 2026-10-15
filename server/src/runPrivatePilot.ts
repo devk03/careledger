@@ -71,7 +71,7 @@ if (config.records) {
   app.use(createOriginalImageRouter({ authenticate, repository: timeline, objectRoot: records.objectRoot }));
 }
 app.use(createHttpApp({ authenticate, timeline, pages: timeline,
-  profiles: timeline, reviews: timeline, noteReviews: timeline, versions: timeline,
+  profiles: timeline, familyAccess: timeline, reviews: timeline, noteReviews: timeline, versions: timeline,
   sessions: timeline, mutations, profileWriter: mutations, accounts, expectedOrigin: config.origin,
   ownerSetup: { bootstrap, recoveryPepper }, allowInvitations: false,
   agentConnectionsAvailable: agentGrants !== null,

@@ -396,3 +396,9 @@ h1, h2, h3, h4 { min-width: 0; overflow-wrap: anywhere; font-style: normal; text
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Privacy text is inline prose, not a button row. Reserve height through padding. */
+.preview-safety-banner { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; text-align: left; gap: var(--space-3xs); padding: var(--space-sm) max(var(--space-sm), calc((100% - var(--content-width)) / 2)); line-height: 1.5; }
+.preview-safety-banner > span { min-width: 0; overflow-wrap: anywhere; }
+.preview-safety-banner a { display: inline; min-height: 0; white-space: normal; line-height: inherit; }
+.preview-safety-banner-inline { padding: var(--space-sm); }

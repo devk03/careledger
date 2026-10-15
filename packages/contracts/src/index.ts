@@ -1,3 +1,5 @@
+import type { AccessActor } from "./familyAccessWire.js";
+import type { EntryProvenance, DocumentProvenance } from "./provenanceWire.js";
 /** Wire-level data only. Authorization and persistence interfaces stay server-side. */
 export * from "./dayKeyEnvelopeWire.js";
 export * from "./scopeKeyEnvelopeWireV2.js";
@@ -19,6 +21,7 @@ export type SourceReference = {
   sourceSha256: string;
   mediaType?: "application/pdf" | "image/png" | "image/jpeg";
   pageNumbers: number[];
+  provenance?: DocumentProvenance;
 };
 
 export type DayStatement = {
@@ -26,6 +29,7 @@ export type DayStatement = {
   text: string;
   attribution: "document" | "family_note";
   authorLabel?: string;
+  provenance?: EntryProvenance;
   status: "planned" | "occurred" | "cancelled" | "uncertain";
   sourceDocumentId?: string;
   pageNumber?: number;
@@ -38,6 +42,8 @@ export type TimelineDay = {
   sources: SourceReference[];
   statements: DayStatement[];
   revision: number;
+  publishedBy?: AccessActor;
+  publishedAt?: string;
 };
 
 export type HistoryPage = {
@@ -63,3 +69,5 @@ export type ApprovedPageChunk = {
   nextOffset: number | null;
   sourceTextIsUntrusted: true;
 };
+export type { AccessActor, FamilyAccessOverview } from "./familyAccessWire.js";
+export type { EntryProvenance, DocumentProvenance } from "./provenanceWire.js";

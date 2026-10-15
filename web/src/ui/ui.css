@@ -114,3 +114,12 @@ textarea.ui-input { resize: vertical; min-height: 6rem; }
 @media (prefers-reduced-motion: reduce) {
   .ui-button, .ui-button:not(:disabled):active, .ui-button.is-active { transition: none; transition-duration: 0ms !important; transform: none; }
 }
+
+/* Header actions stay together; context can wrap without clipping or centering sign-out. */
+.ui-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2xs) var(--space-md); min-width: 0; }
+.ui-header-actions > p { display: flex; align-items: center; gap: var(--space-2xs); color: var(--color-ink-soft); font-size: var(--text-small); line-height: var(--leading-body); margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 40rem) {
+  .ui-header { align-items: flex-start; }
+  .ui-header-actions { flex: 1 1 12rem; }
+  .ui-header-actions > p { flex: 1 1 10rem; }
+}

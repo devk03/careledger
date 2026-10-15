@@ -4,6 +4,7 @@ import { AppHeader, Button, Input, Notice, Textarea } from "./ui";
 import "./private-pilot.css";
 import { uploadPrivateImage, UnconfirmedUpload, type IntakeCapabilities } from "./api/privateIntake";
 import { AgentConnectionPanel } from "./AgentConnectionPanel";
+import { FamilyAccessPanel } from "./FamilyAccessPanel";
 import { DocumentInboxPanel } from "./DocumentInboxPanel";
 import { originalImageUrl } from "./api/privateDocuments";
 
@@ -220,7 +221,7 @@ export function PrivatePilotPage() {
       <header className="workspace-heading"><p className="pilot-eyebrow">YOUR PRIVATE WORKSPACE</p><h1>{session ? "Your care workspace" : "Your care timeline"}</h1>
         <p>{session ? "Keep a person’s records together. Review what belongs on their timeline, then ask your assistant about the approved history." : "Sign in to organize records and connect your assistant."}</p>
         {session && profiles.length > 0 && <nav className="pilot-shortcuts" aria-label="Workspace shortcuts">
-          <a href="#care-person">Your family</a><a href="#record-upload">Add records</a><a href="#assistant-setup">Connect Codex</a>
+          <a href="#care-person">Your family</a><a href="#family-access">Permissions</a><a href="#record-upload">Add records</a><a href="#assistant-setup">Connect Codex</a>
         </nav>}</header>
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone="success">{message}</Notice>}
@@ -278,6 +279,7 @@ export function PrivatePilotPage() {
             </form>}
             <p className="pilot-field-hint">{profiles.length ? "Adding a person organizes their records in this account. It does not invite someone or share access." : "This is the person you care for, not a new sign-in account. You can add more people later."}</p>
           </section>
+          <FamilyAccessPanel />
           {profileId && <>
             <section id="record-upload" className="workflow-panel"><div className="pilot-section-label">RECORDS · UPLOAD, CHECK, PUBLISH</div><h2>Add record images</h2>
               <p className="pilot-person-context">Adding to <strong>{selectedPerson?.preferredName}</strong>’s records</p>
