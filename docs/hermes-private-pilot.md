@@ -9,7 +9,8 @@ managed E2EE claim. Do not import real case records into the repository.
 Release `2ea22b5` is deployed on Hermes as `adeno-private:2ea22b5`, manifest
 `sha256:13c3405f011fc9ffe598791234cf8cf38a173799956c9513017167182063f8b3`.
 The previous environment is retained as `release.before-2ea22b5.env`.
-Production remains on v7 pending separate approval for migration 0008.
+With separate owner approval, production migration 0008 is now applied. Schema
+v8 rich capture is active. A rollback must retain a v8-compatible runtime.
 
 Owners can inspect every household sign-in account's role, member kind, status,
 intake scope, care-day permission level and permitted source files. Other members
@@ -37,13 +38,16 @@ provenance submission, role restrictions, 320/375/414/768/1280px geometry and ze
 serious/critical axe findings. Builds and scoped frontend lint passed.
 A network-disabled, read-only-root Hermes probe created a fresh synthetic v7
 schema, applied 0008 once, repeated it as a no-op and verified v8. It exited 0
-without OOM and mounted no production data. The production app was then upgraded
-without applying the migration. Readiness and signed-in Chrome checks passed;
-existing uploads and pending date proposals remain visible.
+without OOM and mounted no production data. Following separate production
+approval, the offline operator applied migration 0008 with writers stopped.
+Integrity and foreign keys passed, and fingerprints of 67 existing non-ledger
+tables and 34 object files stayed identical. No historical provenance was added.
+Readiness and signed-in Chrome checks passed; reporter/source fields and optional
+file/page controls are visible, and existing uploads/proposals remain visible.
 
 A fresh encrypted pre-migration production snapshot was copied to the owner's Mac
-and restored successfully. Its off-host ciphertext pin is
-`c43fe9b660f84d1bd5120f70b909a4e727379ff7519e85be9011e78b77b5f6b9`.
+and restored successfully immediately before application. Its off-host ciphertext
+pin is `5232238efdfa24fd871d93c1f42c9d79bc8fe822b1c22db978c5b278b96ff3d6`.
 The decryption identity stayed off Hermes. No record content, source manifest,
 private receipt or screenshot is committed to this repository.
 

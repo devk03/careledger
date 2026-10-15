@@ -1,8 +1,8 @@
-# Structured note provenance — migration proposal
+# Structured note provenance — approved rollout
 
-Status: creation and testing approved by the owner on October 14. Migration
-`0008_note_provenance.sql` is implemented and tested on fresh synthetic databases.
-Applying it to production still requires separate explicit authorization.
+Status: creation/testing and the separate production application were explicitly
+approved by the owner on October 14. Migration `0008_note_provenance.sql` is applied
+on Hermes. The running private app exposes structured note source fields.
 
 Existing data already supports account role/status, current scoped permissions,
 upload account/time, note entry account/time, file IDs/hashes/pages and reviewer
@@ -43,3 +43,28 @@ audit chain and pinned migration digest, applies one transaction, updates the
 ledger/user version, and verifies integrity. It creates no accounts or notes.
 A repeated invocation on verified v8 is a no-op. Application startup never applies
 migrations. Both v7 and v8 are supported during this explicit rollout.
+
+## Production receipt — October 14, 2026
+
+Runtime `adeno-private:2ea22b5` applied the exact reviewed migration digest
+`0a87325d2e3bf447fbfa4c3a64e4c830bd1cde2419cb4e8d349c347f3052074d`
+with writers stopped. The bounded, network-disabled operator container returned
+`{"migration":8,"applied":true,"integrity":"ok"}`. Foreign-key checks passed.
+Fingerprints of all 67 existing non-ledger tables and all 34 object files matched
+before/after. The new provenance table remained empty; no historical data was
+backfilled. Private row fingerprints and operational receipts remain outside Git.
+
+Immediately before applying, an encrypted 14,142,983-byte snapshot was copied
+off-host and successfully restored on the owner's Mac. Its pinned SHA-256 is
+`5232238efdfa24fd871d93c1f42c9d79bc8fe822b1c22db978c5b278b96ff3d6`.
+The private decryption identity stayed on the Mac. The application restarted on
+the same runtime and HTTPS readiness returned `ready`.
+
+The signed-in production browser showed reporter, information source and source
+details fields. Selecting Source document exposed permitted-file and page
+selectors. Existing records remained visible. No note or review was submitted
+during verification. The screenshot is retained outside Git as
+`note-provenance-live.png` in the local task visualization directory.
+
+After this migration, retain a runtime that supports schema v8. Do not roll back
+to a v7-only image against the upgraded database.
