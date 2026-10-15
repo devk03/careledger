@@ -3,6 +3,7 @@ export type InboxDocument = {
   documentId: string; displayName: string; sourceSha256: string;
   mediaType: "application/pdf" | "image/png" | "image/jpeg"; byteSize: number;
   pageCount: number; uploadedAt: string;
+  uploadedBy?: import("@adeno/contracts").AccessActor;
   pendingDayProposals: { revisionId: string; careDay: string }[];
 };
 export type DocumentDayProposal = {

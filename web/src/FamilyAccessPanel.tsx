@@ -9,7 +9,6 @@ export function FamilyAccessPanel() {
   const [reload, setReload] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true); setError(""); setAccess(null);
     fetch("/api/v2/family/access", { credentials: "same-origin", cache: "no-store", signal: controller.signal })
       .then(async response => {
         if (!response.ok) throw new Error("Access details could not be loaded. Refresh to try again.");
@@ -28,7 +27,7 @@ export function FamilyAccessPanel() {
     <div className="pilot-section-label">SIGN-IN ACCOUNTS & ACCESS</div>
     <h2 id="access-title">People &amp; permissions</h2>
     <p>These are people who can sign in. Care profiles above are the people whose records you organize; creating one does not give anyone access.</p>
-    <Button disabled={loading} onClick={() => setReload(value => value + 1)}>Refresh permissions</Button>
+    <Button disabled={loading} onClick={() => { setLoading(true); setError(""); setAccess(null); setReload(value => value + 1); }}>Refresh permissions</Button>
     {loading && <p role="status">Checking current access…</p>}
     {error && <Notice>{error}</Notice>}
     {access?.visibility === "self" && <p>You can see your own permissions. The owner can see every account in this household.</p>}
@@ -49,7 +48,7 @@ export function FamilyAccessPanel() {
           <div><dt>Review &amp; publish</dt><dd>{member.memberKind === "child" ? "Not permitted for child accounts." : member.days.some(day => day.level === "publish") ? "Only days marked Review & publish below, with source-file access required for records." : "No publishing days granted."}</dd></div>
           <div><dt>Manage access</dt><dd>Owner only.</dd></div>
         </dl>
-        {member.days.length > 0 && <details><summary>Care days &amp; permitted actions ({member.days.length})</summary>
+        {member.days.length > 0 && <details><summary>Care-day permissions ({member.days.length})</summary>
           <ul>{member.days.map(day => <li key={`${day.careProfileId}:${day.careDay}`}>
             <strong>{person(day.careProfileId)} · {day.careDay}</strong>
             <p>{day.level === "view" ? "Read timeline" : day.level === "contribute" ? "Read timeline · propose record dates when source access permits" : "Read timeline · propose record dates · review & publish"}</p>

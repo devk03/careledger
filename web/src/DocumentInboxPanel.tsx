@@ -21,6 +21,7 @@ function filenameDay(name: string): string {
 export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublished }: {
   profileId: string; csrfToken: string; refreshKey: number; onPublished: () => void;
 }) {
+  const reviewRegion = useRef<HTMLElement>(null);
   const [available, setAvailable] = useState(false);
   const [documents, setDocuments] = useState<InboxDocument[]>([]);
   const [cursor, setCursor] = useState<InboxCursor | null>(null);
@@ -85,6 +86,9 @@ export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublish
     setMessage(decision === "accepted" ? "Record published to the care day." : "Day proposal rejected.");
     if (decision === "accepted") onPublished();
   }
+  useEffect(() => {
+    if (selected) { reviewRegion.current?.focus({ preventScroll: true }); reviewRegion.current?.scrollIntoView?.({ block: "start" }); }
+  }, [selected, proposal]);
   const imageHash = proposal?.sourceSha256 ?? selected?.sourceSha256 ?? "";
   const imageKey = `${selected?.documentId}:${imageHash}:${proposal?.revisionId ?? "original"}`;
   return <section className="workflow-panel pilot-record-inbox" aria-label="Record inbox"><h2>Record inbox</h2>
@@ -97,20 +101,7 @@ export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublish
         setConfirmed(false); setLoadedFor(""); setUncertain(false);
       })}>Refresh record inbox</Button>
       {!documents.length && <p>No inspected records in this inbox.</p>}
-      {documents.map(document => <article key={document.documentId}><h3>{document.displayName}</h3>
-        <p>Uploaded <time dateTime={document.uploadedAt} title={document.uploadedAt}>{readableUploadTime(document.uploadedAt)}</time></p>
-        <Button disabled={busy || uncertain} onClick={() => choose(document)}>Open original: {document.displayName}</Button>
-        {document.pendingDayProposals.map(pending => <Button key={pending.revisionId} disabled={busy || uncertain}
-          onClick={() => void act(async () => {
-            const detail = await readDocumentDayProposal(profileId, pending.revisionId);
-            if (alive.current) { choose(document); setProposal(detail); }
-          })}>Review day {pending.careDay} for {document.displayName}</Button>)}
-      </article>)}
-      {cursor && <Button disabled={busy || uncertain} onClick={() => void act(async () => {
-        const page = await listDocumentInbox(profileId, cursor);
-        if (alive.current) { setDocuments(current => [...current, ...page.documents]); setCursor(page.nextCursor); }
-      })}>Load older records</Button>}
-      {selected && <article aria-label="Original record review"><h3>{proposal ? `Proposed care day: ${proposal.careDay}` : selected.displayName}</h3>
+      {selected && <article ref={reviewRegion} tabIndex={-1} className="pilot-active-record" aria-label="Original record review"><h3>{proposal ? `Proposed care day: ${proposal.careDay}` : selected.displayName}</h3>
         {/-PDF-PAGE-COPY-\d+\.png$/i.test(selected.displayName) && <Notice>
           PDF page copy. This upload preserves the page image, not the original PDF. Keep the original PDF separately; the fingerprint below belongs to this image.
         </Notice>}
@@ -128,13 +119,29 @@ export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublish
             ? "Suggested from the filename. Verify it against the original before saving."
             : "Use a date supported by the original. Leave this record in the inbox if the date is uncertain."} Collection, report and treatment dates can differ. Upload time is not the care day.</p>
           <Button type="submit" disabled={busy || uncertain}>Save day for review</Button></form> : <>
-          <p>Proposed by {proposal.authorLabel}. Approval records your editorial decision.</p>
+          <p>Care date entered through account: {proposal.authorLabel}. Entered at {proposal.createdAt}. Approval records your editorial decision.</p>
           <label className="pilot-review-confirmation"><Input type="checkbox" checked={confirmed} disabled={loadedFor !== imageKey || busy || uncertain}
             onChange={event => setConfirmed(event.target.checked)} />I checked this original and the proposed care day.</label>
           <Button disabled={busy || uncertain || loadedFor !== imageKey || !confirmed} onClick={() => void act(() => decide("accepted"))}>Approve record and publish</Button>
           <Button disabled={busy || uncertain} onClick={() => void act(() => decide("rejected"))}>Reject record day</Button>
         </>}
       </article>}
+      <p className="pilot-field-hint">{documents.length} records loaded · {documents.reduce((count, document) => count + document.pendingDayProposals.length, 0)} dates awaiting review</p>
+      {documents.map(document => <article key={document.documentId}><h3>{document.displayName}</h3>
+        <p>Uploaded <time dateTime={document.uploadedAt} title={document.uploadedAt}>{readableUploadTime(document.uploadedAt)}</time></p>
+        <p className="pilot-field-hint">Uploaded through account: {document.uploadedBy?.displayName ?? "Not recorded"}</p>
+        <Button disabled={busy || uncertain} aria-label={`Open original: ${document.displayName}`} onClick={() => choose(document)}>Open original</Button>
+        {document.pendingDayProposals.map(pending => <Button key={pending.revisionId} disabled={busy || uncertain}
+          aria-label={`Review day ${pending.careDay} for ${document.displayName}`} onClick={() => void act(async () => {
+            const detail = await readDocumentDayProposal(profileId, pending.revisionId);
+            if (alive.current) { choose(document); setProposal(detail); }
+          })}>Review date · {pending.careDay}</Button>)}
+      </article>)}
+      {cursor && <Button disabled={busy || uncertain} onClick={() => void act(async () => {
+        const page = await listDocumentInbox(profileId, cursor);
+        if (alive.current) { setDocuments(current => [...current, ...page.documents]); setCursor(page.nextCursor); }
+      })}>Load older records</Button>}
+
     </>}
     {error && <Notice tone="error">{error}</Notice>}{message && <p role="status">{message}</p>}
   </section>;

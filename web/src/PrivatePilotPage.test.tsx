@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PrivatePilotPage } from "./PrivatePilotPage";
 
@@ -24,7 +24,7 @@ it.each(["image/png", "image/jpeg"])("opens an approved %s citation as a hash-pi
   fireEvent.click(await screen.findByRole("button", { name: "Open Invented source.pdf, page 1" }));
   const image = await screen.findByRole("img", { name: "Original Invented source.pdf, page 1" });
   expect(image.getAttribute("src")).toBe(`/api/v2/care-profiles/profile-a/documents/image-a/original-image?expectedSha256=${source.sourceSha256}`);
-  expect(screen.getByText(source.sourceSha256)).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Source image" })).getByText(source.sourceSha256)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open full-size original in a new tab" }).getAttribute("href")).toBe(image.getAttribute("src"));
   expect(paths.some(path => path.includes("/pages/"))).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "Close source image" }));
@@ -168,7 +168,7 @@ it("traverses earlier days and bounded source sections with immutable provenance
   fireEvent.click(screen.getByRole("button", { name: "Open Invented report, page 1" }));
   await screen.findByText(text);
   expect(container.querySelector("script")).toBeNull();
-  expect(screen.getByText("d".repeat(64))).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Source page" })).getByText("d".repeat(64))).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Read next source section" }));
   await screen.findByText("Next independently invented source section.");
   expect(requests).toContain(`/api/v2/care-profiles/profile-a/documents/document-a/pages/1?offset=${text.length}`);

@@ -148,3 +148,17 @@
 .pilot-permission-list dt { font-size: var(--text-small); font-weight: 650; }
 .pilot-permission-list dd { margin: 0; font-size: var(--text-small); line-height: var(--leading-body); color: var(--color-ink-soft); }
 @media (max-width: 600px) { .pilot-permission-list > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-3xs); } }
+
+.pilot-provenance { display: grid; gap: var(--space-xs); margin-block: var(--space-sm); }
+.pilot-provenance > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--space-xs); }
+.pilot-provenance dt { font-weight: 600; font-size: var(--text-small); }
+.pilot-provenance dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--color-ink-soft); font-size: var(--text-small); line-height: var(--leading-body); }
+.pilot-timeline-day, .pilot-timeline-entry { margin-block: var(--space-md); }
+.pilot-timeline-entry { border-top: 1px solid var(--color-rule); padding-top: var(--space-sm); }
+.pilot-timeline-entry details summary { cursor: pointer; min-height: var(--control-height); display: flex; align-items: center; font-size: var(--text-small); font-weight: 600; }
+.pilot-timeline-entry details summary:focus-visible, .pilot-active-record:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.pilot-active-record { scroll-margin-top: var(--space-md); border-block: 1px solid var(--color-rule); padding-block: var(--space-md); }
+@media (max-width: 600px) { .pilot-provenance > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-3xs); } }
+
+.pilot-note-source { min-width: 0; border: 1px solid var(--color-rule); border-radius: var(--radius-md); padding: var(--space-sm); display: grid; gap: var(--space-sm); }
+.pilot-note-source legend { font-size: var(--text-small); font-weight: 650; padding-inline: var(--space-2xs); }

@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { ApprovedPageChunk, HistoryPage, SourceReference } from "@adeno/contracts";
+import type { ApprovedPageChunk, HistoryPage, SourceReference, NoteProvenanceInput, EntryProvenance } from "@adeno/contracts";
 import { AppHeader, Button, Input, Notice, Textarea } from "./ui";
 import "./private-pilot.css";
 import { uploadPrivateImage, UnconfirmedUpload, type IntakeCapabilities } from "./api/privateIntake";
 import { AgentConnectionPanel } from "./AgentConnectionPanel";
+import { AuditTime, DocumentTrail, ProvenanceTrail } from "./ProvenanceTrail";
+import { NoteSourceFields } from "./NoteSourceFields";
 import { FamilyAccessPanel } from "./FamilyAccessPanel";
 import { DocumentInboxPanel } from "./DocumentInboxPanel";
 import { originalImageUrl } from "./api/privateDocuments";
@@ -12,7 +14,7 @@ type Session = { csrfToken: string };
 type Profile = { id: string; preferredName: string };
 type Hint = { revisionId: string; targetCareDay: string };
 type Proposal = { revisionId: string; careDay: string; body: string; authorLabel: string;
-  expectedDayRevision: number; state: "proposed" };
+  expectedDayRevision: number; state: "proposed"; provenance?: EntryProvenance; createdAt?: string; sources?: SourceReference[] };
 
 async function request<T>(path: string, body?: unknown, csrfToken?: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/v2${path}`, {
@@ -36,6 +38,7 @@ export function PrivatePilotPage() {
   const [profileId, setProfileId] = useState("");
   const [history, setHistory] = useState<HistoryPage | null>(null);
   const [hints, setHints] = useState<Hint[]>([]);
+  const [noteFormRevision, setNoteFormRevision] = useState(0);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [sourcePage, setSourcePage] = useState<ApprovedPageChunk | null>(null);
   const [sourceImage, setSourceImage] = useState<SourceReference | null>(null);
@@ -124,10 +127,17 @@ export function PrivatePilotPage() {
     event.preventDefault();
     const form = event.currentTarget;
     const fields = new FormData(form);
+    const kind = fields.get("sourceKind");
+    const provenance: NoteProvenanceInput | undefined = kind ? {
+      sourceKind: String(kind) as NoteProvenanceInput["sourceKind"],
+      ...(String(fields.get("reporterLabel") ?? "").trim() ? { reporterLabel: String(fields.get("reporterLabel")).trim() } : {}),
+      ...(String(fields.get("sourceDescription") ?? "").trim() ? { sourceDescription: String(fields.get("sourceDescription")).trim() } : {}),
+      ...(fields.get("sourceDocumentId") ? { documentId: String(fields.get("sourceDocumentId")), pageNumber: Number(fields.get("sourcePageNumber")) } : {}),
+    } : undefined;
     void act(async () => {
       await request(`${base}/timeline/days/${encodeURIComponent(String(fields.get("careDay")))}/notes`,
-        { body: fields.get("body") }, session!.csrfToken);
-      form.reset(); setMessage("Note saved as a proposal. Review it before publishing."); setRefresh(value => value + 1);
+        { body: fields.get("body"), ...(provenance ? { provenance } : {}) }, session!.csrfToken);
+      form.reset(); setNoteFormRevision(value => value + 1); setMessage("Note saved as a proposal. Review it before publishing."); setRefresh(value => value + 1);
     });
   }
 
@@ -298,6 +308,7 @@ export function PrivatePilotPage() {
             <section className="workflow-panel"><h2>Add a family note</h2><p>Keep a family observation or question alongside the records. Save it first, then review the proposed text below before publishing.</p><form onSubmit={propose}>
               <label>Care day<Input name="careDay" type="date" required /></label>
               <label>What you observed<Textarea name="body" required maxLength={10000} /></label>
+              <NoteSourceFields key={`${profileId}:${noteFormRevision}`} profileId={profileId} />
               <Button variant="primary" type="submit" loading={busy}>Save for review</Button>
             </form></section>
             <section className="workflow-panel"><h2>Review proposals</h2>
@@ -308,6 +319,10 @@ export function PrivatePilotPage() {
               })}>Review note for {hint.targetCareDay}</Button>)}
               {proposal && <article><h3>Proposed note for {proposal.careDay}</h3><p>Family observation by {proposal.authorLabel}</p>
                 <p className="pilot-source-text">{proposal.body}</p>
+                <ProvenanceTrail value={proposal.provenance ? { ...proposal.provenance, recordedAt: proposal.createdAt } : undefined} fallbackAuthor={proposal.authorLabel} />
+                {proposal.sources?.map(source => <div key={source.documentId}><p>Linked file: {source.displayName}</p>
+                  {source.pageNumbers.map(page => <Button key={page} disabled={busy} aria-label={`Open ${source.displayName}, page ${page}`} onClick={() => void act(() => openSource(source, page))}>Open source · page {page}</Button>)}
+                </div>)}
                 <Button variant="primary" loading={busy} onClick={() => void act(() => review("accepted"))}>Approve and publish</Button>
                 <Button disabled={busy} onClick={() => void act(() => review("rejected"))}>Reject proposal</Button>
               </article>}
@@ -319,13 +334,27 @@ export function PrivatePilotPage() {
               <p>{throughDay ? `Currently recorded history through ${throughDay}.` : "All currently recorded history."}
                 {" "}This does not reconstruct what was known on a past date.</p>
               {history?.days.length === 0 && <p>No published days yet. Add a record or note, then approve it to build this timeline.</p>}
-              {history?.days.map(day => <article key={day.id}><h3>{day.day}</h3>
-                {day.statements.map(statement => <p key={statement.id}>{statement.text}
-                  {statement.attribution === "family_note" && <small> — Family observation</small>}</p>)}
-                {day.sources.map(source => <div key={source.documentId}><p>{source.displayName}</p>
-                  {source.pageNumbers.map(page => <Button key={page} disabled={busy}
+              {history?.days.map(day => <article key={day.id} className="pilot-timeline-day"><h3>{day.day}</h3>
+                <p className="pilot-field-hint">Revision {day.revision} · Published by {day.publishedBy?.displayName ?? "Not recorded"} · <AuditTime value={day.publishedAt} /></p>
+                {day.statements.map(statement => <article key={statement.id} className="pilot-timeline-entry">
+                  <p className="pilot-source-text">{statement.text}</p>
+                  {statement.attribution === "family_note" && <small>Family observation · entered by {statement.authorLabel ?? statement.provenance?.recordedBy?.displayName ?? "Not recorded"}</small>}
+                  <details><summary>Reporter &amp; sources</summary>
+                    <ProvenanceTrail value={statement.provenance} fallbackAuthor={statement.authorLabel} />
+                    {statement.provenance?.citations?.map(citation => {
+                      const file = day.sources.find(source => source.documentId === citation.documentId);
+                      return file ? <Button key={`${file.documentId}:${citation.pageNumber}`} disabled={busy} aria-label={`Open ${file.displayName}, page ${citation.pageNumber}`}
+                        onClick={() => void act(() => openSource(file, citation.pageNumber))}>Open source · page {citation.pageNumber}</Button> : null;
+                    })}
+                    {!statement.provenance?.citations?.length && <p>No linked source file is available with this entry and your current access.</p>}
+                  </details>
+                </article>)}
+                {day.sources.map(source => <div key={source.documentId} className="pilot-timeline-entry"><h4>{source.displayName}</h4>
+                  <DocumentTrail value={source.provenance} uploadedAt={source.uploadedAt} />
+                  <details><summary>File identity</summary><p>Document <code>{source.documentId}</code></p><p className="pilot-source-digest">SHA-256: <code>{source.sourceSha256}</code></p></details>
+                  {source.pageNumbers.map(page => <Button key={page} disabled={busy} aria-label={`Open ${source.displayName}, page ${page}`}
                     onClick={() => void act(() => openSource(source, page))}>
-                    Open {source.displayName}, page {page}
+                    Open source · page {page}
                   </Button>)}
                 </div>)}
               </article>)}
