@@ -4,6 +4,49 @@ Target origin: `https://adeno.kunjadia.dev`. This is a trusted, server-readable
 private deployment, with public signup and invitations disabled. It makes no
 managed E2EE claim. Do not import real case records into the repository.
 
+## Access inventory, source trails and header layout
+
+Release `2ea22b5` is deployed on Hermes as `adeno-private:2ea22b5`, manifest
+`sha256:13c3405f011fc9ffe598791234cf8cf38a173799956c9513017167182063f8b3`.
+The previous environment is retained as `release.before-2ea22b5.env`.
+Production remains on v7 pending separate approval for migration 0008.
+
+Owners can inspect every household sign-in account's role, member kind, status,
+intake scope, care-day permission level and permitted source files. Other members
+see only their own effective grants. Disabled accounts show no effective access.
+Care profiles remain visibly distinct from sign-in accounts. No grant or account
+is changed by inspecting this panel; public invitations remain disabled.
+
+Approved entries expose stored entry accounts, reviewers and publication times.
+Files expose upload account/time, record date when present, immutable ID/hash and
+permitted page links. Historical reporter/source gaps stay explicitly unspecified.
+Inbox controls use short labels, preserve full accessible file names and move the
+selected record above the list. The privacy notice now uses aligned prose rows;
+account context and sign-out stay together rather than centering sign-out.
+
+The additive note-provenance migration and explicit offline operator are reviewed
+in `note-provenance-plan.md`. V7 stays supported with rich capture disabled. V8 adds
+reporter, source category/description and optional file/page links to proposed
+notes, with immutable revision metadata and separate human review. File references
+require current source authorization and publication before assistant reads.
+
+The full server run passed 353 tests with three Linux-only skips. Subsequent
+focused tests cover the explicit operator, v7/v8 reads and encrypted restore.
+Thirty-two focused UI tests and four Chrome scenarios passed, including typed
+provenance submission, role restrictions, 320/375/414/768/1280px geometry and zero
+serious/critical axe findings. Builds and scoped frontend lint passed.
+A network-disabled, read-only-root Hermes probe created a fresh synthetic v7
+schema, applied 0008 once, repeated it as a no-op and verified v8. It exited 0
+without OOM and mounted no production data. The production app was then upgraded
+without applying the migration. Readiness and signed-in Chrome checks passed;
+existing uploads and pending date proposals remain visible.
+
+A fresh encrypted pre-migration production snapshot was copied to the owner's Mac
+and restored successfully. Its off-host ciphertext pin is
+`c43fe9b660f84d1bd5120f70b909a4e727379ff7519e85be9011e78b77b5f6b9`.
+The decryption identity stayed off Hermes. No record content, source manifest,
+private receipt or screenshot is committed to this repository.
+
 ## Family controls and record dates
 
 The workspace now shows visible person buttons and an inline Add person form.

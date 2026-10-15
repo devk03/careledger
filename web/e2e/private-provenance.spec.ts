@@ -69,6 +69,8 @@ test("explains member scope and reporter provenance, and keeps both header rows 
   await page.getByRole("combobox", { name: "Information source", exact: true }).selectOption("document");
   await page.getByLabel("Source details", { exact: true }).fill("Wholly invented source description.");
   await page.getByRole("combobox", { name: "Source file", exact: true }).selectOption("file-a");
+  await page.locator(".pilot-note-source").screenshot({ path: testInfo.outputPath("note-source-fields.png") });
+  await page.locator("#family-access").screenshot({ path: testInfo.outputPath("family-access-panel.png") });
   await page.getByRole("button", { name: "Save for review", exact: true }).click();
   await expect(page.getByText("Note saved as a proposal. Review it before publishing.")).toBeVisible();
   expect(saved).toEqual({ body: "Another invented observation.", provenance: { reporterLabel: "Another invented reporter", sourceKind: "document", sourceDescription: "Wholly invented source description.", documentId: "file-a", pageNumber: 1 } });
