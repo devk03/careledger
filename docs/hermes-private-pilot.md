@@ -4,6 +4,36 @@ Target origin: `https://adeno.kunjadia.dev`. This is a trusted, server-readable
 private deployment, with public signup and invitations disabled. It makes no
 managed E2EE claim. Do not import real case records into the repository.
 
+## Initial public activation, October 14 evening Pacific
+
+Cloudflare is authoritative for `kunjadia.dev`; Squarespace is only the registrar.
+The user authorized dashboard access. The new DNS-only A record
+`adeno.kunjadia.dev → 68.183.163.198` was saved and publicly resolved. Existing
+records were preserved. Let's Encrypt issued a valid hostname certificate,
+expiring January 13, 2027 UTC. The tested Nginx configuration is installed;
+HTTPS `/pilot` returned 200 with successful certificate verification.
+
+The production Compose services started with the approved data root. A one-off,
+network-disabled probe mounted only the production worker sockets and confirmed
+PNG/JPEG decoding, malformed-image/PDF denial, source-bound rendition and real
+antivirus detection using independently generated pixels and the inert EICAR
+test string. It read no database or record directory. A bounded official
+signature updater reported all three signature databases current and exited 0.
+
+The host's existing Certbot timer (active since July) is preserved. The new
+`reload-adeno-private` deploy hook applies only to this certificate lineage,
+validates Nginx and reloads within a 60-second bound. Its successful path was
+tested. No new monitoring schedule was installed.
+
+Live browser inspection caught the missing private runtime mode endpoint: the
+global banner fell back to the fictional-only preview warning. The fix reports
+the explicit trusted-private mode, preserves server-readable disclosure, and
+links a private-specific privacy page covering AI disclosure, permissions,
+preserved originals, current image/PDF support, retention and backup limits.
+Server/browser builds, 15 focused UI tests and lint passed. Owner account setup
+and actual Codex application acceptance remain human steps; no password has
+been entered by the agent.
+
 ## Production preparation, October 14
 
 The user separately approved migrations 0001–0007 for the new empty production

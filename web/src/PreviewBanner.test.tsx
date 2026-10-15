@@ -29,6 +29,16 @@ it("keeps the disclosure beside non-preview file intake", async () => {
     .toHaveTextContent("server you trust"));
 });
 
+it("identifies the trusted private runtime and links its actual privacy page", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true,
+    json: async () => ({ restricted_preview: false, mode: "trusted_private" }) }));
+  render(<PreviewBanner />);
+  const notice = await screen.findByLabelText("Record privacy notice");
+  expect(notice).toHaveTextContent("Private Hermes workspace");
+  expect(notice).not.toHaveTextContent("fictional records only");
+  expect(screen.getByRole("link", { name: "Read the privacy model" })).toHaveAttribute("href", "/pilot/privacy");
+});
+
 it("keeps the warning if runtime status is unavailable", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
   render(<PreviewBanner />);

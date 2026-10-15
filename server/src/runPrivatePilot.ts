@@ -48,6 +48,10 @@ if (!accounts.isSetupComplete()) bootstrap.initialize();
 const app = express();
 app.disable("x-powered-by");
 app.use(privatePilotHeaders);
+app.get("/api/public/runtime", (_request, response) => {
+  response.json({ mode: "trusted_private", restricted_preview: false,
+    record_uploads_enabled: config.records !== null, managed_e2ee_enabled: false });
+});
 const agentGrants = config.agentConnectionsAvailable ? new PrivateAgentGrantStore(
   await provisionPrivateDirectory(config.secretsDirectory, "agent-grants")) : null;
 const authenticate = cookieAuthenticator(timeline);
@@ -77,7 +81,7 @@ if (agentGrants) app.use(createPrivateAgentRouter({ expectedOrigin: config.origi
   authority: mutations, grants: agentGrants, inventory: { grants: agentGrants, sessions: timeline } }));
 app.use(express.static(config.webRoot, { index: false, dotfiles: "deny", redirect: false }));
 app.get("/", (_request, response) => { response.redirect(302, "/pilot"); });
-app.get("/pilot", (_request, response) => {
+app.get(["/pilot", "/pilot/privacy"], (_request, response) => {
   response.sendFile(join(config.webRoot, "index.html"));
 });
 app.use((_request, response) => { response.status(404).json({ error: "NOT_FOUND" }); });
