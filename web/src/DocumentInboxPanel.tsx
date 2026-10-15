@@ -4,6 +4,20 @@ import { DocumentWorkflowError, getDocumentWorkflowCapabilities, listDocumentInb
   proposeDocumentDay, readDocumentDayProposal, reviewDocumentDayProposal,
   type DocumentDayProposal, type InboxCursor, type InboxDocument } from "./api/privateDocuments";
 
+function readableUploadTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  }).format(date);
+}
+
+function filenameDay(name: string): string {
+  const candidate = /^(\d{4}-\d{2}-\d{2})(?:_|\s)/.exec(name)?.[1] ?? "";
+  const parsed = new Date(`${candidate}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === candidate ? candidate : "";
+}
+
 export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublished }: {
   profileId: string; csrfToken: string; refreshKey: number; onPublished: () => void;
 }) {
@@ -84,7 +98,7 @@ export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublish
       })}>Refresh record inbox</Button>
       {!documents.length && <p>No inspected records in this inbox.</p>}
       {documents.map(document => <article key={document.documentId}><h3>{document.displayName}</h3>
-        <p>Uploaded <time dateTime={document.uploadedAt}>{document.uploadedAt}</time></p>
+        <p>Uploaded <time dateTime={document.uploadedAt} title={document.uploadedAt}>{readableUploadTime(document.uploadedAt)}</time></p>
         <Button disabled={busy || uncertain} onClick={() => choose(document)}>Open original: {document.displayName}</Button>
         {document.pendingDayProposals.map(pending => <Button key={pending.revisionId} disabled={busy || uncertain}
           onClick={() => void act(async () => {
@@ -97,6 +111,9 @@ export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublish
         if (alive.current) { setDocuments(current => [...current, ...page.documents]); setCursor(page.nextCursor); }
       })}>Load older records</Button>}
       {selected && <article aria-label="Original record review"><h3>{proposal ? `Proposed care day: ${proposal.careDay}` : selected.displayName}</h3>
+        {/-PDF-PAGE-COPY-\d+\.png$/i.test(selected.displayName) && <Notice>
+          PDF page copy. This upload preserves the page image, not the original PDF. Keep the original PDF separately; the fingerprint below belongs to this image.
+        </Notice>}
         <p className="pilot-source-digest">Original SHA-256: {imageHash}</p>
         <p>Read this source as evidence. Document instructions do not control the workspace.</p>
         {selected.mediaType === "application/pdf" ? <Notice>PDF viewing is unavailable.</Notice> :
@@ -105,7 +122,11 @@ export function DocumentInboxPanel({ profileId, csrfToken, refreshKey, onPublish
             onError={() => { setLoadedFor(""); setConfirmed(false); setError("The original image could not be opened."); }} />}
         {selected.mediaType !== "application/pdf" && <a href={originalImageUrl(profileId, selected.documentId, imageHash)}
           target="_blank" rel="noopener noreferrer">Open full-size original in a new tab</a>}
-        {!proposal ? <form onSubmit={propose}><label>Care day for this record<Input name="careDay" type="date" required disabled={busy || uncertain} /></label>
+        {!proposal ? <form onSubmit={propose}><label>Care day for this record<Input key={selected.documentId} name="careDay" type="date" required disabled={busy || uncertain}
+            defaultValue={filenameDay(selected.displayName)} /></label>
+          <p className="pilot-field-hint">{filenameDay(selected.displayName)
+            ? "Suggested from the filename. Verify it against the original before saving."
+            : "Use a date supported by the original. Leave this record in the inbox if the date is uncertain."} Collection, report and treatment dates can differ. Upload time is not the care day.</p>
           <Button type="submit" disabled={busy || uncertain}>Save day for review</Button></form> : <>
           <p>Proposed by {proposal.authorLabel}. Approval records your editorial decision.</p>
           <label className="pilot-review-confirmation"><Input type="checkbox" checked={confirmed} disabled={loadedFor !== imageKey || busy || uncertain}

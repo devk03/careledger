@@ -49,7 +49,7 @@ test("guides a new owner and copies an existing approval on desktop and narrow s
   await page.getByLabel("Preferred name", { exact: true }).fill("Invented person");
   await page.getByRole("button", { name: "Create profile", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Add record images" })).toBeVisible();
-  await expect(page.getByRole("option", { name: "Invented person" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Invented person", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("navigation", { name: "Workspace shortcuts" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("workspace-1280.png"), fullPage: true });
 });

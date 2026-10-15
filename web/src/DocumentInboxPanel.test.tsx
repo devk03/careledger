@@ -68,3 +68,26 @@ it("never fills the care day from upload time and blocks approval after image fa
   await screen.findByText("The original image could not be opened.");
   expect(screen.getByRole("button", { name: "Approve record and publish" })).toBeDisabled();
 });
+
+it.each([
+  ["2030-04-12_invented.png", "2030-04-12"],
+  ["2030-02-31_invented.png", ""],
+  ["2030-99-12_invented.png", ""],
+  ["2030-04-12_invented-PDF-PAGE-COPY-1.png", "2030-04-12"],
+])("offers a valid filename date without treating upload time as the care day: %s", async (name, expected) => {
+  const writes: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (path: string, options?: RequestInit) => {
+    if (path.endsWith("/capabilities")) return json({ available: true });
+    if (path.endsWith("/documents/inbox")) return json({ documents: [{ ...record, displayName: name, pendingDayProposals: [] }], nextCursor: null });
+    writes.push(options); throw new Error("No writes expected");
+  }));
+  panel();
+  fireEvent.click(await screen.findByRole("button", { name: `Open original: ${name}` }));
+  expect(screen.getByLabelText("Care day for this record")).toHaveValue(expected);
+  expect(writes).toEqual([]);
+  if (name.includes("PDF-PAGE-COPY")) expect(screen.getByText(/This upload preserves the page image, not the original PDF/)).toBeVisible();
+  const timestamp = screen.getByText((_, element) => element?.tagName === "TIME");
+  expect(timestamp).toHaveAttribute("datetime", record.uploadedAt);
+  expect(timestamp).toHaveAttribute("title", record.uploadedAt);
+  expect(screen.getByText(/Upload time is not the care day/)).toBeInTheDocument();
+});

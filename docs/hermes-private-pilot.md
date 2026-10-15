@@ -4,6 +4,23 @@ Target origin: `https://adeno.kunjadia.dev`. This is a trusted, server-readable
 private deployment, with public signup and invitations disabled. It makes no
 managed E2EE claim. Do not import real case records into the repository.
 
+## Family controls and record dates
+
+The workspace now shows visible person buttons and an inline Add person form.
+The active person is named beside uploads and approved history; switching people
+clears the previous source, proposals, uploads and date cutoff. Adding a person
+creates a record space, not an invitation or access grant. Duplicate names are
+caught in the form before a second space is created.
+
+A visible introduction and expandable explanation describe the implemented value:
+separate histories, preserved source images/fingerprints, care dates distinct from
+upload time, and review before assistant access. No diagnosis or generic connector
+performance claim is made. Upload timestamps render in the browser's local zone
+while retaining the exact UTC value. Valid date-prefixed filenames suggest a care
+day only; invalid dates stay blank and all suggestions require source review.
+Recognizable PDF page-copy filenames show an explicit notice that the fingerprint
+belongs to the uploaded image, not the original PDF. Native PDF intake stays closed.
+
 ## Guided workspace and assistant setup
 
 The private workspace now explains account/person separation and the sequence

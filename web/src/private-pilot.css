@@ -115,3 +115,22 @@
 @media (max-width: 600px) {
   .pilot-workspace .pilot-setup-guide ol { gap: 0; }
 }
+
+/* Hallmark · pre-emit critique: P4 H5 E4 S5 R5 V4 */
+.pilot-why-adeno { margin-bottom: var(--space-lg); padding-block: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--color-rule); }
+.pilot-why-adeno > p { max-width: 80ch; line-height: var(--leading-body); color: var(--color-ink-soft); }
+.pilot-why-adeno strong { color: var(--color-ink); }
+.pilot-why-adeno summary { display: flex; align-items: center; min-height: var(--control-height); cursor: pointer; color: var(--color-accent-active); font-size: var(--text-small); font-weight: 600; }
+.pilot-why-adeno summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.pilot-why-adeno details > p { max-width: 80ch; margin-block: var(--space-sm); font-size: var(--text-small); line-height: var(--leading-body); }
+.pilot-why-adeno dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-md) var(--space-lg); margin-block: var(--space-md); }
+.pilot-why-adeno dt { font-weight: 650; margin-bottom: var(--space-2xs); }
+.pilot-why-adeno dd { margin: 0; font-size: var(--text-small); line-height: var(--leading-body); color: var(--color-ink-soft); }
+.pilot-family-people { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-xs); margin-block: var(--space-md); }
+.pilot-family-people .ui-button { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pilot-person-context { padding-block: var(--space-xs); color: var(--color-ink-soft); }
+.pilot-person-context strong { color: var(--color-ink); }
+@media (max-width: 600px) {
+  .pilot-why-adeno dl { grid-template-columns: minmax(0, 1fr); }
+  .pilot-why-adeno summary { font-size: var(--text-small); }
+}

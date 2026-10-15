@@ -53,8 +53,11 @@ it("clears a failed source image and removes the selected source when changing p
   expect(screen.queryByRole("img")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Open Invented image, page 1" }));
   await screen.findByRole("img");
-  await waitFor(() => expect(screen.getByLabelText("Care profile")).toBeEnabled());
-  fireEvent.change(screen.getByLabelText("Care profile"), { target: { value: "profile-b" } });
+  fireEvent.click(screen.getByRole("button", { name: "Invented first" }));
+  expect(screen.getByRole("region", { name: "Source image" })).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Invented second" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Invented second" }));
+  expect(screen.getByRole("button", { name: "Invented second" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.queryByRole("region", { name: "Source image" })).toBeNull();
 });
 
@@ -133,7 +136,7 @@ it("creates a profile through the protected API and opens note intake for it", a
   fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
   await screen.findByRole("heading", { name: "Add a family note" });
   expect(creations).toEqual([{ preferredName: "Invented person" }]);
-  expect(screen.getByRole("option", { name: "Invented person" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Invented person" })).toHaveAttribute("aria-pressed", "true");
 });
 
 it("traverses earlier days and bounded source sections with immutable provenance", async () => {
@@ -210,4 +213,34 @@ it("stops a batch after an unconfirmed upload and leaves the remaining file unat
   fireEvent.submit(picker.closest("form")!);
   await screen.findByText("second.png: Not attempted after an unconfirmed upload");
   expect(attempted).toBe(1);
+});
+
+it("adds another person and prevents an accidental duplicate without sharing access", async () => {
+  const creations: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (path: string, options?: RequestInit) => {
+    if (path.endsWith("/auth/session")) return json({ csrfToken: "fictional-csrf" });
+    if (path.endsWith("/care-profiles")) {
+      if (options?.method !== "POST") return json({ profiles: [{ id: "profile-a", preferredName: "Invented person" }] });
+      creations.push(JSON.parse(String(options.body)));
+      return json({ profile: { id: "profile-b", preferredName: "Another person" } }, 201);
+    }
+    if (path.endsWith("/capabilities")) return json({ available: false });
+    if (path.endsWith("/notes/pending")) return json({ pending: [] });
+    if (path.includes("/timeline/history")) return json({ days: [], nextBeforeDay: null });
+    throw new Error("Unexpected synthetic endpoint");
+  }));
+  render(<PrivatePilotPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "+ Add person" }));
+  fireEvent.change(screen.getByLabelText("Preferred name"), { target: { value: " invented PERSON " } });
+  fireEvent.click(screen.getByRole("button", { name: "Add person" }));
+  await screen.findByText("This person already has a space. Choose their name in Your family.");
+  expect(creations).toEqual([]);
+  fireEvent.change(screen.getByLabelText("Preferred name"), { target: { value: " Another person " } });
+  fireEvent.click(screen.getByRole("button", { name: "Add person" }));
+  await screen.findByText("Another person’s space is ready. Add their records below.");
+  expect(creations).toEqual([{ preferredName: "Another person" }]);
+  expect(screen.getByRole("button", { name: "Another person" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Invented person" })).toHaveAttribute("aria-pressed", "false");
+  expect(screen.queryByLabelText("Preferred name")).toBeNull();
+  expect(screen.getByText(/It does not invite someone or share access/)).toBeVisible();
 });

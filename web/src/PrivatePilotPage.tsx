@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { ApprovedPageChunk, HistoryPage, SourceReference } from "@adeno/contracts";
-import { AppHeader, Button, Input, Notice, Select, Textarea } from "./ui";
+import { AppHeader, Button, Input, Notice, Textarea } from "./ui";
 import "./private-pilot.css";
 import { uploadPrivateImage, UnconfirmedUpload, type IntakeCapabilities } from "./api/privateIntake";
 import { AgentConnectionPanel } from "./AgentConnectionPanel";
@@ -30,6 +30,7 @@ export function PrivatePilotPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [setup, setSetup] = useState(false);
+  const [addingPerson, setAddingPerson] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [profileId, setProfileId] = useState("");
   const [history, setHistory] = useState<HistoryPage | null>(null);
@@ -46,6 +47,13 @@ export function PrivatePilotPage() {
   const [intake, setIntake] = useState<IntakeCapabilities>({ available: false, mediaTypes: [], maxBytes: 0 });
   const [uploads, setUploads] = useState<{ name: string; status: string }[]>([]);
   const base = `/care-profiles/${encodeURIComponent(profileId)}`;
+  const selectedPerson = profiles.find(profile => profile.id === profileId);
+
+  function selectPerson(id: string) {
+    if (id === profileId) return;
+    setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setSourceImage(null);
+    setUploads([]); setThroughDay(""); setError(""); setMessage(""); setProfileId(id);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -126,12 +134,17 @@ export function PrivatePilotPage() {
     event.preventDefault();
     const form = event.currentTarget;
     const fields = new FormData(form);
+    const preferredName = String(fields.get("preferredName") ?? "").trim();
+    if (!preferredName) { setError("Enter the name you use for this person."); return; }
+    if (profiles.some(profile => profile.preferredName.toLocaleLowerCase() === preferredName.toLocaleLowerCase())) {
+      setError("This person already has a space. Choose their name in Your family."); return;
+    }
     void act(async () => {
       const result = await request<{ profile: Profile }>("/care-profiles",
-        { preferredName: fields.get("preferredName") }, session!.csrfToken);
+        { preferredName }, session!.csrfToken);
       form.reset(); setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setSourceImage(null);
-      setProfiles(current => [...current, result.profile]); setProfileId(result.profile.id);
-      setMessage("Care profile created. You can add notes for review.");
+      setProfiles(current => [...current, result.profile]); selectPerson(result.profile.id); setAddingPerson(false);
+      setMessage(`${result.profile.preferredName}’s space is ready. Add their records below.`);
     });
   }
 
@@ -207,7 +220,7 @@ export function PrivatePilotPage() {
       <header className="workspace-heading"><p className="pilot-eyebrow">YOUR PRIVATE WORKSPACE</p><h1>{session ? "Your care workspace" : "Your care timeline"}</h1>
         <p>{session ? "Keep a person’s records together. Review what belongs on their timeline, then ask your assistant about the approved history." : "Sign in to organize records and connect your assistant."}</p>
         {session && profiles.length > 0 && <nav className="pilot-shortcuts" aria-label="Workspace shortcuts">
-          <a href="#record-upload">Add records</a><a href="#assistant-setup">Connect Codex</a>
+          <a href="#care-person">Your family</a><a href="#record-upload">Add records</a><a href="#assistant-setup">Connect Codex</a>
         </nav>}</header>
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone="success">{message}</Notice>}
@@ -233,29 +246,41 @@ export function PrivatePilotPage() {
               <li><span>2. Add &amp; review records</span></li>
               <li><a href="#assistant-setup">3. Connect Codex</a></li></ol>
           </section>}
+          <section className="pilot-why-adeno" aria-labelledby="why-adeno-title">
+            <p><strong>More than a folder connection.</strong> Adeno keeps each person’s records, dates and reviewed history together, with sources your assistant can point back to.</p>
+            <details><summary id="why-adeno-title">What does Adeno add to an assistant connection?</summary>
+              <p>A connector gives an assistant access to files. Adeno adds the care record around those files:</p>
+              <dl>
+                <div><dt>A separate history for each person</dt><dd>Keep family members’ records apart and switch between them here.</dd></div>
+                <div><dt>Dates with context</dt><dd>Place a record on the day it supports. Keep its upload timestamp separate, so an older report does not look like a new event.</dd></div>
+                <div><dt>Originals you can check</dt><dd>Preserved source images and SHA-256 fingerprints let you return to the evidence behind a timeline entry.</dd></div>
+                <div><dt>Your review comes first</dt><dd>Uploads and proposed notes stay out of the assistant’s history until approved. Family observations remain labelled separately.</dd></div>
+              </dl>
+              <p>Connect Codex when you want to ask about approved history and permitted source pages. Disconnect to stop future reads. Adeno does not diagnose or replace your clinical team.</p>
+            </details>
+          </section>
           <div className="pilot-workbench"><div className="pilot-records-column">
-          {profiles.length > 0 && <div className="workspace-heading-actions pilot-profile-picker">
-            <label>Care profile<Select value={profileId} disabled={busy} onChange={event => {
-              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setSourceImage(null); setUploads([]); setProfileId(event.target.value);
-            }}>
-              {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.preferredName}</option>)}
-            </Select></label>
-
-          </div>}
-          <section id="care-person" className="workflow-panel pilot-person-setup">
-            {profiles.length === 0 ? <>
-              <div className="pilot-section-label">STEP 1 · THE PERSON</div><h2>Who are you caring for?</h2>
-              <p className="pilot-section-intro">A care profile is a separate space for one person’s records. It is different from your sign-in account.</p>
-              <form onSubmit={createProfile}><label>Preferred name<Input name="preferredName" required maxLength={120} placeholder="The name you use for this person" /></label>
-                <Button variant="primary" type="submit" loading={busy}>Create profile</Button></form>
-              <p className="pilot-field-hint">You can add more people later. No medical details are needed for this step.</p>
-            </> : <details><summary>Add another person</summary><form onSubmit={createProfile}>
-              <label>Preferred name<Input name="preferredName" required maxLength={120} /></label>
-              <Button variant="primary" type="submit" loading={busy}>Create profile</Button>
-            </form></details>}
+          <section id="care-person" className="workflow-panel pilot-person-setup" aria-labelledby="family-title">
+            <div className="pilot-section-label">YOUR FAMILY</div>
+            <h2 id="family-title">{profiles.length ? "Whose records are you working on?" : "Who are you caring for?"}</h2>
+            <p className="pilot-section-intro">Each person has their own records and timeline. Choose a person before adding anything.</p>
+            {profiles.length > 0 && <div className="pilot-family-people" role="group" aria-label="Choose a family member">
+              {profiles.map(profile => <Button key={profile.id} variant={profile.id === profileId ? "primary" : "secondary"}
+                aria-pressed={profile.id === profileId} disabled={busy} onClick={() => selectPerson(profile.id)}>
+                {profile.preferredName}
+              </Button>)}
+              <Button disabled={busy} aria-expanded={addingPerson} aria-controls="add-family-person"
+                onClick={() => setAddingPerson(current => !current)}>{addingPerson ? "Cancel adding" : "+ Add person"}</Button>
+            </div>}
+            {(profiles.length === 0 || addingPerson) && <form id="add-family-person" onSubmit={createProfile}>
+              <label>Preferred name<Input name="preferredName" required maxLength={120} placeholder="The name you use for this person" /></label>
+              <Button variant="primary" type="submit" loading={busy}>{profiles.length ? "Add person" : "Create profile"}</Button>
+            </form>}
+            <p className="pilot-field-hint">{profiles.length ? "Adding a person organizes their records in this account. It does not invite someone or share access." : "This is the person you care for, not a new sign-in account. You can add more people later."}</p>
           </section>
           {profileId && <>
             <section id="record-upload" className="workflow-panel"><div className="pilot-section-label">RECORDS · UPLOAD, CHECK, PUBLISH</div><h2>Add record images</h2>
+              <p className="pilot-person-context">Adding to <strong>{selectedPerson?.preferredName}</strong>’s records</p>
               <p>Upload a photo, then open it in the Record inbox below. Check the original, choose its care day and approve it for the timeline. Your assistant can only read published history.</p>
               <p className="pilot-field-hint">PNG and JPEG images only. Original files are preserved. PDFs are not supported yet.</p>
               {!intake.available && <Notice>Image intake is unavailable on this installation.</Notice>}
@@ -286,6 +311,7 @@ export function PrivatePilotPage() {
               </article>}
             </section>
             <section className="workflow-panel"><h2>Approved history</h2>
+              <p className="pilot-person-context">{selectedPerson?.preferredName}’s reviewed timeline</p>
               <label>Through care day<Input type="date" value={throughDay} disabled={busy}
                 onChange={event => { setHistory(null); setSourcePage(null); setSourceImage(null); setThroughDay(event.target.value); }} /></label>
               <p>{throughDay ? `Currently recorded history through ${throughDay}.` : "All currently recorded history."}
