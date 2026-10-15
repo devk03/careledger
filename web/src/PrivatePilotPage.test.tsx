@@ -127,6 +127,9 @@ it("creates a profile through the protected API and opens note intake for it", a
   }));
   render(<PrivatePilotPage />);
   fireEvent.change(await screen.findByLabelText("Preferred name"), { target: { value: "Invented person" } });
+  expect(screen.queryByRole("combobox", { name: "Care profile" })).toBeNull();
+  expect(screen.getByRole("heading", { name: "Who are you caring for?" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "3. Connect Codex" })).toHaveAttribute("href", "#assistant-setup");
   fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
   await screen.findByRole("heading", { name: "Add a family note" });
   expect(creations).toEqual([{ preferredName: "Invented person" }]);

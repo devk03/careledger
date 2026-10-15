@@ -4,6 +4,32 @@ Target origin: `https://adeno.kunjadia.dev`. This is a trusted, server-readable
 private deployment, with public signup and invitations disabled. It makes no
 managed E2EE claim. Do not import real case records into the repository.
 
+## Guided workspace and assistant setup
+
+The private workspace now explains account/person separation and the sequence
+of adding a person, uploading/reviewing records and connecting Codex. It hides
+the empty profile selector and places person setup beside assistant setup.
+Primary actions use the existing filled Coral style; supporting instructions,
+readable spacing and compact consent controls replace the undifferentiated form.
+
+Existing active approvals automatically expose **Copy setup instruction**, with
+explicit instructions to paste into Codex on the same Mac and verify the account
+and care profiles. SSH arguments stay inside manual/technical details. Native
+clipboard failure opens a selectable fallback. Expired approval cannot be copied;
+an unknown creation outcome blocks blind retries until access is checked. Access
+approval is never labeled a verified connection. Disconnect revokes every active
+approval shown by the account inventory. Provider disclosure and server-side
+consent/CSRF/revocation remain intact; no schema or permissions were changed.
+
+Eighteen focused component tests and three Chrome browser scenarios passed,
+including native clipboard transfer, reuse of existing approval, profile
+creation, 20px consent geometry, source-image rendering and 320/375/414/768/1280px
+layout checks. Axe found no serious/critical issues. Frontend build and scoped
+lint passed. The broader frontend run had 175 passes and one pre-existing
+managed-device expiry assertion failure: it expects a one-second-expired
+challenge to fail, while unchanged code allows 60 seconds of clock skew.
+That managed-device code is outside this private runtime and was not changed.
+
 ## Initial public activation, October 14 evening Pacific
 
 Cloudflare is authoritative for `kunjadia.dev`; Squarespace is only the registrar.

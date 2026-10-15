@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+const testPort = Number(process.env.ADENO_TEST_PORT ?? "4173");
+if (!Number.isInteger(testPort) || testPort < 1024 || testPort > 65535) throw new Error("Invalid test port");
+const baseURL = `http://127.0.0.1:${testPort}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -7,7 +10,7 @@ export default defineConfig({
   retries: 1,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL,
     trace: "retain-on-failure",
   },
   projects: [
@@ -17,8 +20,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev -- --mode ui-preview --host 127.0.0.1 --port 4173 --strictPort",
-    url: "http://127.0.0.1:4173",
+    command: `npm run dev -- --mode ui-preview --host 127.0.0.1 --port ${testPort} --strictPort`,
+    url: baseURL,
     reuseExistingServer: false,
     timeout: 30_000,
   },

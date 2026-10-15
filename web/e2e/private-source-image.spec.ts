@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 test.use({ ...(process.env.ADENO_TEST_BROWSER_CHANNEL ? { channel: process.env.ADENO_TEST_BROWSER_CHANNEL } : {}) });
 
-test("opens an approved image citation with native decoding and readable narrow-screen provenance", async ({ page }, testInfo) => {
+test("opens an approved image citation with native decoding and readable narrow-screen provenance", async ({ page, baseURL }, testInfo) => {
   const data = await page.evaluate(() => {
     const canvas = document.createElement("canvas"); canvas.width = 500; canvas.height = 300;
     const context = canvas.getContext("2d"); if (!context) throw new Error("Fixture canvas unavailable");
@@ -19,7 +19,7 @@ test("opens an approved image citation with native decoding and readable narrow-
   const source = { documentId: "image-a", displayName: "Invented source.pdf", mediaType: "image/png",
     uploadedAt: "2030-04-13T12:00:00Z", sourceSha256: digest, pageNumbers: [1] };
   // Match actual application API paths only, never Vite's /src/api module imports.
-  await page.route("http://127.0.0.1:4173/api/**", async route => {
+  await page.route(new URL("/api/**", baseURL!).href, async route => {
     const url = new URL(route.request().url()); const path = url.pathname; requests.push(path);
     if (path.endsWith("/original-image")) {
       expect(url.searchParams.get("expectedSha256")).toBe(digest);

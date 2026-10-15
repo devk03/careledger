@@ -192,35 +192,9 @@ export function PrivatePilotPage() {
     });
   }
 
-  return <div className="workspace-page">
-    <AppHeader context="Private Hermes workspace" />
-    <main className="workspace-layout">
-      <header className="workspace-heading"><h1>Your care timeline</h1>
-        <p>This private installation stores server-readable records. Published history contains human-reviewed material.</p></header>
-      {error && <Notice tone="error">{error}</Notice>}
-      {message && <Notice tone="success">{message}</Notice>}
-      {loading ? <p role="status">Opening your workspace…</p> : !session ?
-        <section className="workflow-panel"><h2>{setup ? "Set up your private account" : "Sign in"}</h2>
-          <form onSubmit={signIn}>
-            {setup ? <>
-              <label>Private setup token<Input name="token" type="password" required autoComplete="off" /></label>
-              <label>Your name<Input name="displayName" required maxLength={120} /></label>
-              <label>Household name<Input name="householdName" required maxLength={120} /></label>
-            </> : <label>Login name<Input name="loginName" required autoComplete="username" defaultValue="owner" /></label>}
-            <label>Password<Input name="password" type="password" required minLength={12}
-              autoComplete={setup ? "new-password" : "current-password"} /></label>
-            <Button type="submit" loading={busy}>{setup ? "Create private account" : "Sign in"}</Button>
-          </form></section> : <>
-          {recoveryCodes.length > 0 && <section className="workflow-panel"><h2>Save your recovery codes privately</h2>
-            <p>These codes restore access to your account. Keep them outside this server.</p>
-            <pre>{recoveryCodes.join("\n")}</pre><Button onClick={() => setRecoveryCodes([])}>I saved the codes</Button></section>}
-          <div className="workspace-heading-actions">
-            <label>Care profile<Select value={profileId} disabled={busy} onChange={event => {
-              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setSourceImage(null); setUploads([]); setProfileId(event.target.value);
-            }}>
-              {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.preferredName}</option>)}
-            </Select></label>
-            <Button loading={busy} onClick={() => void act(async () => {
+  return <div className="workspace-page pilot-workspace">
+    <AppHeader context="Private Hermes workspace">{session && <>
+            <Button variant="quiet" loading={busy} onClick={() => void act(async () => {
               await request("/auth/logout", {}, session.csrfToken);
               setSession(null); setHistory(null); setProposal(null); setHints([]); setRecoveryCodes([]);
               setProfileId(""); setProfiles([]);
@@ -228,31 +202,76 @@ export function PrivatePilotPage() {
               setSourceImage(null);
               setIntake({ available: false, mediaTypes: [], maxBytes: 0 }); setUploads([]);
             })}>Sign out</Button>
-          </div>
-          <section className="workflow-panel"><h2>Create a care profile</h2>
-            <form onSubmit={createProfile}>
+    </>}</AppHeader>
+    <main className="workspace-layout">
+      <header className="workspace-heading"><p className="pilot-eyebrow">YOUR PRIVATE WORKSPACE</p><h1>{session ? "Your care workspace" : "Your care timeline"}</h1>
+        <p>{session ? "Keep a person’s records together. Review what belongs on their timeline, then ask your assistant about the approved history." : "Sign in to organize records and connect your assistant."}</p>
+        {session && profiles.length > 0 && <nav className="pilot-shortcuts" aria-label="Workspace shortcuts">
+          <a href="#record-upload">Add records</a><a href="#assistant-setup">Connect Codex</a>
+        </nav>}</header>
+      {error && <Notice tone="error">{error}</Notice>}
+      {message && <Notice tone="success">{message}</Notice>}
+      {loading ? <p role="status">Opening your workspace…</p> : !session ?
+        <section className="workflow-panel pilot-auth"><h2>{setup ? "Set up your private account" : "Sign in"}</h2>
+          <p>{setup ? "Create the account you’ll use to sign in. Next, you’ll choose whose records to organize and connect Codex." : "Your installation owner’s login name is owner. Use the password you chose during setup."}</p>
+          <form onSubmit={signIn}>
+            {setup ? <>
+              <label>Private setup token<Input name="token" type="password" required autoComplete="off" /><span className="pilot-field-hint">Use the one-time token supplied by your installation administrator.</span></label>
+              <label>Your name<Input name="displayName" required maxLength={120} /></label>
+              <label>Household name<Input name="householdName" required maxLength={120} /></label>
+            </> : <label>Login name<Input name="loginName" required autoComplete="username" defaultValue="owner" /></label>}
+            <label>Password<Input name="password" type="password" required minLength={12}
+              autoComplete={setup ? "new-password" : "current-password"} /></label>
+            <Button variant="primary" type="submit" loading={busy}>{setup ? "Create private account" : "Sign in"}</Button>
+          </form></section> : <>
+          {recoveryCodes.length > 0 && <section className="workflow-panel"><h2>Save your recovery codes privately</h2>
+            <p>These codes restore access to your account. Keep them outside this server.</p>
+            <pre>{recoveryCodes.join("\n")}</pre><Button onClick={() => setRecoveryCodes([])}>I saved the codes</Button></section>}
+          {!profiles.length && <section className="pilot-setup-guide" aria-label="Getting started">
+            <span className="pilot-account-ready">Account ready</span><h2>Your next steps</h2>
+            <ol><li><a href="#care-person">1. Add a person</a></li>
+              <li><span>2. Add &amp; review records</span></li>
+              <li><a href="#assistant-setup">3. Connect Codex</a></li></ol>
+          </section>}
+          <div className="pilot-workbench"><div className="pilot-records-column">
+          {profiles.length > 0 && <div className="workspace-heading-actions pilot-profile-picker">
+            <label>Care profile<Select value={profileId} disabled={busy} onChange={event => {
+              setHistory(null); setHints([]); setProposal(null); setSourcePage(null); setSourceImage(null); setUploads([]); setProfileId(event.target.value);
+            }}>
+              {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.preferredName}</option>)}
+            </Select></label>
+
+          </div>}
+          <section id="care-person" className="workflow-panel pilot-person-setup">
+            {profiles.length === 0 ? <>
+              <div className="pilot-section-label">STEP 1 · THE PERSON</div><h2>Who are you caring for?</h2>
+              <p className="pilot-section-intro">A care profile is a separate space for one person’s records. It is different from your sign-in account.</p>
+              <form onSubmit={createProfile}><label>Preferred name<Input name="preferredName" required maxLength={120} placeholder="The name you use for this person" /></label>
+                <Button variant="primary" type="submit" loading={busy}>Create profile</Button></form>
+              <p className="pilot-field-hint">You can add more people later. No medical details are needed for this step.</p>
+            </> : <details><summary>Add another person</summary><form onSubmit={createProfile}>
               <label>Preferred name<Input name="preferredName" required maxLength={120} /></label>
-              <Button type="submit" loading={busy}>Create profile</Button>
-            </form>
+              <Button variant="primary" type="submit" loading={busy}>Create profile</Button>
+            </form></details>}
           </section>
-          <AgentConnectionPanel csrfToken={session.csrfToken} />
-          {!profileId ? <Notice>Create a care profile before adding notes.</Notice> : <>
-            <section className="workflow-panel"><h2>Add record images</h2>
-              <p>Images are preserved as originals and require manual review. PDFs are not supported yet.</p>
+          {profileId && <>
+            <section id="record-upload" className="workflow-panel"><div className="pilot-section-label">RECORDS · UPLOAD, CHECK, PUBLISH</div><h2>Add record images</h2>
+              <p>Upload a photo, then open it in the Record inbox below. Check the original, choose its care day and approve it for the timeline. Your assistant can only read published history.</p>
+              <p className="pilot-field-hint">PNG and JPEG images only. Original files are preserved. PDFs are not supported yet.</p>
               {!intake.available && <Notice>Image intake is unavailable on this installation.</Notice>}
               <form onSubmit={uploadFiles}>
                 <label>PNG or JPEG images<Input name="images" type="file" multiple accept="image/png,image/jpeg"
                   disabled={!intake.available || busy} required /></label>
-                <Button type="submit" disabled={!intake.available} loading={busy}>Upload for review</Button>
+                <Button variant="primary" type="submit" disabled={!intake.available} loading={busy}>Upload for review</Button>
               </form>
               <ul aria-live="polite">{uploads.map((upload, index) => <li key={index}>{upload.name}: {upload.status}</li>)}</ul>
             </section>
             <DocumentInboxPanel key={profileId} profileId={profileId} csrfToken={session.csrfToken}
               refreshKey={refresh} onPublished={() => setRefresh(value => value + 1)} />
-            <section className="workflow-panel"><h2>Add a family note</h2><form onSubmit={propose}>
+            <section className="workflow-panel"><h2>Add a family note</h2><p>Keep a family observation or question alongside the records. Save it first, then review the proposed text below before publishing.</p><form onSubmit={propose}>
               <label>Care day<Input name="careDay" type="date" required /></label>
               <label>What you observed<Textarea name="body" required maxLength={10000} /></label>
-              <Button type="submit" loading={busy}>Save for review</Button>
+              <Button variant="primary" type="submit" loading={busy}>Save for review</Button>
             </form></section>
             <section className="workflow-panel"><h2>Review proposals</h2>
               {!hints.length && <p>No pending notes.</p>}
@@ -262,7 +281,7 @@ export function PrivatePilotPage() {
               })}>Review note for {hint.targetCareDay}</Button>)}
               {proposal && <article><h3>Proposed note for {proposal.careDay}</h3><p>Family observation by {proposal.authorLabel}</p>
                 <p className="pilot-source-text">{proposal.body}</p>
-                <Button loading={busy} onClick={() => void act(() => review("accepted"))}>Approve and publish</Button>
+                <Button variant="primary" loading={busy} onClick={() => void act(() => review("accepted"))}>Approve and publish</Button>
                 <Button disabled={busy} onClick={() => void act(() => review("rejected"))}>Reject proposal</Button>
               </article>}
             </section>
@@ -271,7 +290,7 @@ export function PrivatePilotPage() {
                 onChange={event => { setHistory(null); setSourcePage(null); setSourceImage(null); setThroughDay(event.target.value); }} /></label>
               <p>{throughDay ? `Currently recorded history through ${throughDay}.` : "All currently recorded history."}
                 {" "}This does not reconstruct what was known on a past date.</p>
-              {history?.days.length === 0 && <p>No published days yet.</p>}
+              {history?.days.length === 0 && <p>No published days yet. Add a record or note, then approve it to build this timeline.</p>}
               {history?.days.map(day => <article key={day.id}><h3>{day.day}</h3>
                 {day.statements.map(statement => <p key={statement.id}>{statement.text}
                   {statement.attribution === "family_note" && <small> — Family observation</small>}</p>)}
@@ -310,6 +329,7 @@ export function PrivatePilotPage() {
               <Button disabled={busy} onClick={() => setSourcePage(null)}>Close source</Button>
             </section>}
           </>}
+          </div><AgentConnectionPanel csrfToken={session.csrfToken} /></div>
         </>}
     </main>
   </div>;

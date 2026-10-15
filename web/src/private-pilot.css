@@ -32,3 +32,86 @@
   padding: 0;
   flex-shrink: 0;
 }
+
+/* Hallmark · genre: modern-minimal · macrostructure: guided Workbench
+ * design-system: design.md · designed-as-app · pre-emit critique: P4 H5 E4 S5 R5 V4 */
+.pilot-assistant { scroll-margin-top: var(--space-lg); }
+.pilot-section-label { display: flex; align-items: center; gap: var(--space-2xs); color: var(--color-accent-active); font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; }
+.pilot-assistant h2 { margin-block: var(--space-xs); }
+.pilot-assistant p { line-height: var(--leading-body); }
+.pilot-section-intro { color: var(--color-ink-soft); max-width: 60ch; }
+.pilot-connection-context, .pilot-expiry, .pilot-sharing-note { margin-block: var(--space-sm); color: var(--color-ink-soft); font-size: var(--text-small); }
+.pilot-access-state { display: flex; align-items: flex-start; gap: var(--space-2xs); margin-block: var(--space-md); color: var(--color-success); font-size: var(--text-small); }
+.pilot-access-state svg { flex-shrink: 0; margin-top: var(--space-3xs); }
+.pilot-copy-button { width: 100%; }
+.pilot-consent-block { margin-top: var(--space-md); }
+.pilot-consent-block h3 { margin-bottom: var(--space-2xs); font-size: var(--text-body); }
+.pilot-consent-block > .ui-button { width: 100%; }
+.pilot-consent { display: flex; align-items: flex-start; gap: var(--space-xs); margin-block: var(--space-md); padding-block: var(--space-2xs); min-height: var(--control-height); cursor: pointer; line-height: 1.5; font-size: var(--text-small); }
+.workflow-panel .pilot-consent input[type="checkbox"] { width: 20px; height: 20px; min-height: 20px; padding: 0; margin: var(--space-3xs) 0 0; flex: 0 0 20px; accent-color: var(--color-accent); cursor: pointer; }
+.pilot-connection-steps { display: grid; gap: var(--space-md); margin-block: var(--space-lg); padding-left: var(--space-md); }
+.pilot-connection-steps li { padding-left: var(--space-2xs); line-height: 1.5; font-size: var(--text-small); }
+.pilot-connection-steps li::marker { color: var(--color-accent-active); font-weight: 650; }
+.pilot-connection-steps strong, .pilot-connection-steps span { display: block; }
+.pilot-connection-steps span { margin-top: var(--space-3xs); color: var(--color-ink-soft); }
+.pilot-connection-details { margin-block: var(--space-sm); min-width: 0; }
+.pilot-connection-details summary { display: flex; align-items: center; min-height: var(--control-height); cursor: pointer; font-size: var(--text-small); color: var(--color-ink-soft); text-decoration: underline; text-underline-offset: 0.2em; }
+.pilot-connection-details label { display: grid; gap: var(--space-2xs); font-size: var(--text-small); }
+.pilot-connection-details textarea { font-family: var(--font-mono); font-size: var(--text-small); overflow-wrap: anywhere; }
+.pilot-connection-details p { margin-top: var(--space-xs); font-size: var(--text-small); color: var(--color-ink-soft); }
+.pilot-connection-details summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+.pilot-workspace .workspace-layout { padding-block: var(--space-xl) var(--space-3xl); }
+.pilot-workspace .workspace-heading { display: grid; gap: var(--space-xs); margin-bottom: var(--space-lg); }
+.pilot-workspace .workspace-heading > p { max-width: 65ch; line-height: var(--leading-body); color: var(--color-ink-soft); }
+.pilot-workspace .workspace-heading .pilot-eyebrow { color: var(--color-accent-active); font-size: var(--text-small); font-weight: 650; letter-spacing: 0.06em; }
+.pilot-workspace .workspace-heading h1 { max-width: none; }
+.pilot-workbench { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; gap: var(--space-lg); }
+.pilot-records-column { min-width: 0; display: grid; gap: var(--space-md); }
+.pilot-workspace .workflow-panel { min-width: 0; padding: var(--space-lg); border: 1px solid var(--color-rule); border-radius: var(--radius-lg); background: var(--color-paper-raised); box-shadow: var(--shadow-paper); }
+.pilot-workspace .workflow-panel h2 { margin-bottom: var(--space-xs); }
+.pilot-workspace .workflow-panel p { line-height: var(--leading-body); }
+.pilot-workspace .workflow-panel > p + p { margin-top: var(--space-xs); }
+.pilot-workspace .workflow-panel form { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); margin-top: var(--space-md); }
+.pilot-workspace .workflow-panel form label { display: grid; gap: var(--space-2xs); font-size: var(--text-small); }
+.pilot-workspace .workflow-panel form > .ui-button { justify-self: start; max-width: 100%; }
+.pilot-workspace .workflow-panel form input[type="file"] { padding: var(--space-sm); background: var(--color-paper); }
+.pilot-workspace .workflow-panel form input[type="file"]::file-selector-button { min-height: var(--control-height); margin-right: var(--space-sm); padding-inline: var(--space-sm); border: 1px solid var(--color-rule-strong); border-radius: var(--radius-sm); color: var(--color-ink); background: var(--color-paper-raised); font: inherit; cursor: pointer; }
+.pilot-workspace .pilot-assistant { position: sticky; top: var(--space-sm); }
+.pilot-workspace .pilot-auth { max-width: 36rem; }
+.pilot-workspace .pilot-profile-picker { width: 100%; max-width: none; display: block; }
+.pilot-workspace .pilot-profile-picker label { display: grid; gap: var(--space-2xs); font-size: var(--text-small); }
+.pilot-field-hint { margin-top: var(--space-sm); color: var(--color-ink-soft); font-size: var(--text-small); line-height: 1.5; font-weight: 400; }
+.pilot-person-setup { scroll-margin-top: var(--space-lg); }
+.pilot-person-setup summary { min-height: var(--control-height); cursor: pointer; font-weight: 600; line-height: var(--control-height); }
+.pilot-person-setup summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.pilot-setup-guide { padding-block: 0 var(--space-lg); margin-bottom: var(--space-lg); border-bottom: 1px solid var(--color-rule); }
+.pilot-account-ready { color: var(--color-success); font-size: var(--text-small); font-weight: 600; }
+.pilot-setup-guide h2 { margin-top: var(--space-2xs); font-size: var(--text-section); }
+.pilot-setup-guide ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; padding: 0; gap: var(--space-lg); margin-block: var(--space-md) 0; }
+.pilot-setup-guide li { min-width: 0; line-height: 1.5; }
+.pilot-setup-guide li > a, .pilot-setup-guide li > span { min-height: var(--control-height); display: inline-flex; align-items: center; font-weight: 600; font-size: var(--text-body); white-space: nowrap; }
+.pilot-setup-guide li > a { text-underline-offset: 0.2em; }
+.pilot-setup-guide li > a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.pilot-setup-guide li p { font-size: var(--text-small); color: var(--color-ink-soft); }
+.pilot-workspace .pilot-record-inbox article + article { border-top: 1px solid var(--color-rule); padding-top: var(--space-md); }
+@media (max-width: 900px) {
+  .pilot-workbench { grid-template-columns: minmax(0, 1fr); }
+  .pilot-workspace .pilot-assistant { position: static; }
+}
+@media (max-width: 600px) {
+  .pilot-workspace .workspace-layout { padding-top: var(--space-lg); }
+  .pilot-workspace .workflow-panel { padding: var(--space-sm); }
+  .pilot-setup-guide ol { grid-template-columns: minmax(0, 1fr); gap: var(--space-xs); }
+  .pilot-setup-guide li > a, .pilot-setup-guide li > span { font-size: var(--text-small); }
+  .pilot-workspace .workflow-panel form > .ui-button { justify-self: stretch; }
+}
+.pilot-shortcuts { display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-md); }
+.pilot-shortcuts a { display: inline-flex; align-items: center; min-height: var(--control-height); font-weight: 600; color: var(--color-accent-active); text-underline-offset: 0.2em; white-space: nowrap; }
+.pilot-shortcuts a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.pilot-workspace .pilot-setup-guide { position: relative; padding-block: 0 var(--space-md); margin-bottom: var(--space-md); }
+.pilot-workspace .pilot-setup-guide h2 { display: inline; margin-left: var(--space-sm); font-size: var(--text-body); font-weight: 500; }
+.pilot-workspace .pilot-setup-guide ol { margin-top: var(--space-xs); }
+@media (max-width: 600px) {
+  .pilot-workspace .pilot-setup-guide ol { gap: 0; }
+}
