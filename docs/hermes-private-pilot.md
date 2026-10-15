@@ -21,6 +21,21 @@ day only; invalid dates stay blank and all suggestions require source review.
 Recognizable PDF page-copy filenames show an explicit notice that the fingerprint
 belongs to the uploaded image, not the original PDF. Native PDF intake stays closed.
 
+Release `e6ac110` is deployed as `adeno-private:e6ac110`, manifest
+`sha256:6551461384ca9edfd0230827716a0a2a343c28f4aacabc6978109a52ea1aa886`.
+The previous environment is retained as `release.before-e6ac110.env`. Eighteen
+focused component tests and three Chrome scenarios passed, including responsive
+and accessibility checks; scoped lint and production builds passed. Signed-in
+production inspection confirmed visible family selection, the expanded value
+explanation, local-zone upload timestamps and pending date reviews after restart.
+
+A production encrypted backup was copied off Hermes to the owner's Mac and
+restored into a new private directory. The restore command and independent checks
+verified the database, all referenced object hashes and proposed dates; restored
+sessions were revoked. No production session was revoked by snapshotting. Private
+keys, record contents, import manifests and upload receipts remain outside Git.
+No schema migration was created or applied for these changes.
+
 ## Guided workspace and assistant setup
 
 The private workspace now explains account/person separation and the sequence
