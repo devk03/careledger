@@ -30,6 +30,15 @@ managed-device expiry assertion failure: it expects a one-second-expired
 challenge to fail, while unchanged code allows 60 seconds of clock skew.
 That managed-device code is outside this private runtime and was not changed.
 
+Release `dc1624b` is deployed on Hermes, manifest
+`sha256:5c1688fc951df8eb8726f2a9d57ff3cae61182f5d530e2acf3dd89ef4edac4c8`.
+The previous environment is retained in `release.before-dc1624b.env`. HTTPS
+serves the redesigned bundle, readiness passes and owner setup remains complete.
+Actual signed-in Chrome inspection confirmed automatic reuse of the existing
+approval, the prominent copy button and hidden technical details. The unfinished
+person-name field was preserved across reload without submitting it. No account,
+record, grant or schema mutation was performed during that browser check.
+
 ## Initial public activation, October 14 evening Pacific
 
 Cloudflare is authoritative for `kunjadia.dev`; Squarespace is only the registrar.
