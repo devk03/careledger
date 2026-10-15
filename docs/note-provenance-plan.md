@@ -1,6 +1,8 @@
 # Structured note provenance — migration proposal
 
-Status: awaiting explicit migration authorization. No migration file exists.
+Status: creation and testing approved by the owner on October 14. Migration
+`0008_note_provenance.sql` is implemented and tested on fresh synthetic databases.
+Applying it to production still requires separate explicit authorization.
 
 Existing data already supports account role/status, current scoped permissions,
 upload account/time, note entry account/time, file IDs/hashes/pages and reviewer
@@ -26,8 +28,18 @@ The browser form will show reporter, source kind, source description and an
 optional permitted-file/page selector. Review and history show the exact entered
 metadata alongside recorded-by account and reviewer, with timestamps.
 
-If approved: create migration 0008, apply existing plus new migration only to
-fresh synthetic test databases, and test bounds, cross-profile/household links,
-missing/revoked source access, immutable provenance and review/publication. Back up
-production and verify restore before separately applying the approved additive
-migration. Preserve all existing notes, records, accounts, grants and originals.
+Validation covers migration 0008 on fresh synthetic databases, including bounds, cross-profile/household links,
+missing/revoked source access, immutable provenance and review/publication. Back up production and verify restore before separately applying the additive
+migration, only after production approval. Preserve all existing notes, records, accounts, grants and originals.
+
+## Operator command
+
+Stop application writers and retain a fresh encrypted snapshot before invoking
+`node server/dist/runPrivateNoteMigration.js /data/case.sqlite /migration.sql`
+with `ADENO_NOTE_MIGRATION_APPROVED=0008`. Use the reviewed private runtime in a
+network-disabled, read-only-root, bounded container; mount only the approved data
+root and the exact reviewed SQL file. The command validates the existing schema,
+audit chain and pinned migration digest, applies one transaction, updates the
+ledger/user version, and verifies integrity. It creates no accounts or notes.
+A repeated invocation on verified v8 is a no-op. Application startup never applies
+migrations. Both v7 and v8 are supported during this explicit rollout.

@@ -9,7 +9,7 @@ import type { ApprovedPageRepository, CareProfileRepository, DayVersion, DayVers
 import type { SessionRepository, StoredSession } from "../auth/cookieSession.js";
 import type { DocumentDayReviewDetail, DocumentInboxCursor, InboxDocument, NoteReviewDetail, NoteReviewRepository, OriginalImageReference } from "../timeline/types.js";
 
-const MIGRATIONS = [
+export const PRIVATE_SCHEMA_MIGRATIONS = [
   [1, "initial", "793dbf7dc872fe52f05e2f7e9294145898ea4f1f499816d304dd8e8b8190c501"],
   [2, "cross_scope_guards", "e34ecf2c5ecebe413dd20b8d2f2a8e3e69e6d8200e39e015435089e9a9f302bd"],
   [3, "extraction_job_uniqueness", "8c86c1661b26b52704ee3b4e27d0069c67b3704ef6175196572e342d208cb1a0"],
@@ -605,8 +605,8 @@ export function verifySchema(db: Database.Database): void {
     ![7, 8].includes(db.pragma("user_version", { simple: true }) as number)) throw new IncompatibleFamilyTimelineDatabase();
   const rows = db.prepare<[], MigrationRow>("SELECT version, name, sha256 FROM schema_migrations ORDER BY version").all();
   if (rows.length !== db.pragma("user_version", { simple: true }) || rows.some((row, i) =>
-    row.version !== MIGRATIONS[i]?.[0] || row.name !== MIGRATIONS[i]?.[1] ||
-    row.sha256 !== MIGRATIONS[i]?.[2])) throw new IncompatibleFamilyTimelineDatabase();
+    row.version !== PRIVATE_SCHEMA_MIGRATIONS[i]?.[0] || row.name !== PRIVATE_SCHEMA_MIGRATIONS[i]?.[1] ||
+    row.sha256 !== PRIVATE_SCHEMA_MIGRATIONS[i]?.[2])) throw new IncompatibleFamilyTimelineDatabase();
   if (db.prepare<[], { integrity_check: string }>("PRAGMA integrity_check").get()?.integrity_check !== "ok" ||
     db.prepare("PRAGMA foreign_key_check").get() !== undefined) throw new IncompatibleFamilyTimelineDatabase();
   const events = db.prepare<[], { id: string; householdId: string; actorUserId: string | null;
