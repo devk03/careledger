@@ -34,6 +34,19 @@ Server/browser builds, 15 focused UI tests and lint passed. Owner account setup
 and actual Codex application acceptance remain human steps; no password has
 been entered by the agent.
 
+The corrected release `d87761d` is now deployed as `adeno-private:d87761d`,
+manifest `sha256:58fd316f2b948e5b91f9867e934faf1860161026e8d4c3bc2b896a67baab5263`.
+The prior release environment is retained as `release.before-d87761d.env`; no
+schema change was needed. Actual HTTPS requests verified trusted-private mode,
+the private privacy route, readiness, no-store/CSP/nosniff headers, unauthenticated
+session/profile/intake denial and disabled invitations. Chrome showed the
+corrected server-readable banner and navigated to the private privacy page.
+Owner setup remains ready in the live browser. The setup token was copied only
+to a private local handoff file outside Git, never printed in chat/tool output.
+The owner must enter their own new password and submit setup. Production record
+review and actual Codex application acceptance remain incomplete until that
+human setup and approval are finished.
+
 ## Production preparation, October 14
 
 The user separately approved migrations 0001–0007 for the new empty production
